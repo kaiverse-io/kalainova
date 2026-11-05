@@ -8,6 +8,8 @@ last_reviewed: 2026-11-05
 
 Content generation engine for any subject. Video, audio, stills, and text. Inspired by `kaiverse-io/chassis` for the cockpit (this file, `just`, CI, docs, an eval slot). Do not copier-stamp a service into this repo.
 
+The brief for the next agent is `CLAUDE_HANDOVER.md`. Read it before changing the tree. Names that appear only in that file stay in that file.
+
 ## What you are building
 
 A job. Not a niche, and not a sample domain checked into the tree.

@@ -10,6 +10,6 @@ The plan is `docs/consolidation.md`. Three peer ways in: a funded cut, a master 
 just check
 ```
 
-`just` is optional. CI runs `python3 scripts/check.py`.
+`just` is optional. The gate is `python3 scripts/check.py`. GitHub Actions is not on this commit. `CLAUDE_HANDOVER.md` is the brief for the next agent.
 
 Media files stay on disk. Publish stays with a human.
