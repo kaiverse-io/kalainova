@@ -3,23 +3,87 @@
   "$id": "kalainova/measure-0.1.json",
   "title": "Measure",
   "type": "object",
-  "required": ["schema_version", "job_id"],
+  "required": [
+    "schema_version",
+    "job_id"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "0.1" },
-    "job_id": { "type": "string", "minLength": 1 },
-    "posted_at": { "type": "string" },
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "posted_at": {
+      "type": "string"
+    },
     "artifact_path": {
       "type": "string",
       "description": "Local path. Not committed."
     },
-    "views_48h": { "type": "number", "minimum": 0 },
+    "views_48h": {
+      "type": "number",
+      "minimum": 0
+    },
     "accepted": {
       "type": "boolean",
       "description": "Funded-clip only. The marketplace is tracking the URL."
     },
-    "cost": { "type": "number", "minimum": 0 },
-    "keep": { "type": "boolean" },
-    "notes": { "type": "string" }
+    "cost": {
+      "type": "number",
+      "minimum": 0
+    },
+    "keep": {
+      "type": "boolean"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "likes": {
+      "type": "number",
+      "minimum": 0
+    },
+    "comments": {
+      "type": "number",
+      "minimum": 0
+    },
+    "shares": {
+      "type": "number",
+      "minimum": 0
+    },
+    "subscribers_gained": {
+      "type": "number",
+      "minimum": 0
+    },
+    "avg_view_pct": {
+      "type": "number",
+      "minimum": 0
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "synthetic_declared": {
+      "type": "boolean"
+    },
+    "revenue": {
+      "type": "number",
+      "minimum": 0
+    },
+    "measured_at": {
+      "type": "string"
+    },
+    "views": {
+      "type": "number",
+      "minimum": 0
+    },
+    "age_hours": {
+      "type": "number",
+      "minimum": 0
+    }
   }
 }

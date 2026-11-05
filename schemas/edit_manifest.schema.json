@@ -3,39 +3,114 @@
   "$id": "kalainova/edit_manifest-0.1.json",
   "title": "Edit manifest",
   "type": "object",
-  "required": ["schema_version", "job_id", "runtime"],
+  "required": [
+    "schema_version",
+    "job_id",
+    "runtime"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "0.1" },
-    "job_id": { "type": "string", "minLength": 1 },
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "runtime": {
-      "enum": ["rented-tool", "ffmpeg", "remotion"],
+      "enum": [
+        "rented-tool",
+        "ffmpeg",
+        "remotion"
+      ],
       "description": "rented-tool until one job is accepted or measured."
     },
     "profile": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "aspect": { "enum": ["16:9", "9:16", "1:1", "audio-only"] },
-        "width": { "type": "integer" },
-        "height": { "type": "integer" },
-        "fps": { "type": "number" },
-        "target_lufs": { "type": "number" },
-        "true_peak_dbtp_max": { "type": "number" }
+        "aspect": {
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "audio-only"
+          ]
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "fps": {
+          "type": "number"
+        },
+        "target_lufs": {
+          "type": "number"
+        },
+        "true_peak_dbtp_max": {
+          "type": "number"
+        }
       }
     },
     "cuts": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "source", "in_sec", "out_sec"],
+        "required": [
+          "id",
+          "source",
+          "in_sec",
+          "out_sec"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string" },
-          "source": { "type": "string" },
-          "in_sec": { "type": "number", "minimum": 0 },
-          "out_sec": { "type": "number", "minimum": 0 },
-          "role": { "enum": ["hook", "body", "payoff", "cta", "bed", "other"] }
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "in_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "out_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "role": {
+            "enum": [
+              "hook",
+              "body",
+              "payoff",
+              "cta",
+              "bed",
+              "other"
+            ]
+          },
+          "start_sec": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Timeline position."
+          },
+          "motion": {
+            "enum": [
+              "none",
+              "push_in",
+              "push_out",
+              "pan_left",
+              "pan_right",
+              "drift_up"
+            ]
+          },
+          "hold_last_frame": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          }
         }
       }
     },
@@ -43,12 +118,53 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["start_sec", "end_sec", "text"],
+        "required": [
+          "start_sec",
+          "end_sec",
+          "text"
+        ],
         "additionalProperties": false,
         "properties": {
-          "start_sec": { "type": "number", "minimum": 0 },
-          "end_sec": { "type": "number", "minimum": 0 },
-          "text": { "type": "string" }
+          "start_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "emphasis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "words": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "text",
+                "start_sec",
+                "end_sec"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -56,20 +172,83 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "voice_asset_id": { "type": "string" },
-        "music_asset_id": { "type": "string" },
-        "music_gain_db": { "type": "number" },
+        "voice_asset_id": {
+          "type": "string"
+        },
+        "music_asset_id": {
+          "type": "string"
+        },
+        "music_gain_db": {
+          "type": "number"
+        },
         "sfx": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["asset_id", "start_sec"],
+            "required": [
+              "asset_id",
+              "start_sec"
+            ],
             "additionalProperties": false,
             "properties": {
-              "asset_id": { "type": "string" },
-              "start_sec": { "type": "number", "minimum": 0 },
-              "gain_db": { "type": "number" }
+              "asset_id": {
+                "type": "string"
+              },
+              "start_sec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "gain_db": {
+                "type": "number"
+              }
             }
+          }
+        },
+        "duck": {
+          "type": "boolean"
+        }
+      }
+    },
+    "duration_sec": {
+      "type": "number",
+      "minimum": 0
+    },
+    "caption_style": {
+      "enum": [
+        "kinetic",
+        "plain",
+        "none"
+      ]
+    },
+    "overlays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "start_sec",
+          "end_sec"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "hook_card",
+              "progress_bar",
+              "lower_third",
+              "end_card"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "type": "number",
+            "minimum": 0
           }
         }
       }

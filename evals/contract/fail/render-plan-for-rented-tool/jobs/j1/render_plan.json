@@ -3,7 +3,7 @@
   "job_id": "j1",
   "steps": [
     {
-      "op": "cut"
+      "op": "export"
     }
   ]
 }

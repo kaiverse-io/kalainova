@@ -12,4 +12,17 @@ just ci        # check + contract eval + docs lint
 
 `just` is optional; each target is one `python3 scripts/...` line in `justfile`. GitHub Actions is not on `main` yet: pushing a workflow needs a token with `workflow` scope. Opening a job: `docs/how-to/open-a-job.md`. `CLAUDE_HANDOVER.md` is the brief for the next agent.
 
-Media files stay on disk. Publish stays with a human.
+## Studio engine
+
+```bash
+pip install -r requirements.txt     # plus ffmpeg on PATH
+python3 -m kalainova providers      # which rented models have keys; local fallbacks always work
+python3 -m kalainova make jobs/<id> # plan → assets → edit → compile → render → qa
+python3 -m kalainova approve jobs/<id> --reviewer <you> --platforms youtube
+python3 -m kalainova publish jobs/<id> youtube --live
+python3 -m kalainova measure jobs/<id>   # at 48 h
+```
+
+Plan, model stack, and money paths: `docs/studio.md`. Decision: `docs/decisions/0007-own-the-compile-path.md`.
+
+Media files stay on disk. A human approves every piece.

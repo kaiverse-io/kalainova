@@ -3,16 +3,29 @@
   "$id": "kalainova/job-0.1.json",
   "title": "Kalainova job",
   "type": "object",
-  "required": ["schema_version", "job_id", "strategy", "media", "rights", "status"],
+  "required": [
+    "schema_version",
+    "job_id",
+    "strategy",
+    "media",
+    "rights",
+    "status"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "0.1" },
-    "job_id": { "type": "string", "minLength": 1 },
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "strategy": {
       "enum": [
         "funded-clip",
         "owned-derivative",
         "generated",
+        "client",
         "procedural",
         "audio-native",
         "text-pack",
@@ -23,33 +36,140 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "enum": ["video", "audio", "still", "text"] }
+      "items": {
+        "enum": [
+          "video",
+          "audio",
+          "still",
+          "text"
+        ]
+      }
     },
-    "rights": { "enum": ["funded-brief", "owned", "licensed"] },
-    "distribution_identity": { "type": ["string", "null"] },
+    "rights": {
+      "enum": [
+        "funded-brief",
+        "owned",
+        "licensed"
+      ]
+    },
+    "distribution_identity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "status": {
-      "enum": ["template", "draft", "rented", "rendered", "accepted", "measured", "killed"]
+      "enum": [
+        "template",
+        "draft",
+        "rented",
+        "rendered",
+        "approved",
+        "published",
+        "accepted",
+        "measured",
+        "killed"
+      ]
     },
     "skip_funded": {
       "type": "boolean",
       "description": "Generated jobs only. True means the operator explicitly skipped a funded-clip proof."
     },
     "cost_cap": {
-      "type": ["number", "null"],
+      "type": [
+        "number",
+        "null"
+      ],
       "minimum": 0,
       "description": "Currency-agnostic ceiling for rented generation on this job."
     },
     "parent_job_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Required in practice for downstream-sku and for a stem that serves another job."
     },
     "format": {
-      "enum": ["list", "comparison", "countdown", "alert", "poll", "recap", "quote", "stat"],
+      "enum": [
+        "list",
+        "comparison",
+        "countdown",
+        "alert",
+        "poll",
+        "recap",
+        "quote",
+        "stat"
+      ],
       "description": "Procedural jobs only."
     },
     "platforms": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
+    },
+    "brief": {
+      "type": "object",
+      "description": "Operator intent. The subject lives here, only in the job folder.",
+      "additionalProperties": true,
+      "properties": {
+        "subject": {
+          "type": "string"
+        },
+        "audience": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "duration_sec": {
+          "type": "number",
+          "minimum": 3
+        },
+        "language": {
+          "type": "string"
+        },
+        "voice": {
+          "type": "string"
+        },
+        "visual_style": {
+          "type": "string"
+        },
+        "music": {
+          "type": "string"
+        },
+        "max_video_beats": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "client": {
+          "type": "string",
+          "description": "Client label for strategy client. The deliverable goes to their accounts; they hold the rights."
+        }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "description": "Per-job provider preference by capability; local is always the fallback.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "profile": {
+      "type": "string",
+      "description": "Name from config/studio.yaml profiles."
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "synthetic_disclosure": {
+      "type": "boolean",
+      "description": "Publish sets the platform AI label. Default true."
     }
   }
 }

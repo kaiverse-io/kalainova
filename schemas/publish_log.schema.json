@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/publish_log-0.1.json",
+  "title": "Publish log",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "posts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string"
+    },
+    "posts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "platform",
+          "at",
+          "status"
+        ],
+        "properties": {
+          "platform": {
+            "type": "string"
+          },
+          "identity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "dry_run",
+              "posted",
+              "failed"
+            ]
+          },
+          "post_id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          },
+          "response": {},
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
