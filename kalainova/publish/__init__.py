@@ -46,6 +46,9 @@ def _qa_bound(job: Job, final: Path) -> dict:
     return qa
 
 
+CAPTION_LIMITS = {"youtube": 4900, "instagram": 2200, "tiktok": 2200, "facebook": 5000, "x": 280, "linkedin": 3000, "threads": 500}
+
+
 def approve(job: Job, reviewer: str, *, platforms: list[str], notes: str = "", privacy: str = "public") -> dict:
     final = job.work / "final.mp4"
     _qa_bound(job, final)
@@ -90,6 +93,12 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
             raise ContractError(f"{job.id}: already posted to {platform} ({done[-1].get('url') or done[-1].get('post_id')})")
     identity = job.job.get("distribution_identity")
     caption = appr["description"] + ("\n\n" + " ".join(appr["hashtags"]) if appr["hashtags"] else "")
+    limit = CAPTION_LIMITS.get(platform, 2200)
+    if (job.folder / "stock.json").exists():
+        from ..stock import credits
+        if credits(job) not in caption[:limit]:
+            raise ContractError(f"{job.id}: the stock credit would not survive {platform}'s {limit}-character caption; shorten it")
+    caption = caption[:limit]
     entry = {"platform": platform, "identity": identity, "at": _now(), "dry_run": dry_run, "title": appr["title"]}
     if dry_run:
         entry["status"] = "dry_run"

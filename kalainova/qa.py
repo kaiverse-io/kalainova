@@ -126,6 +126,12 @@ def run(job: Job) -> dict:
     _check(checks, "disclosure.synthetic_flag", not synthetic or data.get("synthetic_disclosure", True),
            "synthetic assets present; publish must set the platform AI label")
 
+    # stock credits must reach the post, not just the job folder
+    if (job.folder / "stock.json").exists():
+        from .stock import credits
+        desc = (packet.get("publish") or {}).get("description", "")
+        _check(checks, "rights.stock_credit", credits(job) in desc, "stock credit line present in publish description")
+
     # rights
     rights_ok = all(a.get("rights", data.get("rights")) in ("owned", "licensed", "funded-brief") for a in am["assets"])
     _check(checks, "rights.assets", rights_ok, "every asset carries rights")

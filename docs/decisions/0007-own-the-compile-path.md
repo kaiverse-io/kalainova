@@ -1,6 +1,6 @@
 # 0007. Own the compile path and gate auto-post on a hash-bound approval
 
-Status: proposed · 2026-11-05 · accepted when the PR that adds it merges. Supersedes 0003 for the render path and amends 0004.
+Status: accepted · 2026-11-05 (merged in PR #2, landed on main in PR #3). Supersedes 0003 for the render path and amends 0004.
 
 ## Context
 

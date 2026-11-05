@@ -1,6 +1,6 @@
 # 0004. A human publishes
 
-Status: accepted · 2026-11-05 · amended by 0007 when it is accepted
+Status: accepted · 2026-11-05 · amended by 0007
 
 ## Context
 
