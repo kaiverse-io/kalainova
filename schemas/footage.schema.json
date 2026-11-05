@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/footage-0.1.json",
+  "title": "Footage",
+  "description": "Operator media split into scored shots. Bytes stay in the work dir.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "sources",
+    "shots"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "path",
+          "kind"
+        ]
+      }
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "kind",
+          "in_sec",
+          "out_sec"
+        ]
+      }
+    }
+  }
+}

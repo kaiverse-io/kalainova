@@ -99,7 +99,8 @@ def run(job: Job) -> dict:
     # hook timing
     caps = em.get("captions", [])
     first = caps[0]["start_sec"] if caps else None
-    _check(checks, "hook.first_word", first is not None and first <= 0.6, f"first caption at {first}s", "warn")
+    if caps or am.get("words"):  # edits of silent footage carry no captions to time
+        _check(checks, "hook.first_word", first is not None and first <= 0.6, f"first caption at {first}s", "warn")
     hook_words = len(packet["beats"][0]["text"].split())
     _check(checks, "hook.length", hook_words <= 14, f"hook line {hook_words} words", "warn")
 

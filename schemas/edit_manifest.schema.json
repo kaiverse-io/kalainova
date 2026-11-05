@@ -110,6 +110,41 @@
           },
           "title": {
             "type": "string"
+          },
+          "crop_x": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Horizontal subject centre for reframing."
+          },
+          "grade": {
+            "enum": [
+              "natural",
+              "warm",
+              "cool",
+              "teal_orange",
+              "film",
+              "bw",
+              "vivid"
+            ]
+          },
+          "gamma": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 2
+          },
+          "speed": {
+            "type": "number",
+            "minimum": 0.25,
+            "maximum": 4
+          },
+          "zoom": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1.5
+          },
+          "keep_audio": {
+            "type": "boolean"
           }
         }
       }
@@ -265,6 +300,26 @@
         "cut",
         "dissolve"
       ]
+    },
+    "original_audio": {
+      "type": "boolean"
+    },
+    "fade_out_sec": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 5
+    },
+    "beat_grid": {
+      "type": "object",
+      "properties": {
+        "bpm": {
+          "type": "number"
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }
