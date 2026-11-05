@@ -14,6 +14,10 @@ Editing arm (your own footage):
   python3 -m kalainova edit <job> "30s reel, warm, fast cuts, title: ..."   direct -> render -> qa
   python3 -m kalainova revise <job> "opening slower, drop 03_blurry, cooler"  re-edit from a comment
   python3 -m kalainova shots <job>                       list shots with scores (ids for notes)
+
+Stock (free-license footage, needs PEXELS_API_KEY and/or PIXABAY_API_KEY and network):
+  python3 -m kalainova stock <job> "Cape Town" [--count 10]          fetch, credit, ingest
+  python3 -m kalainova reel <id> "Cape Town" "20s reel, cinematic, warm, title: Cape Town"   new job -> stock -> edit
 """
 
 from __future__ import annotations
@@ -145,6 +149,16 @@ def main(argv: list[str] | None = None) -> int:
         e.add_argument("job")
         e.add_argument("note", nargs="?", default="")
     sub.add_parser("shots").add_argument("job")
+    st = sub.add_parser("stock")
+    st.add_argument("job")
+    st.add_argument("subject")
+    st.add_argument("--count", type=int, default=10)
+    rl = sub.add_parser("reel")
+    rl.add_argument("id")
+    rl.add_argument("subject")
+    rl.add_argument("note", nargs="?", default="")
+    rl.add_argument("--identity", default="stock-reels")
+    rl.add_argument("--count", type=int, default=10)
     a = p.parse_args(argv)
 
     try:
@@ -169,6 +183,29 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd in ("edit", "revise"):
             from .editor import direct
             job = open_job(a.job)
+            if a.note:
+                direct.add_note(job, a.note)
+            return _render_edit(job)
+        if a.cmd in ("stock", "reel"):
+            from .editor import analyze, direct
+            from . import stock as stock_mod
+            if a.cmd == "reel":
+                jdir = REPO / "jobs" / a.id
+                if not jdir.exists():
+                    jdir.mkdir(parents=True)
+                    (jdir / "job.json").write_text(json.dumps({
+                        "schema_version": "0.1", "job_id": a.id, "strategy": "owned-derivative", "media": ["video", "audio"],
+                        "rights": "licensed", "distribution_identity": a.identity, "status": "draft", "cost_cap": 5,
+                        "brief": {"subject": a.subject}}, indent=2) + "\n")
+                job = open_job(jdir)
+            else:
+                job = open_job(a.job)
+            paths = stock_mod.fetch(job, a.subject, count=a.count)
+            print(f"  stock    {len(paths)} clips  ({stock_mod.credits(job)[:120]}...)")
+            fo = analyze.ingest(job, paths)
+            print(f"  ingest   {len(fo['shots'])} shots")
+            if a.cmd == "stock":
+                return 0
             if a.note:
                 direct.add_note(job, a.note)
             return _render_edit(job)

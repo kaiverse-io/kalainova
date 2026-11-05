@@ -241,6 +241,11 @@ def _long(job: Job, footage: dict, s: dict) -> tuple[list, list, dict, list, flo
     return cuts, extra, {}, [], round(t, 3)
 
 
+def _credits(job: Job) -> str:
+    from .. import stock
+    return stock.credits(job)
+
+
 # ------------------------------------------------------------------ run
 def run(job: Job) -> dict:
     footage_path = job.folder / "footage.json"
@@ -256,8 +261,10 @@ def run(job: Job) -> dict:
     assets = []
     for sid in sorted({c["source"] for c in cuts}):
         src = sources[sid]
+        licensed = src["name"].split("_")[1:2] in (["pexels"], ["pixabay"])
         a = {"id": sid, "kind": "video" if src["kind"] == "video" else "still", "role": "visual", "path": src["path"],
-             "rights": job.job.get("rights", "owned"), "provider": "operator", "synthetic": False}
+             "rights": "licensed" if licensed else job.job.get("rights", "owned"),
+             "provider": "operator", "synthetic": False}
         if src.get("duration_sec"):
             a["duration_sec"] = round(src["duration_sec"], 3)
         assets.append(a)
@@ -273,7 +280,7 @@ def run(job: Job) -> dict:
         beats_.append({"id": c["id"], "role": c["role"], "text": label, **({"on_screen": c["title"]} if c.get("title") else {})})
     job.write("script_packet", {"schema_version": "0.1", "job_id": job.id, "title": s["title"] or job.id,
                                 "format": "edit", "target_duration_sec": s["duration_sec"], "beats": beats_,
-                                "publish": {"title": (s["title"] or job.id)[:100], "description": "", "hashtags": []}})
+                                "publish": {"title": (s["title"] or job.id)[:100], "description": _credits(job), "hashtags": []}})
 
     studio_cuts = [{k: v for k, v in c.items() if k != "shot_id"} for c in cuts]
     audio = {}

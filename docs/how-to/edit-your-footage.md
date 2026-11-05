@@ -28,3 +28,13 @@ Notes accumulate in `direction.json`; later notes win. The vocabulary:
 What the director does on its own: rejects shaky, soft, and badly exposed takes outright; picks the steadiest, sharpest window inside each shot; never repeats a take back to back; lands cuts on the music's beat; reframes 16:9 to 9:16 around the subject; hides long-form jump cuts with alternating punch-ins; fades out at the end.
 
 Then the shared gate: `approve` (a human), `publish`, `measure`.
+
+## Free stock footage instead of your own
+
+```bash
+export PEXELS_API_KEY=...    # free: https://www.pexels.com/api/
+export PIXABAY_API_KEY=...   # free: https://pixabay.com/api/docs/   (either one is enough)
+python3 -m kalainova reel <id> "<place or topic>" "20s reel, cinematic, warm, title: <title>"
+```
+
+`reel` opens a job (`owned-derivative`, rights `licensed`) and builds a shot list from the subject (wide, aerial, skyline, sunset, coast, street…). It takes the best free-license clips, at least 720p and 4–40 s long, picking for coverage across the shot list, then downloads them and records author, page, and license in `stock.json`. After that it ingests and edits. Credits go into the publish description. Paid libraries are never touched.
