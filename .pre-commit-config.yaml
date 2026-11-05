@@ -1,0 +1,23 @@
+# pip install pre-commit && pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: kalainova-check
+        name: engine contract
+        entry: python3 scripts/check.py
+        language: system
+        pass_filenames: false
+      - id: kalainova-fixtures
+        name: contract fixtures
+        entry: python3 scripts/check.py --fixtures evals/contract
+        language: system
+        pass_filenames: false
+      - id: kalainova-docs
+        name: engine docs stay subject-free
+        entry: python3 scripts/lint_docs.py
+        language: system
+        pass_filenames: false
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks

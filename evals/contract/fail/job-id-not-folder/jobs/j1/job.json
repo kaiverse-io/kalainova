@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1",
+  "job_id": "other",
+  "strategy": "generated",
+  "media": [
+    "video",
+    "audio",
+    "text"
+  ],
+  "rights": "owned",
+  "distribution_identity": "identity-a",
+  "status": "draft",
+  "skip_funded": false,
+  "cost_cap": 5,
+  "parent_job_id": null
+}

@@ -1,0 +1,1 @@
+waits until one job is accepted or measured

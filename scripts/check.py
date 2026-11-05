@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Gates: no media blobs in git, every job.json matches the engine contract."""
+"""Gates. Stdlib only.
+
+  python3 scripts/check.py                 the repo: no media blobs in git, every job folder honours the contract
+  python3 scripts/check.py --jobs DIR      the same rules over another jobs directory
+  python3 scripts/check.py --fixtures DIR  contract eval: every fixture under DIR/pass must pass, every
+                                           fixture under DIR/fail must fail with the text in its expect.txt
+
+The gate cannot tell you a piece is good, true, paid, or published. It rejects malformed shape.
+"""
 
 from __future__ import annotations
 
@@ -19,13 +27,24 @@ STRATEGIES = {
     "text-pack",
     "downstream-sku",
 }
+EXTENSIONS_AFTER_PROOF = {"procedural", "downstream-sku"}
 KINDS = {"video", "audio", "still", "text"}
 RIGHTS = {"funded-brief", "owned", "licensed"}
+RIGHTS_FOR = {"funded-clip": {"funded-brief"}, "owned-derivative": {"owned", "licensed"}}
 STATUSES = {"template", "draft", "rented", "rendered", "accepted", "measured", "killed"}
+PROVEN = {"accepted", "measured"}
 FORMATS = {"list", "comparison", "countdown", "alert", "poll", "recap", "quote", "stat"}
 OPS = {"cut", "concat", "scale", "overlay_text", "mix_audio", "loudnorm", "burn_captions", "export"}
 ROLES = {"hook", "body", "payoff", "cta"}
 CUT_ROLES = ROLES | {"bed", "other"}
+CONTRACT = {
+    "job.json": "job",
+    "script_packet.json": "script_packet",
+    "asset_manifest.json": "asset_manifest",
+    "edit_manifest.json": "edit_manifest",
+    "render_plan.json": "render_plan",
+    "measure.json": "measure",
+}
 
 errors: list[str] = []
 
@@ -34,167 +53,262 @@ def fail(msg: str) -> None:
     errors.append(msg)
 
 
+def rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def load(path: Path) -> dict:
     try:
         data = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
-        fail(f"{path}: invalid json ({exc})")
+        fail(f"{rel(path)}: invalid json ({exc})")
         return {}
     if not isinstance(data, dict):
-        fail(f"{path}: expected an object")
+        fail(f"{rel(path)}: expected an object")
         return {}
     return data
 
 
-def tracked_paths() -> list[str]:
+def schema_keys(name: str) -> tuple[set[str], set[str]]:
+    """(allowed top-level keys, required keys) from schemas/<name>.schema.json, which stays the source of truth."""
+    schema = json.loads((ROOT / "schemas" / f"{name}.schema.json").read_text())
+    return set(schema.get("properties", {})), set(schema.get("required", []))
+
+
+def shape(data: dict, name: str, path: Path) -> None:
+    allowed, required = schema_keys(name)
+    for key in sorted(required - set(data)):
+        fail(f"{rel(path)}: missing {key}")
+    for key in sorted(set(data) - allowed):
+        fail(f"{rel(path)}: unknown key {key!r}")
+    if "schema_version" in data and data["schema_version"] != "0.1":
+        fail(f"{rel(path)}: schema_version must be 0.1")
+
+
+# ------------------------------------------------------------------ media
+def tracked_paths() -> list[str] | None:
     try:
-        out = subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True)
+        out = subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
+        return None
     return [line for line in out.splitlines() if line]
 
 
-def check_media() -> None:
-    paths = tracked_paths()
-    if not paths:
+def check_media(paths: list[str] | None) -> None:
+    if paths is None:
+        print("note: not a git checkout; media check skipped", file=sys.stderr)
         return
     bad = [p for p in paths if Path(p).suffix.lower() in MEDIA]
     if bad:
         fail("media blobs must stay out of git:\n" + "\n".join(bad))
 
 
-def require(data: dict, key: str, path: Path) -> None:
-    if key not in data:
-        fail(f"{path}: missing {key}")
-
-
-def check_job(path: Path) -> None:
-    data = load(path)
-    if not data:
-        return
-    for key in ("schema_version", "job_id", "strategy", "media", "rights", "status"):
-        require(data, key, path)
-    if data.get("schema_version") != "0.1":
-        fail(f"{path}: schema_version must be 0.1")
-    if data.get("strategy") not in STRATEGIES:
-        fail(f"{path}: unknown strategy {data.get('strategy')!r}")
+# ------------------------------------------------------------------ one job
+def check_job(path: Path, data: dict, any_proven: bool) -> None:
+    shape(data, "job", path)
+    folder = path.parent.name
+    if data.get("job_id") != folder:
+        fail(f"{rel(path)}: job_id {data.get('job_id')!r} must equal its folder name {folder!r}")
+    strategy = data.get("strategy")
+    if strategy not in STRATEGIES:
+        fail(f"{rel(path)}: unknown strategy {strategy!r}")
     media = data.get("media")
     if not isinstance(media, list) or not media or any(k not in KINDS for k in media):
-        fail(f"{path}: media must be a non-empty subset of {sorted(KINDS)}")
-    if data.get("rights") not in RIGHTS:
-        fail(f"{path}: rights must be one of {sorted(RIGHTS)}")
+        fail(f"{rel(path)}: media must be a non-empty subset of {sorted(KINDS)}")
+        media = []
+    rights = data.get("rights")
+    if rights not in RIGHTS:
+        fail(f"{rel(path)}: rights must be one of {sorted(RIGHTS)}")
     status = data.get("status")
     if status not in STATUSES:
-        fail(f"{path}: unknown status {status!r}")
-    identity = data.get("distribution_identity", None)
-    if status != "template" and not identity:
-        fail(f"{path}: distribution_identity is required once the job leaves the template")
-    if status == "template" and data.get("job_id") != "_template":
-        fail(f"{path}: only jobs/_template may use status template")
-    if data.get("strategy") == "procedural" and status != "template":
-        if data.get("format") not in FORMATS:
-            fail(f"{path}: procedural jobs need a format")
-    if data.get("strategy") == "audio-native" and status != "template":
-        if media and "audio" not in media:
-            fail(f"{path}: audio-native jobs include audio")
-    if data.get("strategy") == "text-pack" and status != "template":
-        if media != ["text"]:
-            fail(f"{path}: text-pack media is exactly ['text']")
-    if data.get("strategy") == "downstream-sku" and status != "template":
-        if not data.get("parent_job_id"):
-            fail(f"{path}: downstream-sku needs parent_job_id")
-    if data.get("format") not in (None, *FORMATS) and "format" in data:
-        fail(f"{path}: unknown format")
-
-
-def check_script(path: Path) -> None:
-    data = load(path)
-    if not data:
+        fail(f"{rel(path)}: unknown status {status!r}")
+    if status == "template":
+        if data.get("job_id") != "_template":
+            fail(f"{rel(path)}: only jobs/_template may use status template")
         return
-    require(data, "beats", path)
-    beats = data.get("beats") or []
-    if not beats:
-        fail(f"{path}: beats must not be empty")
+    if folder == "_template":
+        fail(f"{rel(path)}: the template keeps status template")
+    if not data.get("distribution_identity"):
+        fail(f"{rel(path)}: distribution_identity is required once the job leaves the template")
+    allowed = RIGHTS_FOR.get(strategy)
+    if allowed and rights not in allowed:
+        fail(f"{rel(path)}: {strategy} needs rights in {sorted(allowed)}, got {rights!r}")
+    if data.get("skip_funded") and strategy != "generated":
+        fail(f"{rel(path)}: skip_funded applies to generated jobs only")
+    if strategy == "generated" and status != "draft" and data.get("cost_cap") is None:
+        fail(f"{rel(path)}: generated jobs write cost_cap before the first render")
+    if strategy == "procedural" and data.get("format") not in FORMATS:
+        fail(f"{rel(path)}: procedural jobs need a format")
+    if strategy == "audio-native" and "audio" not in media:
+        fail(f"{rel(path)}: audio-native jobs include audio")
+    if strategy == "text-pack" and media != ["text"]:
+        fail(f"{rel(path)}: text-pack media is exactly ['text']")
+    if strategy == "downstream-sku" and not data.get("parent_job_id"):
+        fail(f"{rel(path)}: downstream-sku needs parent_job_id")
+    if strategy in EXTENSIONS_AFTER_PROOF and not any_proven:
+        fail(f"{rel(path)}: {strategy} is an extension; it waits until one job is accepted or measured")
+    if "format" in data and data["format"] not in FORMATS:
+        fail(f"{rel(path)}: unknown format")
+    if status in PROVEN and not (path.parent / "measure.json").exists():
+        fail(f"{rel(path)}: status {status} needs measure.json")
+
+
+def check_script(path: Path, data: dict) -> None:
+    shape(data, "script_packet", path)
+    beats = data.get("beats")
+    if not isinstance(beats, list) or not beats:
+        fail(f"{rel(path)}: beats must be a non-empty list")
+        beats = []
     for beat in beats:
         if not isinstance(beat, dict):
-            fail(f"{path}: beat is not an object")
+            fail(f"{rel(path)}: beat is not an object")
             continue
         if beat.get("role") not in ROLES:
-            fail(f"{path}: beat role {beat.get('role')!r}")
+            fail(f"{rel(path)}: beat role {beat.get('role')!r}")
         if not beat.get("text"):
-            fail(f"{path}: beat missing text")
+            fail(f"{rel(path)}: beat missing text")
     for claim in data.get("claims") or []:
         if not isinstance(claim, dict) or not claim.get("source"):
-            fail(f"{path}: claim missing source")
+            fail(f"{rel(path)}: claim missing source")
 
 
-def check_assets(path: Path) -> None:
-    data = load(path)
-    if not data:
-        return
-    assets = data.get("assets") or []
-    if not assets:
-        fail(f"{path}: assets must not be empty")
+def check_assets(path: Path, data: dict) -> None:
+    shape(data, "asset_manifest", path)
+    assets = data.get("assets")
+    if not isinstance(assets, list) or not assets:
+        fail(f"{rel(path)}: assets must be a non-empty list")
+        assets = []
     for asset in assets:
         if not isinstance(asset, dict):
-            fail(f"{path}: asset is not an object")
+            fail(f"{rel(path)}: asset is not an object")
             continue
         if asset.get("kind") not in KINDS:
-            fail(f"{path}: asset kind {asset.get('kind')!r}")
+            fail(f"{rel(path)}: asset kind {asset.get('kind')!r}")
         if not asset.get("path"):
-            fail(f"{path}: asset missing path")
+            fail(f"{rel(path)}: asset missing path")
+        if "rights" in asset and asset["rights"] not in RIGHTS:
+            fail(f"{rel(path)}: asset rights {asset['rights']!r}")
 
 
-def check_edit(path: Path) -> None:
-    data = load(path)
-    if not data:
-        return
+def _num(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def check_edit(path: Path, data: dict) -> None:
+    shape(data, "edit_manifest", path)
     if data.get("runtime") not in {"rented-tool", "ffmpeg", "remotion"}:
-        fail(f"{path}: runtime")
-    for cut in data.get("cuts") or []:
-        if cut.get("role") not in CUT_ROLES:
-            fail(f"{path}: cut role {cut.get('role')!r}")
-        if cut.get("out_sec", 0) < cut.get("in_sec", 0):
-            fail(f"{path}: cut {cut.get('id')} ends before it starts")
+        fail(f"{rel(path)}: runtime must be rented-tool, ffmpeg, or remotion")
+    cuts = data.get("cuts") or []
+    if not isinstance(cuts, list):
+        fail(f"{rel(path)}: cuts must be a list")
+        cuts = []
+    for cut in cuts:
+        if not isinstance(cut, dict):
+            fail(f"{rel(path)}: cut is not an object")
+            continue
+        if "role" in cut and cut["role"] not in CUT_ROLES:
+            fail(f"{rel(path)}: cut role {cut['role']!r}")
+        a, b = cut.get("in_sec"), cut.get("out_sec")
+        if not (_num(a) and _num(b)):
+            fail(f"{rel(path)}: cut {cut.get('id')!r} needs numeric in_sec and out_sec")
+        elif b <= a:
+            fail(f"{rel(path)}: cut {cut.get('id')!r} ends before it starts")
 
 
-def check_render(path: Path) -> None:
-    data = load(path)
-    if not data:
-        return
-    steps = data.get("steps") or []
-    if not steps:
-        fail(f"{path}: steps must not be empty")
+def check_render(path: Path, data: dict, any_proven: bool) -> None:
+    shape(data, "render_plan", path)
+    if not any_proven:
+        fail(f"{rel(path)}: a render plan is compiler output; no compiler before one job is accepted or measured")
+    steps = data.get("steps")
+    if not isinstance(steps, list) or not steps:
+        fail(f"{rel(path)}: steps must be a non-empty list")
+        steps = []
     for step in steps:
         if not isinstance(step, dict) or step.get("op") not in OPS:
-            fail(f"{path}: op must be one of {sorted(OPS)}")
+            fail(f"{rel(path)}: op must be one of {sorted(OPS)}")
 
 
-def check_measure(path: Path) -> None:
-    data = load(path)
-    if not data:
+def check_measure(path: Path, data: dict) -> None:
+    shape(data, "measure", path)
+
+
+# ------------------------------------------------------------------ a jobs tree
+def check_tree(jobs_root: Path) -> None:
+    folders = sorted(p.parent for p in jobs_root.glob("*/job.json"))
+    if not folders:
+        fail(f"no jobs found under {rel(jobs_root)}")
         return
-    require(data, "job_id", path)
+    jobs = {f: load(f / "job.json") for f in folders}
+    any_proven = any(j.get("status") in PROVEN for j in jobs.values())
+    identities: dict[str, set[str]] = {}
+    for folder, job in jobs.items():
+        if not job:
+            continue
+        check_job(folder / "job.json", job, any_proven)
+        if job.get("status") != "template" and job.get("distribution_identity"):
+            identities.setdefault(job["distribution_identity"], set()).add(job.get("strategy"))
+        for name, kind in CONTRACT.items():
+            path = folder / name
+            if kind == "job" or not path.exists():
+                continue
+            data = load(path)
+            if not data:
+                continue
+            if data.get("job_id") not in (None, folder.name):
+                fail(f"{rel(path)}: job_id {data.get('job_id')!r} must equal its folder name {folder.name!r}")
+            if kind == "script_packet":
+                check_script(path, data)
+            elif kind == "asset_manifest":
+                check_assets(path, data)
+            elif kind == "edit_manifest":
+                check_edit(path, data)
+            elif kind == "render_plan":
+                check_render(path, data, any_proven)
+            elif kind == "measure":
+                check_measure(path, data)
+    for ident, strategies in sorted(identities.items()):
+        if len(strategies) > 1:
+            fail(f"distribution_identity {ident!r} is used by {sorted(strategies)}; one identity per strategy")
 
 
-def main() -> int:
-    check_media()
-    jobs = sorted((ROOT / "jobs").glob("*/job.json"))
-    if not jobs:
-        fail("no jobs found")
-    for path in jobs:
-        check_job(path)
-        folder = path.parent
-        if (folder / "script_packet.json").exists():
-            check_script(folder / "script_packet.json")
-        if (folder / "asset_manifest.json").exists():
-            check_assets(folder / "asset_manifest.json")
-        if (folder / "edit_manifest.json").exists():
-            check_edit(folder / "edit_manifest.json")
-        if (folder / "render_plan.json").exists():
-            check_render(folder / "render_plan.json")
-        if (folder / "measure.json").exists():
-            check_measure(folder / "measure.json")
+# ------------------------------------------------------------------ contract eval
+def run_fixtures(root: Path) -> int:
+    """Each fixture is a jobs tree. Optional tracked.txt lists paths treated as git-tracked."""
+    global errors
+    results, bad = [], 0
+    cases = sorted(p for p in (root / "pass").glob("*") if p.is_dir()) + sorted(p for p in (root / "fail").glob("*") if p.is_dir())
+    if not cases:
+        print(f"no fixtures under {root}", file=sys.stderr)
+        return 1
+    for case in cases:
+        errors = []
+        tracked = case / "tracked.txt"
+        if tracked.exists():
+            check_media([l.strip() for l in tracked.read_text().splitlines() if l.strip()])
+        check_tree(case / "jobs")
+        should_fail = case.parent.name == "fail"
+        expect = (case / "expect.txt").read_text().strip() if (case / "expect.txt").exists() else ""
+        if should_fail:
+            ok = bool(errors) and (not expect or any(expect in e for e in errors))
+        else:
+            ok = not errors
+        bad += not ok
+        results.append(f"  {'ok  ' if ok else 'FAIL'} {case.parent.name}/{case.name}"
+                       + ("" if ok else f"\n       expected {'failure containing ' + repr(expect) if should_fail else 'pass'}, got: {errors or 'no errors'}"))
+    print("\n".join(results))
+    print(f"fixtures: {len(cases) - bad}/{len(cases)} ok")
+    return 1 if bad else 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) >= 3 and argv[1] == "--fixtures":
+        return run_fixtures(Path(argv[2]).resolve())
+    jobs_root = Path(argv[2]).resolve() if len(argv) >= 3 and argv[1] == "--jobs" else ROOT / "jobs"
+    check_media(tracked_paths())
+    check_tree(jobs_root)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
@@ -203,4 +317,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv))
