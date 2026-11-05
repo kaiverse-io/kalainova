@@ -15,3 +15,8 @@ dist/
 
 # operator-local denylist for scripts/lint_docs.py; never commit it
 .denylist.local
+
+# python bytecode and test cache
+__pycache__/
+*.pyc
+.pytest_cache/
