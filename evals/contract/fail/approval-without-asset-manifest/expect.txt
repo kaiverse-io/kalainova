@@ -1,0 +1,1 @@
+approval without asset_manifest.json

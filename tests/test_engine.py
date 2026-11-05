@@ -89,6 +89,11 @@ def test_end_to_end_local_render(tmp_path, monkeypatch):
     assert (info["width"], info["height"]) == (1080, 1920)
     assert report["passed"], [c for c in report["checks"] if c["status"] == "fail"]
     assert abs(report["metrics"]["integrated_lufs"] + 14) <= 1.0
+    # a technical pass for CI, and still not approvable
+    from kalainova import publish
+    with pytest.raises(ContractError, match="placeholder"):
+        publish.approve(job, "human", platforms=["youtube"])
+    assert not job.has("approval")
 
 
 # ---- regressions from the independent review -------------------------------------------
@@ -164,12 +169,105 @@ def test_approve_and_publish_are_bound_to_qa_bytes(tmp_path, monkeypatch):
                      "artifacts_sha256": {"video": publish.sha256_file(final)}})
     (job.folder / "script_packet.json").write_text(json.dumps({"schema_version": "0.1", "job_id": "r1",
                                                                "beats": [{"id": "b", "role": "hook", "text": "x"}]}))
+    _manifest(job, {"id": "voice", "provider": "paid", "model": "m"})
     publish.approve(job, "human", platforms=["youtube"])
     assert publish.publish(job, "youtube", dry_run=True)["status"] == "dry_run"
     with open(final, "ab") as fh:
         fh.write(b"x")  # bytes change after approval
     with pytest.raises(ContractError, match="changed after approval"):
         publish.publish(job, "youtube", dry_run=True)
+
+
+# ---- the local provider makes placeholders, and the gate enforces that ------------------
+def _manifest(job, *assets):
+    job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id,
+                                 "assets": [{"kind": "audio", "path": "x.wav", **a} for a in assets]})
+
+
+def _qa_passed(job):
+    from kalainova import publish
+    final = job.work / "final.mp4"
+    final.write_bytes(b"not a real video; the gate only reads the hash")
+    job.write("qa", {"schema_version": "0.1", "job_id": job.id, "passed": True, "checks": [],
+                     "artifacts_sha256": {"video": publish.sha256_file(final)}})
+    job.write("script_packet", {"schema_version": "0.1", "job_id": job.id,
+                                "beats": [{"id": "b", "role": "hook", "text": "x"}]})
+
+
+@pytest.mark.parametrize("asset", [
+    {"id": "a", "provider": "local", "model": "anything"},
+    {"id": "a", "model": "local-studio-field"},
+    {"id": "a", "model": "local-typecard"},
+    {"id": "a", "model": "local-pad"},
+    {"id": "a", "model": "local-whoosh"},
+    {"id": "a", "model": "flite-slt"},
+])
+def test_approve_refuses_a_placeholder(tmp_path, monkeypatch, asset):
+    from kalainova import publish
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = _job(tmp_path, cap=1)
+    _qa_passed(job)
+    _manifest(job, {"id": "paid", "provider": "paid", "model": "m"}, asset)
+    with pytest.raises(ContractError, match="placeholder"):
+        publish.approve(job, "human", platforms=["youtube"])
+    assert not job.has("approval")
+    assert job.job["status"] == "draft"
+
+
+def test_approve_refuses_when_the_manifest_is_missing(tmp_path, monkeypatch):
+    from kalainova import publish
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = _job(tmp_path, cap=1)
+    _qa_passed(job)
+    with pytest.raises(ContractError, match="asset_manifest"):
+        publish.approve(job, "human", platforms=["youtube"])
+    assert not job.has("approval")
+
+
+def test_approve_accepts_paid_and_operator_assets(tmp_path, monkeypatch):
+    from kalainova import publish
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = _job(tmp_path, cap=1)
+    _qa_passed(job)
+    _manifest(job, {"id": "voice", "provider": "paid", "model": "m"}, {"id": "clip", "provider": "operator"})
+    assert publish.approve(job, "human", platforms=["youtube"])["reviewer"] == "human"
+    assert job.job["status"] == "approved"
+
+
+def test_publish_refuses_an_approval_written_for_a_placeholder(tmp_path, monkeypatch):
+    from kalainova import publish
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = _job(tmp_path, cap=1)
+    _qa_passed(job)
+    _manifest(job, {"id": "voice", "provider": "local", "model": "flite-slt"})
+    job.write("approval", {"schema_version": "0.1", "job_id": job.id, "reviewer": "human", "approved_at": "t",
+                           "platforms": ["youtube"], "title": "t", "description": "", "hashtags": [],
+                           "artifact_sha256": publish.sha256_file(job.work / "final.mp4")})
+    with pytest.raises(ContractError, match="placeholder"):
+        publish.publish(job, "youtube", dry_run=True)
+
+
+def test_one_local_beat_marks_the_whole_voice_track(tmp_path, monkeypatch):
+    """A fallback on the first beat must not vanish because a later beat reached the paid provider."""
+    from types import SimpleNamespace as NS
+    from kalainova import assets, publish
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = _job(tmp_path, cap=1, media=["audio"])
+    job.write("script_packet", {"schema_version": "0.1", "job_id": job.id,
+                                "beats": [{"id": f"b{i}", "role": "body", "text": "x"} for i in range(3)]})
+    makers = iter([("local", "flite-slt"), ("paid", "m"), ("paid", "m"), ("paid", "m"), ("paid", "m")])
+
+    def fake_gen(*a, **k):
+        name, model = next(makers)
+        return NS(name=name), NS(model=model, words=[])
+    monkeypatch.setattr(assets, "_gen", fake_gen)
+    monkeypatch.setattr(assets.media, "run", lambda *a, **k: None)
+    monkeypatch.setattr(assets.media, "duration", lambda *a, **k: 1.0)
+    monkeypatch.setattr(assets.media, "summarize", lambda *a, **k: {})
+    manifest = assets.run(job)
+    voice = next(a for a in manifest["assets"] if a["id"] == "voice")
+    assert (voice["provider"], voice["model"]) == ("local", "flite-slt")
+    assert publish.placeholder_assets(manifest) == ["voice"]
 
 
 def test_measure_refuses_before_48h(tmp_path, monkeypatch):

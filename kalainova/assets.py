@@ -75,6 +75,7 @@ def run(job: Job, *, force: bool = False) -> dict:
     # --- voice, per beat, then joined ------------------------------------
     t = 0.0
     voice_parts: list[Path] = []
+    voice_makers: list[tuple] = []
     for beat in packet["beats"]:
         bid = beat["id"]
         start = t
@@ -85,6 +86,7 @@ def run(job: Job, *, force: bool = False) -> dict:
             for w in res.words:
                 words.append({**w, "start_sec": round(w["start_sec"] + start, 3), "end_sec": round(w["end_sec"] + start, 3)})
             voice_parts.append(dst)
+            voice_makers.append((p, res))
             t += dur + GAP
         else:
             t += max(2.0, len(beat["text"].split()) / 2.6)
@@ -99,6 +101,8 @@ def run(job: Job, *, force: bool = False) -> dict:
         filt = "".join(f"[{i}:a]aresample=48000,apad=pad_dur={GAP}[a{i}];" for i in range(len(voice_parts)))
         filt += "".join(f"[a{i}]" for i in range(len(voice_parts))) + f"concat=n={len(voice_parts)}:v=0:a=1[out]"
         media.run([*args, "-filter_complex", filt, "-map", "[out]", "-ac", "1", str(work / "voice.wav")])
+        # one manifest entry covers every beat, so one local beat after a fallback marks the whole track
+        p, res = next((m for m in voice_makers if m[0].name == "local"), voice_makers[-1])
         add(id="voice", kind="audio", role="voice", path="voice.wav", duration_sec=media.duration(work / "voice.wav"),
             rights=_rights(data), provider=p.name, model=res.model, synthetic=True, probe=media.summarize(work / "voice.wav"))
 

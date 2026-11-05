@@ -48,10 +48,28 @@ def _qa_bound(job: Job, final: Path) -> dict:
 
 CAPTION_LIMITS = {"youtube": 4900, "instagram": 2200, "tiktok": 2200, "facebook": 5000, "x": 280, "linkedin": 3000, "threads": 500}
 
+# The local provider says it is not the quality bar. QA may pass its output for CI; a human cannot approve it.
+LOCAL_MODELS = {"local-studio-field", "local-pad", "local-whoosh", "local-typecard"}
+
+
+def placeholder_assets(manifest: dict) -> list[str]:
+    """Ids of the assets the local provider made."""
+    return [a.get("id", "?") for a in manifest.get("assets", [])
+            if a.get("provider") == "local" or a.get("model") in LOCAL_MODELS or str(a.get("model", "")).startswith("flite-")]
+
+
+def _not_placeholder(job: Job) -> None:
+    if not job.has("asset_manifest"):
+        raise ContractError(f"{job.id}: no asset_manifest.json, so nothing shows who made the picture, voice, or music")
+    local = placeholder_assets(job.read("asset_manifest"))
+    if local:
+        raise ContractError(f"{job.id}: placeholder; the local provider made {local}. Render again with the paid models")
+
 
 def approve(job: Job, reviewer: str, *, platforms: list[str], notes: str = "", privacy: str = "public") -> dict:
     final = job.work / "final.mp4"
     _qa_bound(job, final)
+    _not_placeholder(job)
     packet = job.read("script_packet")
     pub = packet.get("publish") or {}
     record = {
@@ -87,6 +105,7 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
     if sha256_file(final) != appr["artifact_sha256"]:
         raise ContractError(f"{job.id}: final.mp4 changed after approval; re-run QA and approval")
     _qa_bound(job, final)
+    _not_placeholder(job)
     if not dry_run and job.has("publish_log"):
         done = [p for p in job.read("publish_log")["posts"] if p["platform"] == platform and p["status"] == "posted"]
         if done:
