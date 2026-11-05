@@ -38,6 +38,7 @@ FORMATS = {"list", "comparison", "countdown", "alert", "poll", "recap", "quote",
 OPS = {"cut", "concat", "scale", "overlay_text", "mix_audio", "loudnorm", "burn_captions", "export"}
 ROLES = {"hook", "body", "payoff", "cta"}
 CUT_ROLES = ROLES | {"bed", "other"}
+LOCAL_MODELS = {"local-studio-field", "local-pad", "local-whoosh", "local-typecard"}
 CONTRACT = {
     "job.json": "job",
     "script_packet.json": "script_packet",
@@ -263,6 +264,15 @@ def check_approval(path: Path, data: dict) -> None:
     checked = (qa.get("artifacts_sha256") or {}).get("video")
     if checked != data.get("artifact_sha256"):
         fail(f"{rel(path)}: approved sha256 is not the file QA checked")
+    manifest_path = path.parent / "asset_manifest.json"
+    if not manifest_path.exists():
+        fail(f"{rel(path)}: approval without asset_manifest.json")
+        return
+    assets = load(manifest_path).get("assets")
+    local = [a.get("id", "?") for a in (assets if isinstance(assets, list) else []) if isinstance(a, dict) and (
+        a.get("provider") == "local" or a.get("model") in LOCAL_MODELS or str(a.get("model", "")).startswith("flite-"))]
+    if local:
+        fail(f"{rel(path)}: approval of a placeholder; the local provider made {local}")
 
 
 # ------------------------------------------------------------------ a jobs tree

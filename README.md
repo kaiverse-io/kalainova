@@ -16,7 +16,7 @@ just ci        # check + contract eval + docs lint
 
 ```bash
 pip install -r requirements.txt     # plus ffmpeg on PATH
-python3 -m kalainova providers      # which rented models have keys; local fallbacks always work
+python3 -m kalainova providers      # which rented models have keys; local fallbacks run the line, but approve refuses their output
 python3 -m kalainova make jobs/<id> # plan → assets → edit → compile → render → qa
 python3 -m kalainova approve jobs/<id> --reviewer <you> --platforms youtube
 python3 -m kalainova publish jobs/<id> youtube --live

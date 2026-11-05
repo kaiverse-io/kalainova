@@ -22,17 +22,17 @@ Measured by three numbers, nothing else:
 
 ## Where the engine is (v0.2, 2026-11-05)
 
-Working and tested (`just test`, 20 tests, one is a full render):
+Working and tested (`just test`, 33 tests, one is a full render):
 
 - `python3 -m kalainova make <job>` runs **plan → assets → edit → compile → render → qa** from JSON contracts.
 - Provider adapters: Anthropic (planner + vision judge), ElevenLabs (voice with word timestamps, music, sfx), fal (image, video, music, transcription), and a zero-cost **local** fallback for every capability so the line never stops.
 - ffmpeg compiler over a closed op list (`cut scale concat overlay_text mix_audio loudnorm burn_captions export`). Paths are jailed to the job work dir, so a model-written plan cannot run a command or touch other files.
 - Retention defaults: hook card, kinetic word-by-word captions with emphasis colour, motion on every still, a shot change every ≤ 4 s, progress bar, sidechain-ducked music, whoosh on cuts, two-pass loudnorm to −14 LUFS / −1 dBTP.
 - QA gate: frame size, fps, duration, loudness, true peak, black frames, dead air, pacing, hook timing, caption coverage, claim sources, rights, synthetic flag, contact sheet, and an LLM vision judge when a key exists.
-- Human gate: `approve` binds to the sha256 of the exact file that passed QA. `publish` refuses if the bytes changed. YouTube posts through the official Data API with `containsSyntheticMedia: true`; other platforms go through Upload-Post.
+- Human gate: `approve` binds to the sha256 of the exact file that passed QA and refuses any job with an asset from the local provider. `publish` refuses if the bytes changed. YouTube posts through the official Data API with `containsSyntheticMedia: true`; other platforms go through Upload-Post.
 - `measure` pulls 48 h stats into `measure.json`.
 
-Proof render (local providers, no keys): 1080×1920, 30 fps, −14.0 LUFS, 100% caption coverage, QA passed.
+Placeholder render (local providers, no keys): 1080×1920, 30 fps, −14.0 LUFS, 100% caption coverage. QA records a technical pass for CI. It is not a proof of quality, and `approve` refuses the file. No piece has been accepted, so the 30-day and 90-day numbers above are the bar, not a result.
 
 ## How it makes money (first 90 days)
 
