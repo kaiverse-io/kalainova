@@ -4,7 +4,7 @@ Date: 2026-11-05. Written by Ben for the next agent (Claude) taking this repo. O
 
 This file is the brief. It is not engine doctrine. Proper nouns in the source map below stay in this file. Do not copy them into `README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `docs/strategies.md`, `docs/consolidation.md`, schemas, or a sample job.
 
-Read `PREMORTEM.md` before section 7. Nine models reviewed this handover. Section 7 stays frozen. Do not add the cockpit planes until the operator says otherwise.
+Read `HANDOVER_FEEDBACK.md` first, then `PREMORTEM.md`, before section 7. Section 7 stays frozen. The studio it describes is already on main, and the implementation review scored it short of a paying-client piece. Follow the order in `HANDOVER_FEEDBACK.md`. Do not add another cockpit plane.
 
 Published remote: https://github.com/kaiverse-io/kalainova
 Published `main` at the time of this handover: `8b59afe` (`8b59afe4679b9668682bc8c6b3c34544c0f5df5f`).
