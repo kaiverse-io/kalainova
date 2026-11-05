@@ -215,6 +215,7 @@
     },
     "caption_style": {
       "enum": [
+        "studio",
         "kinetic",
         "plain",
         "none"
@@ -252,6 +253,18 @@
           }
         }
       }
+    },
+    "theme": {
+      "enum": [
+        "studio",
+        "bold"
+      ]
+    },
+    "transition": {
+      "enum": [
+        "cut",
+        "dissolve"
+      ]
     }
   }
 }

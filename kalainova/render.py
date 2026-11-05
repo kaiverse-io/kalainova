@@ -26,12 +26,13 @@ SPEC = {
     "cut": {"source": "path", "kind": ("still", "video"), "in_sec": "num", "out_sec": "num", "fps": "num",
             "out": "path", "pad_to_sec": "num?"},
     "scale": {"input": "path", "out": "path", "width": "int", "height": "int", "fps": "num",
-              "motion": MOTIONS, "duration_sec": "num"},
-    "concat": {"inputs": "paths", "out": "path", "fps": "num"},
+              "motion": MOTIONS, "duration_sec": "num", "intensity": "num?"},
+    "concat": {"inputs": "paths", "out": "path", "fps": "num", "transition": ("cut", "dissolve", None),
+               "xfade_sec": "num?", "durations": "list"},
     "overlay_text": {"input": "path", "out": "path", "width": "int", "height": "int", "overlays": "list",
-                     "titles": "list", "duration_sec": "num"},
+                     "titles": "list", "duration_sec": "num", "theme": ("studio", "bold", None)},
     "burn_captions": {"input": "path", "out": "path", "width": "int", "height": "int",
-                      "style": ("kinetic", "plain"), "captions": "list"},
+                      "style": ("studio", "kinetic", "plain"), "captions": "list"},
     "mix_audio": {"out": "path", "duration_sec": "num", "voice": "path?", "music": "path?",
                   "music_gain_db": "num?", "duck": "bool?", "sfx": "list"},
     "loudnorm": {"input": "path", "out": "path", "target_lufs": "num", "true_peak_dbtp_max": "num"},
@@ -98,33 +99,47 @@ def compile_plan(job: Job) -> dict:
     W, H, FPS = prof["width"], prof["height"], prof["fps"]
     steps: list[dict] = []
     segs: list[str] = []
+    studio = em.get("theme", "studio") == "studio"
+    dissolve = em.get("transition") == "dissolve"
+    XF = 0.4 if dissolve else 0.0
+    n_cuts = len(em.get("cuts", []))
+    seg_durs: list[float] = []
 
     for i, cut in enumerate(em.get("cuts", [])):
         src = assets[cut["source"]]
         dur = round(cut["out_sec"] - cut["in_sec"], 3)
         raw = f"seg/{i:02d}.raw.mp4"
         out = f"seg/{i:02d}.mp4"
+        seg = round(_span(em, i) + (XF if i < n_cuts - 1 else 0), 3)  # overlap so the dissolve eats no beat time
+        seg_durs.append(seg)
+        out_sec = cut["out_sec"] + (XF if i < n_cuts - 1 and src["kind"] == "still" else 0)
         steps.append({"op": "cut", "args": {"source": src["path"], "kind": src["kind"], "in_sec": cut["in_sec"],
-                                            "out_sec": cut["out_sec"], "fps": FPS, "out": raw,
-                                            "pad_to_sec": round(_span(em, i), 3) if cut.get("hold_last_frame") else None}})
+                                            "out_sec": out_sec, "fps": FPS, "out": raw,
+                                            "pad_to_sec": seg if (cut.get("hold_last_frame") or src["kind"] == "video") else None}})
         steps.append({"op": "scale", "args": {"input": raw, "out": out, "width": W, "height": H, "fps": FPS,
-                                              "motion": cut.get("motion", "none"), "duration_sec": round(_span(em, i), 3)}})
+                                              "motion": cut.get("motion", "none"), "duration_sec": seg,
+                                              "intensity": 0.45 if studio else 1.0}})
         segs.append(out)
 
-    steps.append({"op": "concat", "args": {"inputs": segs, "out": "picture.mp4", "fps": FPS}})
+    steps.append({"op": "concat", "args": {"inputs": segs, "out": "picture.mp4", "fps": FPS,
+                                           "transition": "dissolve" if dissolve else "cut", "xfade_sec": XF,
+                                           "durations": seg_durs}})
 
     titles = []
     for i, cut in enumerate(em.get("cuts", [])):
         if cut.get("title"):
             s = cut.get("start_sec", 0)
-            titles.append({"text": cut["title"], "start_sec": s + 0.1, "end_sec": s + min(2.2, _span(em, i))})
+            span = _span(em, i)
+            hold = span - 0.15 if studio else min(2.2, span)  # studio headlines live for the whole beat
+            titles.append({"text": cut["title"], "start_sec": s + (0.15 if studio else 0.1), "end_sec": s + max(hold, 0.6)})
     steps.append({"op": "overlay_text", "args": {"input": "picture.mp4", "out": "picture.ov.mp4", "width": W, "height": H,
                                                  "overlays": em.get("overlays", []), "titles": titles,
+                                                 "theme": "studio" if studio else "bold",
                                                  "duration_sec": em["duration_sec"]}})
     video = "picture.ov.mp4"
     if em.get("captions"):
         steps.append({"op": "burn_captions", "args": {"input": video, "out": "picture.cap.mp4", "width": W, "height": H,
-                                                      "style": em.get("caption_style", "kinetic"),
+                                                      "style": em.get("caption_style", "kinetic") if em.get("caption_style") != "none" else "plain",
                                                       "captions": em["captions"]}})
         video = "picture.cap.mp4"
 
@@ -176,16 +191,19 @@ def _safe(work: Path, rel: str) -> Path:
     return p
 
 
-def _motion_filter(motion: str, w: int, h: int, fps: float, dur: float) -> str:
+def _motion_filter(motion: str, w: int, h: int, fps: float, dur: float, k: float = 1.0) -> str:
     frames = max(int(dur * fps), 1)
     # upscale first so zoompan has pixels to move through without shimmer
     pre = f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2}"
+    zi, zp, zd = 0.12 * k, 1 + 0.10 * k, 1 + 0.08 * k
+    # ease in-out (smoothstep) on the progress term: motion starts and lands softly
+    e = "(3*pow(on/{n},2)-2*pow(on/{n},3))"
     z = {
-        "push_in": ("1.0+0.12*on/{n}", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
-        "push_out": ("1.12-0.12*on/{n}", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
-        "pan_left": ("1.10", "(iw-iw/zoom)*(1-on/{n})", "ih/2-(ih/zoom/2)"),
-        "pan_right": ("1.10", "(iw-iw/zoom)*on/{n}", "ih/2-(ih/zoom/2)"),
-        "drift_up": ("1.08", "iw/2-(iw/zoom/2)", "(ih-ih/zoom)*(1-on/{n})"),
+        "push_in": (f"1.0+{zi:.4f}*{e}", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
+        "push_out": (f"{1 + zi:.4f}-{zi:.4f}*{e}", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
+        "pan_left": (f"{zp:.4f}", f"(iw-iw/zoom)*(1-{e})", "ih/2-(ih/zoom/2)"),
+        "pan_right": (f"{zp:.4f}", f"(iw-iw/zoom)*{e}", "ih/2-(ih/zoom/2)"),
+        "drift_up": (f"{zd:.4f}", "iw/2-(iw/zoom/2)", f"(ih-ih/zoom)*(1-{e})"),
     }.get(motion)
     if not z:
         return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps}"
@@ -228,7 +246,7 @@ def _op_cut(work: Path, a: dict) -> None:
 
 def _op_scale(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
-    vf = _motion_filter(a.get("motion", "none"), a["width"], a["height"], a["fps"], a["duration_sec"])
+    vf = _motion_filter(a.get("motion", "none"), a["width"], a["height"], a["fps"], a["duration_sec"], a.get("intensity") or 1.0)
     media.run(["-i", str(src), "-vf", vf + f",trim=duration={a['duration_sec']:.3f},format=yuv420p",
                "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14", str(out)])
 
@@ -238,8 +256,18 @@ def _op_concat(work: Path, a: dict) -> None:
     args: list[str] = []
     for p in ins:
         args += ["-i", str(p)]
-    filt = "".join(f"[{i}:v]settb=AVTB,fps={a['fps']}[v{i}];" for i in range(len(ins)))
-    filt += "".join(f"[v{i}]" for i in range(len(ins))) + f"concat=n={len(ins)}:v=1:a=0[out]"
+    filt = "".join(f"[{i}:v]settb=AVTB,fps={a['fps']:g},format=yuv420p[v{i}];" for i in range(len(ins)))
+    durs = [float(d) for d in a.get("durations") or []]
+    xf = a.get("xfade_sec") or 0.0
+    if a.get("transition") == "dissolve" and xf > 0 and len(ins) > 1 and len(durs) == len(ins):
+        prev, total = "v0", durs[0]
+        for i in range(1, len(ins)):
+            label = "out" if i == len(ins) - 1 else f"x{i}"
+            filt += f"[{prev}][v{i}]xfade=transition=fade:duration={xf:.3f}:offset={total - xf:.3f}[{label}];"
+            prev, total = label, total + durs[i] - xf
+        filt = filt.rstrip(";")
+    else:
+        filt += "".join(f"[v{i}]" for i in range(len(ins))) + f"concat=n={len(ins)}:v=1:a=0[out]"
     media.run([*args, "-filter_complex", filt, "-map", "[out]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14",
                str(_safe(work, a["out"]))])
 
@@ -248,9 +276,11 @@ def _op_overlay_text(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
     W, H, D = a["width"], a["height"], a["duration_sec"]
     ass_path = work / "overlay.ass"
-    ass_path.write_text(ass.overlay_events(a.get("overlays", []), a.get("titles", []), W, H))
+    studio = a.get("theme") == "studio"
+    ass_path.write_text(ass.studio_titles(a.get("titles", []), W, H) if studio
+                        else ass.overlay_events(a.get("overlays", []), a.get("titles", []), W, H))
     bar = any(o["kind"] == "progress_bar" for o in a.get("overlays", []))
-    fonts = "/usr/share/fonts/truetype/google-fonts"
+    fonts = ass.STUDIO_FONTS if studio else "/usr/share/fonts/truetype/google-fonts"
     if bar:
         bh = max(8, H // 240)
         filt = (f"[0:v]subtitles=overlay.ass:fontsdir={fonts}[t];"
@@ -265,8 +295,11 @@ def _op_overlay_text(work: Path, a: dict) -> None:
 
 def _op_burn_captions(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
-    (work / "captions.ass").write_text(ass.kinetic(a["captions"], a["width"], a["height"]))
-    media.run(["-i", src.name, "-vf", "subtitles=captions.ass:fontsdir=/usr/share/fonts/truetype/google-fonts",
+    studio = a.get("style") == "studio"
+    (work / "captions.ass").write_text(ass.studio_captions(a["captions"], a["width"], a["height"]) if studio
+                                       else ass.kinetic(a["captions"], a["width"], a["height"]))
+    fonts = ass.STUDIO_FONTS if studio else "/usr/share/fonts/truetype/google-fonts"
+    media.run(["-i", src.name, "-vf", f"subtitles=captions.ass:fontsdir={fonts}",
                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14", out.name], cwd=work)
     (work / "captions.srt").write_text(_srt(a["captions"]))
 

@@ -111,7 +111,8 @@ def run(job: Job, *, force: bool = False) -> dict:
             prompt = f"{beat.get('visual_cue') or beat['text']}. {_style(data)}"
             still = work / "beats" / f"{bid}.still.png"
             p, res = _gen(job, "image", "image", prompt, still, width=W, height=H,
-                          title=beat.get("on_screen") or beat["text"], palette=i)
+                          title=beat.get("on_screen") or beat["text"], palette=i,
+                          style=(data.get("edit") or {}).get("theme", "studio"))
             add(id=f"{bid}.still", kind="still", role="visual", beat_id=bid, path=f"beats/{bid}.still.png",
                 rights=_rights(data), provider=p.name, model=res.model, prompt=prompt, synthetic=True,
                 probe=media.summarize(still))
