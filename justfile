@@ -12,4 +12,8 @@ eval:
 lint:
 	python3 scripts/lint_docs.py
 
-ci: check eval lint
+# engine tests, including one local end-to-end render (needs ffmpeg)
+test:
+	python3 -m pytest -q
+
+ci: check eval lint test

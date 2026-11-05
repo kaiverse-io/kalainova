@@ -4,7 +4,7 @@ Loops for the plan in `docs/consolidation.md`. The premortem is `docs/explanatio
 
 Rank, after that premortem:
 
-- **Peers.** Funded cut, owned master, generated. A job is one of these.
+- **Peers.** Funded cut, owned master, generated, client. A job is one of these.
 - **Extensions.** Audio-native, text pack, procedural, downstream SKU. Not peers. They do not count as the first proof, and procedural plus SKU stay shut until a job is `accepted` or `measured`.
 
 The engine does not rank by topic. It ranks by whether a proof exists.
@@ -75,6 +75,12 @@ A prompt or a script packet becomes a new piece: voice, picture, captions, or an
 5. Kill the loop when cost per piece times a month of posts is higher than anything the measure log supports.
 
 Do not run a "comment a word, get a guide" call to action until the guide exists as a file.
+
+## 3b. Client
+
+The studio makes media for a business: ad creative, explainers, localization. The client supplies the brief, brand kit, and product material, and holds rights to the output (`rights: licensed`, contract reference in the job folder). The deliverable goes to the client, or posts to the client's own accounts with their approval. `distribution_identity` is the client label.
+
+**Loop.** One pilot pack (3 to 5 pieces) at a fixed price, client review, then a monthly retainer. Track first-review acceptance per client.
 
 ## 4. Procedural
 

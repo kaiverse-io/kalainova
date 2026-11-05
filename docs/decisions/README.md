@@ -10,3 +10,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0004](0004-human-publishes.md) | A human publishes; agents stop at the gate |
 | [0005](0005-three-peers.md) | Three peers; extensions are not the first proof |
 | [0006](0006-not-a-copier-service.md) | This repo is not a Copier Python service |
+| [0007](0007-own-the-compile-path.md) | Own the ffmpeg compile path; auto-post only bytes a human approved (proposed) |

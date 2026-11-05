@@ -14,15 +14,15 @@ The brief for the next agent is `CLAUDE_HANDOVER.md`. Read it before changing th
 
 A job. Not a niche, and not a sample domain checked into the tree.
 
-Read `docs/consolidation.md`, then `docs/strategies.md`. Pick **one** peer way (funded cut, owned master, or generated). Copy `jobs/_template` to `jobs/<id>/`. The subject the operator asked for goes in that job's own files. Do not add the subject to `README.md`, `ARCHITECTURE.md`, schemas, or strategy docs. Do not open an extension, a format, or a compiler until one job is `accepted` or `measured`.
+Read `docs/consolidation.md`, then `docs/strategies.md`. Pick **one** peer way (funded cut, owned master, or generated). Copy `jobs/_template` to `jobs/<id>/`. The subject the operator asked for goes in that job's own files. Do not add the subject to `README.md`, `ARCHITECTURE.md`, schemas, or strategy docs. Do not open `procedural` or `downstream-sku` until one job is `accepted` or `measured`. The studio plan is `docs/studio.md`.
 
 ## Planes
 
 - **Guardrails.** This file, `ARCHITECTURE.md`, `docs/decisions/`, `justfile` (`just ci`), `scripts/check.py`, `scripts/lint_docs.py`, pre-commit.
 - **One strategy per job.** Do not cross strategies inside one job folder.
 - **One distribution identity per strategy.** A funded-clip post never goes out on an identity used for owned or generated work.
-- **Humans gate publish.** Agents do not upload, and they do not submit a campaign URL.
-- **Rent first.** Do not add a compiler, a renderer, or a shared pipeline until one job has `status: accepted` or `status: measured`.
+- **Humans gate publish.** A human approves every piece (`kalainova approve`). Agents never write `approval.json`; `kalainova publish` posts only the approved, QA-checked bytes (ADR 0007). Agents never submit a campaign URL.
+- **Rent the models, own the line.** The ffmpeg compile path is owned (ADR 0007): `python3 -m kalainova make <job>`. Rented models make the bytes, swapped in `config/studio.yaml`. Procedural formats and SKUs still wait for a proof.
 
 ## Forbidden
 

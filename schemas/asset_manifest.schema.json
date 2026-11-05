@@ -4,36 +4,111 @@
   "title": "Asset manifest",
   "description": "Pointers to local media. Bytes stay out of git.",
   "type": "object",
-  "required": ["schema_version", "job_id", "assets"],
+  "required": [
+    "schema_version",
+    "job_id",
+    "assets"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "0.1" },
-    "job_id": { "type": "string", "minLength": 1 },
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "assets": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "kind", "path"],
+        "required": [
+          "id",
+          "kind",
+          "path"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string" },
-          "kind": { "enum": ["video", "audio", "still", "text"] },
-          "path": { "type": "string", "minLength": 1 },
-          "duration_sec": { "type": "number", "minimum": 0 },
-          "rights": { "enum": ["funded-brief", "owned", "licensed"] },
-          "prompt": { "type": "string" },
-          "model": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "video",
+              "audio",
+              "still",
+              "text"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "duration_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "rights": {
+            "enum": [
+              "funded-brief",
+              "owned",
+              "licensed"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
           "probe": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "width": { "type": "integer", "minimum": 1 },
-              "height": { "type": "integer", "minimum": 1 },
-              "fps": { "type": "number", "minimum": 0 },
-              "sample_rate_hz": { "type": "integer", "minimum": 1 },
-              "channels": { "type": "integer", "minimum": 1 }
+              "width": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "fps": {
+                "type": "number",
+                "minimum": 0
+              },
+              "sample_rate_hz": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "channels": {
+                "type": "integer",
+                "minimum": 1
+              }
             }
+          },
+          "role": {
+            "enum": [
+              "voice",
+              "visual",
+              "music",
+              "sfx",
+              "other"
+            ]
+          },
+          "beat_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "cost": {
+            "type": "number",
+            "minimum": 0
+          },
+          "synthetic": {
+            "type": "boolean"
           }
         }
       }
@@ -43,15 +118,60 @@
       "description": "Word timings. A cut must not land inside an interval.",
       "items": {
         "type": "object",
-        "required": ["start_sec", "end_sec", "text"],
+        "required": [
+          "start_sec",
+          "end_sec",
+          "text"
+        ],
         "additionalProperties": false,
         "properties": {
-          "start_sec": { "type": "number", "minimum": 0 },
-          "end_sec": { "type": "number", "minimum": 0 },
-          "text": { "type": "string" },
-          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          "start_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
         }
       }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "beat_id",
+          "start_sec",
+          "end_sec"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "duration_sec": {
+      "type": "number",
+      "minimum": 0
     }
   }
 }

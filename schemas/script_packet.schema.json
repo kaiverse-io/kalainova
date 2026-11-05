@@ -3,44 +3,127 @@
   "$id": "kalainova/script_packet-0.1.json",
   "title": "Script packet",
   "type": "object",
-  "required": ["schema_version", "job_id", "beats"],
+  "required": [
+    "schema_version",
+    "job_id",
+    "beats"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "0.1" },
-    "job_id": { "type": "string", "minLength": 1 },
-    "title": { "type": "string" },
-    "target_duration_sec": { "type": "number", "minimum": 0 },
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "target_duration_sec": {
+      "type": "number",
+      "minimum": 0
+    },
     "beats": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "role", "text"],
+        "required": [
+          "id",
+          "role",
+          "text"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string" },
-          "role": { "enum": ["hook", "body", "payoff", "cta"] },
-          "text": { "type": "string" },
-          "visual_cue": { "type": "string" },
-          "audio_cue": { "type": "string" }
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "hook",
+              "body",
+              "payoff",
+              "cta"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "visual_cue": {
+            "type": "string"
+          },
+          "audio_cue": {
+            "type": "string"
+          },
+          "on_screen": {
+            "type": "string"
+          },
+          "visual_kind": {
+            "enum": [
+              "still",
+              "video"
+            ]
+          },
+          "emphasis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       }
     },
     "hooks": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "claims": {
       "type": "array",
       "description": "Every factual statement in the beats. Empty if the piece states no fact.",
       "items": {
         "type": "object",
-        "required": ["id", "statement", "source"],
+        "required": [
+          "id",
+          "statement",
+          "source"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string" },
-          "statement": { "type": "string" },
-          "source": { "type": "string", "minLength": 1 }
+          "id": {
+            "type": "string"
+          },
+          "statement": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "format": {
+      "type": "string"
+    },
+    "publish": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string"
+        },
+        "hashtags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }
