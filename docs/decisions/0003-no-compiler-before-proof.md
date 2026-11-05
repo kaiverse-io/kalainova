@@ -1,6 +1,6 @@
 # 0003. No compiler, second format, or SKU before a proof
 
-Status: accepted · 2026-11-05
+Status: accepted · 2026-11-05 · amended by 0007 when it is accepted
 
 ## Context
 

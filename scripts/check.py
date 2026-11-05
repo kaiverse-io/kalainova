@@ -22,6 +22,7 @@ STRATEGIES = {
     "funded-clip",
     "owned-derivative",
     "generated",
+    "client",
     "procedural",
     "audio-native",
     "text-pack",
@@ -30,8 +31,8 @@ STRATEGIES = {
 EXTENSIONS_AFTER_PROOF = {"procedural", "downstream-sku"}
 KINDS = {"video", "audio", "still", "text"}
 RIGHTS = {"funded-brief", "owned", "licensed"}
-RIGHTS_FOR = {"funded-clip": {"funded-brief"}, "owned-derivative": {"owned", "licensed"}}
-STATUSES = {"template", "draft", "rented", "rendered", "accepted", "measured", "killed"}
+RIGHTS_FOR = {"funded-clip": {"funded-brief"}, "owned-derivative": {"owned", "licensed"}, "client": {"licensed"}}
+STATUSES = {"template", "draft", "rented", "rendered", "approved", "published", "accepted", "measured", "killed"}
 PROVEN = {"accepted", "measured"}
 FORMATS = {"list", "comparison", "countdown", "alert", "poll", "recap", "quote", "stat"}
 OPS = {"cut", "concat", "scale", "overlay_text", "mix_audio", "loudnorm", "burn_captions", "export"}
@@ -44,6 +45,9 @@ CONTRACT = {
     "edit_manifest.json": "edit_manifest",
     "render_plan.json": "render_plan",
     "measure.json": "measure",
+    "qa.json": "qa",
+    "approval.json": "approval",
+    "publish_log.json": "publish_log",
 }
 
 errors: list[str] = []
@@ -154,6 +158,11 @@ def check_job(path: Path, data: dict, any_proven: bool) -> None:
         fail(f"{rel(path)}: unknown format")
     if status in PROVEN and not (path.parent / "measure.json").exists():
         fail(f"{rel(path)}: status {status} needs measure.json")
+    for st, files in {"approved": ["qa.json", "approval.json"], "published": ["qa.json", "approval.json", "publish_log.json"]}.items():
+        if status == st:
+            for name in files:
+                if not (path.parent / name).exists():
+                    fail(f"{rel(path)}: status {st} needs {name}")
 
 
 def check_script(path: Path, data: dict) -> None:
@@ -219,9 +228,13 @@ def check_edit(path: Path, data: dict) -> None:
 
 
 def check_render(path: Path, data: dict, any_proven: bool) -> None:
+    """ADR 0007: the owned ffmpeg compiler exists, so a render plan is legal when it was compiled from an
+    ffmpeg edit manifest in the same job. A plan for a rented-tool job still means a compiler snuck in."""
     shape(data, "render_plan", path)
-    if not any_proven:
-        fail(f"{rel(path)}: a render plan is compiler output; no compiler before one job is accepted or measured")
+    em = path.parent / "edit_manifest.json"
+    runtime = (json.loads(em.read_text()).get("runtime") if em.exists() else None)
+    if runtime != "ffmpeg":
+        fail(f"{rel(path)}: a render plan needs an edit_manifest with runtime ffmpeg (the owned compiler, ADR 0007)")
     steps = data.get("steps")
     if not isinstance(steps, list) or not steps:
         fail(f"{rel(path)}: steps must be a non-empty list")
@@ -233,6 +246,21 @@ def check_render(path: Path, data: dict, any_proven: bool) -> None:
 
 def check_measure(path: Path, data: dict) -> None:
     shape(data, "measure", path)
+
+
+def check_approval(path: Path, data: dict) -> None:
+    """An approval binds to the exact bytes QA passed."""
+    shape(data, "approval", path)
+    qa_path = path.parent / "qa.json"
+    if not qa_path.exists():
+        fail(f"{rel(path)}: approval without qa.json")
+        return
+    qa = load(qa_path)
+    if qa.get("passed") is not True:
+        fail(f"{rel(path)}: approval exists but qa.json did not pass")
+    checked = (qa.get("artifacts_sha256") or {}).get("video")
+    if checked != data.get("artifact_sha256"):
+        fail(f"{rel(path)}: approved sha256 is not the file QA checked")
 
 
 # ------------------------------------------------------------------ a jobs tree
@@ -269,6 +297,10 @@ def check_tree(jobs_root: Path) -> None:
                 check_render(path, data, any_proven)
             elif kind == "measure":
                 check_measure(path, data)
+            elif kind == "approval":
+                check_approval(path, data)
+            elif kind in ("qa", "publish_log"):
+                shape(data, kind, path)
     for ident, strategies in sorted(identities.items()):
         if len(strategies) > 1:
             fail(f"distribution_identity {ident!r} is used by {sorted(strategies)}; one identity per strategy")

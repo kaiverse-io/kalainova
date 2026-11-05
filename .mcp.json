@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "fal": { "type": "http", "url": "https://mcp.fal.ai/mcp-relay" },
+    "elevenlabs": {
+      "command": "uvx",
+      "args": ["elevenlabs-mcp"],
+      "env": { "ELEVENLABS_API_KEY": "${ELEVENLABS_API_KEY}" }
+    },
+    "exa": { "type": "http", "url": "https://mcp.exa.ai/mcp" },
+    "assemblyai": { "type": "http", "url": "https://mcp.assemblyai.com/mcp" },
+    "upload-post": {
+      "type": "http",
+      "url": "https://mcp.upload-post.com/mcp",
+      "headers": { "Authorization": "Apikey ${UPLOAD_POST_API_KEY}" }
+    },
+    "airtable": { "type": "http", "url": "https://mcp.airtable.com/mcp" }
+  }
+}

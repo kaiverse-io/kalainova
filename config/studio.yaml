@@ -1,0 +1,49 @@
+# Kalainova studio config. Swap models here, not in code.
+# Preference: first provider with a key wins; "local" is always the last fallback.
+# Prices are estimates for the job cost cap; the invoice is the truth. Re-check monthly.
+
+preference:
+  llm: [anthropic]
+  voice: [elevenlabs]
+  image: [fal]
+  video: [fal]
+  music: [elevenlabs, fal]
+  sfx: [elevenlabs]
+  transcribe: [fal]
+
+models:
+  anthropic:
+    llm: claude-opus-5-5
+  elevenlabs:
+    voice: eleven_v4_turbo            # Eleven v4 Turbo: #2 TTS arena, half v4's price. Premium: eleven_v4. VERIFY id in ElevenLabs docs.
+    voice_id: JBFqnCBsd6RMkjVDRZzb   # replace with your house voice
+    music: music_v1
+  fal:
+    # Slugs: confirm with the fal MCP search_models/get_model_schema before first paid run.
+    image: fal-ai/nano-banana-2.1                   # default; premium = GPT Image 2.5 via OpenAI
+    video: fal-ai/wan/v3/text-to-video              # Wan 3.0: #1 AA T2V, $0.20/s at 1080p
+    image_to_video: fal-ai/wan/v3/image-to-video    # premium = Seedance 2.5 / Kling 4.0
+    video_durations: "5,10"                         # seconds the model accepts; VERIFY per model
+    image_to_video_durations: "5,10"
+    music: fal-ai/lyria3                            # Lyria 3 Pro ~$0.08/song; alt ElevenLabs Music v2
+    transcribe: fal-ai/whisper     # swap for ElevenLabs Scribe v2 (2.2% WER) when added
+
+prices:
+  anthropic:
+    llm: {input_per_mtok: 15.0, output_per_mtok: 75.0}
+  elevenlabs:
+    voice: {per_kchar: 0.04}       # v4 Turbo $40 / 1M chars
+    music: {per_min: 0.80}
+    sfx: {per_min: 0.50}
+  fal:
+    image: {per_image: 0.05}       # Nano Banana 2.1 2K
+    video: {per_sec: 0.20}         # Wan 3.0 1080p
+    image_to_video: {per_sec: 0.20}
+    music: {per_track: 0.08}
+    transcribe: {per_min: 0.01}
+
+profiles:
+  short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
+  square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
+  landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
+  podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
