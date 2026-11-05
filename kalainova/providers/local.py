@@ -79,7 +79,77 @@ class LocalProvider(Provider):
         return Result(path=dst, model=f"flite-{v}", words=estimate_words(text, dur), meta={"duration_sec": dur})
 
     def image(self, prompt: str, dst: Path, *, width: int, height: int, title: str = "", palette: int | None = None, **kw) -> Result:
-        """A designed typographic card: gradient, grain, geometry, headline."""
+        if kw.get("style", "studio") == "studio":
+            return self._studio_field(prompt, dst, width=width, height=height, palette=palette)
+        return self._typecard(prompt, dst, width=width, height=height, title=title, palette=palette)
+
+    # Studio palettes: (base, light A, light B). Deep near-black base, two luminous fields.
+    STUDIO = {
+        "blue": ((4, 6, 14), (40, 110, 255), (120, 200, 255)),
+        "sunset": ((10, 4, 4), (255, 90, 40), (255, 170, 80)),
+        "spectrum": ((6, 6, 10), (120, 90, 255), (60, 210, 200)),
+        "dusk": ((6, 4, 14), (120, 70, 220), (240, 110, 170)),
+        "green": ((3, 10, 7), (40, 200, 140), (180, 240, 120)),
+        "silver": ((8, 8, 10), (150, 160, 180), (230, 232, 240)),
+        "red": ((12, 3, 4), (230, 40, 60), (255, 120, 90)),
+    }
+    CUES = [
+        ("sunset", "sunset sunrise orange warm red-orange dawn fire golden"),
+        ("red", "red crimson danger alert"),
+        ("dusk", "dusk night purple violet calm evening dream"),
+        ("blue", "blue sky noon ocean water cool air atmosphere"),
+        ("green", "green nature growth plant forest money"),
+        ("spectrum", "prism light white color rainbow spectrum split"),
+        ("silver", "metal steel silver data tech minimal"),
+    ]
+
+    def _palette_for(self, prompt: str, palette: int | None) -> str:
+        low = prompt.lower()
+        hits = [(low.find(w), name) for name, words in self.CUES for w in words.split() if w in low]
+        if hits:
+            return min(hits)[1]
+        names = list(self.STUDIO)
+        return names[(palette or int(hashlib.sha1(prompt.encode()).hexdigest()[:6], 16)) % len(names)]
+
+    def _studio_field(self, prompt: str, dst: Path, *, width: int, height: int, palette: int | None) -> Result:
+        """Keynote-style background: near-black, two soft luminous fields, gentle vignette, dithered."""
+        import numpy as np
+        from PIL import Image
+
+        name = self._palette_for(prompt, palette)
+        base, ca, cb = (np.array(c, dtype=np.float32) / 255 for c in self.STUDIO[name])
+        rnd = random.Random(int(hashlib.sha1(prompt.encode()).hexdigest()[:8], 16))
+        w, h = width // 2, height // 2  # render at half size; the smooth field upsamples cleanly
+        y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+        x /= w
+        y /= h
+        img = np.broadcast_to(base, (h, w, 3)).copy()
+
+        def field(cx, cy, rx, ry, color, strength):
+            d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2
+            return np.exp(-d)[..., None] * color * strength
+
+        # 1. a low, wide pool of light; 2. a smaller offset glow; 3. one flowing ribbon. Black does the rest.
+        img += field(rnd.uniform(0.35, 0.65), rnd.uniform(1.02, 1.1), 0.9, 0.24, ca, 0.85)
+        img += field(rnd.uniform(0.2, 0.8), rnd.uniform(0.86, 0.92), 0.35, 0.10, cb, 0.35)
+        phase, amp, yc = rnd.uniform(0, 6.28), rnd.uniform(0.03, 0.06), rnd.uniform(0.80, 0.86)
+        curve = yc + amp * np.sin(x * rnd.uniform(3.0, 5.0) + phase) + 0.10 * (x - 0.5) ** 2
+        dist = np.abs(y - curve)
+        ribbon = np.exp(-(dist / 0.006) ** 2) * 0.9 + np.exp(-(dist / 0.03) ** 2) * 0.35  # bright core + soft bloom
+        fade = np.exp(-((x - 0.5) / 0.55) ** 4)  # ribbon dissolves toward the edges
+        img += (ribbon * fade)[..., None] * (0.55 * ca + 0.45 * cb + 0.25)
+        vign = 1 - 0.6 * (((x - 0.5) / 0.8) ** 2 + ((y - 0.55) / 0.85) ** 2)
+        img *= np.clip(vign, 0.25, 1)[..., None]
+        # roll off highlights by luminance only, so hues stay saturated
+        lum = img.max(axis=2, keepdims=True)
+        img *= np.where(lum > 0.85, (0.85 + 0.15 * np.tanh((lum - 0.85) / 0.15)) / np.maximum(lum, 1e-6), 1.0)
+        img += np.random.default_rng(1).uniform(-1.5 / 255, 1.5 / 255, img.shape)  # dither against banding
+        out = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8)).resize((width, height), Image.LANCZOS)
+        out.save(dst)
+        return Result(path=dst, model="local-studio-field", meta={"palette": name})
+
+    def _typecard(self, prompt: str, dst: Path, *, width: int, height: int, title: str = "", palette: int | None = None) -> Result:
+        """Bold style: a designed typographic card with a baked headline."""
         from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
         seed = int(hashlib.sha1(prompt.encode()).hexdigest()[:8], 16)

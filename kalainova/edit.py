@@ -15,6 +15,8 @@ from . import config
 from .jobfs import Job
 
 MOTIONS = ["push_in", "pan_left", "push_out", "pan_right", "drift_up"]
+STUDIO_MOTIONS = ["push_in", "drift_up", "push_in", "pan_right", "push_out"]  # slow, mostly forward
+THEMES = ("studio", "bold")
 
 
 def caption_cards(words: list[dict], emphasis: set[str], max_words: int = 3, max_chars: int = 14) -> list[dict]:
@@ -39,6 +41,20 @@ def caption_cards(words: list[dict], emphasis: set[str], max_words: int = 3, max
         if re.search(r"[.!?,;:]$", w["text"]):
             flush()
     flush()
+    # no orphans: fold a lone-word card into its neighbour when the line still fits
+    merged: list[dict] = []
+    for card in cards:
+        if merged and len(card["words"]) == 1 and len(merged[-1]["text"]) + 1 + len(card["text"]) <= max_chars + 6 \
+                and card["start_sec"] - merged[-1]["end_sec"] < 0.35:
+            prev = merged[-1]
+            prev["words"] += card["words"]
+            prev["text"] = f"{prev['text']} {card['text']}"
+            prev["end_sec"] = card["end_sec"]
+            if card.get("emphasis"):
+                prev["emphasis"] = prev.get("emphasis", []) + card["emphasis"]
+            continue
+        merged.append(card)
+    cards = merged
     # close tiny gaps so captions don't flicker
     for a, b in zip(cards, cards[1:]):
         if 0 < b["start_sec"] - a["end_sec"] < 0.25:
@@ -56,6 +72,8 @@ def run(job: Job, *, force: bool = False) -> dict:
     prof = config.profile(data.get("profile") or "short-9x16")
     by_id = {a["id"]: a for a in am["assets"]}
     beats = {b["id"]: b for b in packet["beats"]}
+    theme = opts.get("theme", "studio")
+    studio = theme == "studio"
 
     cuts = []
     for i, span in enumerate(am["timeline"]):
@@ -68,24 +86,25 @@ def run(job: Job, *, force: bool = False) -> dict:
         cut = {"id": f"cut-{bid}", "source": src["id"], "in_sec": 0, "out_sec": dur, "role": beat["role"],
                "start_sec": span["start_sec"]}
         if src["kind"] == "still":
-            cut["motion"] = MOTIONS[i % len(MOTIONS)]
+            cut["motion"] = (STUDIO_MOTIONS if studio else MOTIONS)[i % len(MOTIONS)]
         if src["kind"] == "video" and src.get("duration_sec", dur) < dur:
             cut["out_sec"] = round(src["duration_sec"], 3)
             cut["hold_last_frame"] = True
-        # typecards already carry the headline; titles only go over generated imagery/video
-        if beat.get("on_screen") and i > 0 and src.get("model") != "local-typecard":
+        # bold typecards bake their headline; everything else gets an animated title (studio: every beat)
+        if beat.get("on_screen") and src.get("model") != "local-typecard" and (studio or i > 0):
             cut["title"] = beat["on_screen"]
         cuts.append(cut)
 
     emphasis = {re.sub(r"\W", "", w).lower() for b in packet["beats"] for w in b.get("emphasis", [])}
-    captions = caption_cards(am.get("words", []), emphasis) if opts.get("captions", True) else []
+    cw, cc = (4, 22) if studio else (3, 14)
+    captions = caption_cards(am.get("words", []), emphasis, cw, cc) if opts.get("captions", True) else []
 
     overlays = []
     hook = packet["beats"][0]
     hook_text = hook.get("on_screen") or (packet.get("hooks") or [hook["text"]])[0]
-    if hook_text:
+    if hook_text and not studio:  # studio: the first beat's hero title is the hook, never a second card
         overlays.append({"kind": "hook_card", "text": hook_text, "start_sec": 0, "end_sec": min(1.6, am["duration_sec"])})
-    if opts.get("progress_bar", True):
+    if opts.get("progress_bar", not studio):
         overlays.append({"kind": "progress_bar", "start_sec": 0, "end_sec": am["duration_sec"]})
 
     audio: dict = {}
@@ -93,9 +112,9 @@ def run(job: Job, *, force: bool = False) -> dict:
         audio["voice_asset_id"] = "voice"
     if "music" in by_id:
         audio["music_asset_id"] = "music"
-        audio["music_gain_db"] = float(opts.get("music_gain_db", -19))
+        audio["music_gain_db"] = float(opts.get("music_gain_db", -21 if studio else -19))
         audio["duck"] = True
-    if "whoosh" in by_id and opts.get("whoosh", True):
+    if "whoosh" in by_id and opts.get("whoosh", not studio):
         audio["sfx"] = [{"asset_id": "whoosh", "start_sec": max(0, c["start_sec"] - 0.25), "gain_db": -14} for c in cuts[1:]]
 
     manifest = {
@@ -111,7 +130,9 @@ def run(job: Job, *, force: bool = False) -> dict:
             "target_lufs": float(prof.get("target_lufs", -14)),
             "true_peak_dbtp_max": float(prof.get("true_peak_dbtp_max", -1)),
         },
-        "caption_style": opts.get("caption_style", "kinetic"),
+        "theme": theme,
+        "transition": opts.get("transition", "dissolve" if studio else "cut"),
+        "caption_style": opts.get("caption_style", "studio" if studio else "kinetic"),
         "cuts": cuts,
         "captions": captions,
         "overlays": overlays,
