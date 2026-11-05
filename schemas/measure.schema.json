@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/measure-0.1.json",
+  "title": "Measure",
+  "type": "object",
+  "required": ["schema_version", "job_id"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "job_id": { "type": "string", "minLength": 1 },
+    "posted_at": { "type": "string" },
+    "artifact_path": {
+      "type": "string",
+      "description": "Local path. Not committed."
+    },
+    "views_48h": { "type": "number", "minimum": 0 },
+    "accepted": {
+      "type": "boolean",
+      "description": "Funded-clip only. The marketplace is tracking the URL."
+    },
+    "cost": { "type": "number", "minimum": 0 },
+    "keep": { "type": "boolean" },
+    "notes": { "type": "string" }
+  }
+}

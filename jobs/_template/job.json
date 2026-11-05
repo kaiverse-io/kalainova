@@ -1,0 +1,12 @@
+{
+  "schema_version": "0.1",
+  "job_id": "_template",
+  "strategy": "generated",
+  "media": ["video", "audio", "text"],
+  "rights": "owned",
+  "distribution_identity": null,
+  "status": "template",
+  "skip_funded": false,
+  "cost_cap": null,
+  "parent_job_id": null
+}

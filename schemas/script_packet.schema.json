@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/script_packet-0.1.json",
+  "title": "Script packet",
+  "type": "object",
+  "required": ["schema_version", "job_id", "beats"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "job_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "target_duration_sec": { "type": "number", "minimum": 0 },
+    "beats": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "role", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "role": { "enum": ["hook", "body", "payoff", "cta"] },
+          "text": { "type": "string" },
+          "visual_cue": { "type": "string" },
+          "audio_cue": { "type": "string" }
+        }
+      }
+    },
+    "hooks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "claims": {
+      "type": "array",
+      "description": "Every factual statement in the beats. Empty if the piece states no fact.",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "statement": { "type": "string" },
+          "source": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

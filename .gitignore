@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+.DS_Store
+.env
+.env.*
+
+# Media stays local. scripts/check.py enforces this once the tree is a git repo.
+*.mp3
+*.mp4
+*.wav
+*.m4a
+*.mov
+*.webm
