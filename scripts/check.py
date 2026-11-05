@@ -48,6 +48,8 @@ CONTRACT = {
     "qa.json": "qa",
     "approval.json": "approval",
     "publish_log.json": "publish_log",
+    "footage.json": "footage",
+    "direction.json": "direction",
 }
 
 errors: list[str] = []
@@ -299,7 +301,7 @@ def check_tree(jobs_root: Path) -> None:
                 check_measure(path, data)
             elif kind == "approval":
                 check_approval(path, data)
-            elif kind in ("qa", "publish_log"):
+            elif kind in ("qa", "publish_log", "footage", "direction"):
                 shape(data, kind, path)
     for ident, strategies in sorted(identities.items()):
         if len(strategies) > 1:

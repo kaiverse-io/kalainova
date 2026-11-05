@@ -99,7 +99,8 @@ def run(job: Job) -> dict:
     # hook timing
     caps = em.get("captions", [])
     first = caps[0]["start_sec"] if caps else None
-    _check(checks, "hook.first_word", first is not None and first <= 0.6, f"first caption at {first}s", "warn")
+    if caps or am.get("words"):  # edits of silent footage carry no captions to time
+        _check(checks, "hook.first_word", first is not None and first <= 0.6, f"first caption at {first}s", "warn")
     hook_words = len(packet["beats"][0]["text"].split())
     _check(checks, "hook.length", hook_words <= 14, f"hook line {hook_words} words", "warn")
 
@@ -124,6 +125,12 @@ def run(job: Job) -> dict:
     metrics["synthetic"] = synthetic
     _check(checks, "disclosure.synthetic_flag", not synthetic or data.get("synthetic_disclosure", True),
            "synthetic assets present; publish must set the platform AI label")
+
+    # stock credits must reach the post, not just the job folder
+    if (job.folder / "stock.json").exists():
+        from .stock import credits
+        desc = (packet.get("publish") or {}).get("description", "")
+        _check(checks, "rights.stock_credit", credits(job) in desc, "stock credit line present in publish description")
 
     # rights
     rights_ok = all(a.get("rights", data.get("rights")) in ("owned", "licensed", "funded-brief") for a in am["assets"])

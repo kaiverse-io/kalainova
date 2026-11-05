@@ -8,7 +8,7 @@ last_reviewed: 2026-11-05
 
 Content generation engine for any subject. Video, audio, stills, and text. Inspired by `kaiverse-io/chassis` for the cockpit (this file, `just`, docs and ADRs, a contract eval, pre-commit, a devcontainer, the `open-a-job` skill). Do not copier-stamp a service into this repo.
 
-The brief for the next agent is `CLAUDE_HANDOVER.md`. Read it before changing the tree. Names that appear only in that file stay in that file.
+The brief for the next agent is `CLAUDE_HANDOVER.md`. Read it before changing the tree. Names that appear only in that file stay in that file. The handover predates ADR 0007: where it says "no compiler", the ADRs in `docs/decisions/` win. The current verdict and kill checks are in `docs/explanation/premortem-2026-11-05-studio.md`.
 
 ## What you are building
 

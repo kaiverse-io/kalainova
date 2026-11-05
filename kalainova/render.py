@@ -18,17 +18,29 @@ from .jobfs import ContractError, Job
 OPS = ("cut", "scale", "concat", "overlay_text", "mix_audio", "loudnorm", "burn_captions", "export")
 MOTIONS = ("none", "push_in", "push_out", "pan_left", "pan_right", "drift_up")
 PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")
+GRADES = ("natural", "warm", "cool", "teal_orange", "film", "bw", "vivid")
+# Grade looks: gentle, filmic, never crushed. Each is a fixed filter string; no value from a plan enters it.
+GRADE_FILTERS = {
+    "natural": "eq=contrast=1.04:saturation=1.06",
+    "warm": "colorbalance=rs=0.04:gs=0.01:bs=-0.05:rm=0.03:bm=-0.03:rh=0.02:bh=-0.03,eq=contrast=1.05:saturation=1.08",
+    "cool": "colorbalance=rs=-0.03:bs=0.05:rm=-0.02:bm=0.03,eq=contrast=1.05:saturation=0.98",
+    "teal_orange": "colorbalance=rs=-0.06:gs=0.0:bs=0.08:rh=0.07:gh=0.02:bh=-0.06,eq=contrast=1.08:saturation=1.1",
+    "film": "curves=m='0/0.035 0.25/0.22 0.5/0.5 0.75/0.78 1/0.96',eq=saturation=0.92,noise=alls=5:allf=t",
+    "bw": "hue=s=0,eq=contrast=1.12,curves=m='0/0.02 0.5/0.5 1/0.97'",
+    "vivid": "eq=contrast=1.08:saturation=1.22,unsharp=5:5:0.4",
+}
 
 # Closed arg spec per op. Every value is coerced to its type before it reaches ffmpeg, so a
 # model-written plan cannot smuggle filtergraph text through a number. Text (titles, captions)
 # only ever goes into .ass files, never into a filtergraph.
 SPEC = {
     "cut": {"source": "path", "kind": ("still", "video"), "in_sec": "num", "out_sec": "num", "fps": "num",
-            "out": "path", "pad_to_sec": "num?"},
+            "out": "path", "pad_to_sec": "num?", "speed": "num?", "audio_out": "path?", "audio_from_source": "bool?"},
     "scale": {"input": "path", "out": "path", "width": "int", "height": "int", "fps": "num",
-              "motion": MOTIONS, "duration_sec": "num", "intensity": "num?"},
+              "motion": MOTIONS, "duration_sec": "num", "intensity": "num?", "crop_x": "num?", "zoom": "num?",
+              "grade": GRADES + (None,), "gamma": "num?"},
     "concat": {"inputs": "paths", "out": "path", "fps": "num", "transition": ("cut", "dissolve", None),
-               "xfade_sec": "num?", "durations": "list"},
+               "xfade_sec": "num?", "durations": "list", "audio_inputs": "list", "audio_out": "path?"},
     "overlay_text": {"input": "path", "out": "path", "width": "int", "height": "int", "overlays": "list",
                      "titles": "list", "duration_sec": "num", "theme": ("studio", "bold", None)},
     "burn_captions": {"input": "path", "out": "path", "width": "int", "height": "int",
@@ -37,7 +49,8 @@ SPEC = {
                   "music_gain_db": "num?", "duck": "bool?", "sfx": "list"},
     "loudnorm": {"input": "path", "out": "path", "target_lufs": "num", "true_peak_dbtp_max": "num"},
     "export": {"video": "path", "audio": "path?", "out": "path", "crf": "int", "preset": PRESETS,
-               "thumbnail": "path?", "audio_only": "path?"},
+               "thumbnail": "path?", "audio_only": "path?", "fade_out_sec": "num?", "duration_sec": "num?",
+               "synthetic": "bool?"},
 }
 
 
@@ -52,7 +65,7 @@ def _coerce(op: str, args: dict, n: int) -> dict:
         optional = isinstance(kind, str) and kind.endswith("?")
         kind = kind.rstrip("?") if isinstance(kind, str) else kind
         if key not in args or args[key] is None:
-            if optional or kind in ("list",):
+            if optional or kind in ("list",) or (isinstance(kind, tuple) and None in kind):
                 out[key] = [] if kind == "list" else None
                 continue
             raise ContractError(f"step {n} ({op}): missing {key}")
@@ -84,9 +97,21 @@ def _coerce(op: str, args: dict, n: int) -> dict:
             raise ContractError(f"step {n} ({op}): {key}: {exc}") from exc
         out[key] = v
     for s in out.get("sfx") or []:
-        if not (isinstance(s, dict) and isinstance(s.get("path"), str)
+        if not (isinstance(s, dict) and isinstance(s.get("path"), str) and not s["path"].startswith("-")
                 and all(isinstance(s.get(k, 0), (int, float)) and not isinstance(s.get(k, 0), bool) for k in ("start_sec", "gain_db"))):
             raise ContractError(f"step {n} (mix_audio): malformed sfx entry")
+    for p in out.get("audio_inputs") or []:
+        if not isinstance(p, str) or not p or p.startswith("-"):
+            raise ContractError(f"step {n} (concat): malformed audio input")
+    for key in ("crop_x",):
+        if out.get(key) is not None and not 0 <= out[key] <= 1:
+            raise ContractError(f"step {n}: {key} out of range")
+    if out.get("speed") is not None and not 0.25 <= out["speed"] <= 4:
+        raise ContractError(f"step {n}: speed out of range")
+    if out.get("zoom") is not None and not 1 <= out["zoom"] <= 1.5:
+        raise ContractError(f"step {n}: zoom out of range")
+    if out.get("gamma") is not None and not 0.5 <= out["gamma"] <= 2:
+        raise ContractError(f"step {n}: gamma out of range")
     return out
 
 
@@ -104,6 +129,8 @@ def compile_plan(job: Job) -> dict:
     XF = 0.4 if dissolve else 0.0
     n_cuts = len(em.get("cuts", []))
     seg_durs: list[float] = []
+    seg_audio: list[str] = []
+    orig = bool(em.get("original_audio"))
 
     for i, cut in enumerate(em.get("cuts", [])):
         src = assets[cut["source"]]
@@ -112,18 +139,34 @@ def compile_plan(job: Job) -> dict:
         out = f"seg/{i:02d}.mp4"
         seg = round(_span(em, i) + (XF if i < n_cuts - 1 else 0), 3)  # overlap so the dissolve eats no beat time
         seg_durs.append(seg)
-        out_sec = cut["out_sec"] + (XF if i < n_cuts - 1 and src["kind"] == "still" else 0)
-        steps.append({"op": "cut", "args": {"source": src["path"], "kind": src["kind"], "in_sec": cut["in_sec"],
-                                            "out_sec": out_sec, "fps": FPS, "out": raw,
-                                            "pad_to_sec": seg if (cut.get("hold_last_frame") or src["kind"] == "video") else None}})
-        steps.append({"op": "scale", "args": {"input": raw, "out": out, "width": W, "height": H, "fps": FPS,
-                                              "motion": cut.get("motion", "none"), "duration_sec": seg,
-                                              "intensity": 0.45 if studio else 1.0}})
+        speed = float(cut.get("speed") or 1.0)
+        tail = XF if i < n_cuts - 1 else 0
+        if src["kind"] == "still":
+            out_sec = cut["out_sec"] + tail
+        else:  # take the dissolve overlap from the source when it exists; tpad covers the rest
+            out_sec = min(cut["out_sec"] + tail * speed, src.get("duration_sec", cut["out_sec"] + tail * speed))
+        cut_args = {"source": src["path"], "kind": src["kind"], "in_sec": cut["in_sec"], "out_sec": round(out_sec, 3),
+                    "fps": FPS, "out": raw, "pad_to_sec": seg if (cut.get("hold_last_frame") or src["kind"] == "video") else None}
+        if speed != 1.0:
+            cut_args["speed"] = speed
+        if orig:
+            cut_args["audio_out"] = f"seg/{i:02d}.wav"
+            cut_args["audio_from_source"] = bool(cut.get("keep_audio")) and speed == 1.0
+            cut_args["pad_to_sec"] = seg
+            seg_audio.append(cut_args["audio_out"])
+        steps.append({"op": "cut", "args": cut_args})
+        scale_args = {"input": raw, "out": out, "width": W, "height": H, "fps": FPS,
+                      "motion": cut.get("motion", "none"), "duration_sec": seg, "intensity": 0.45 if studio else 1.0}
+        for key in ("crop_x", "zoom", "grade", "gamma"):
+            if cut.get(key) is not None:
+                scale_args[key] = cut[key]
+        steps.append({"op": "scale", "args": scale_args})
         segs.append(out)
 
     steps.append({"op": "concat", "args": {"inputs": segs, "out": "picture.mp4", "fps": FPS,
                                            "transition": "dissolve" if dissolve else "cut", "xfade_sec": XF,
-                                           "durations": seg_durs}})
+                                           "durations": seg_durs, "audio_inputs": seg_audio,
+                                           "audio_out": "orig.wav" if seg_audio else None}})
 
     titles = []
     for i, cut in enumerate(em.get("cuts", [])):
@@ -131,7 +174,10 @@ def compile_plan(job: Job) -> dict:
             s = cut.get("start_sec", 0)
             span = _span(em, i)
             hold = span - 0.15 if studio else min(2.2, span)  # studio headlines live for the whole beat
-            titles.append({"text": cut["title"], "start_sec": s + (0.15 if studio else 0.1), "end_sec": s + max(hold, 0.6)})
+            item = {"text": cut["title"], "start_sec": s + (0.15 if studio else 0.1), "end_sec": s + max(hold, 0.6)}
+            if assets[cut["source"]].get("provider") == "operator":
+                item["scrim"] = True
+            titles.append(item)
     steps.append({"op": "overlay_text", "args": {"input": "picture.mp4", "out": "picture.ov.mp4", "width": W, "height": H,
                                                  "overlays": em.get("overlays", []), "titles": titles,
                                                  "theme": "studio" if studio else "bold",
@@ -145,24 +191,28 @@ def compile_plan(job: Job) -> dict:
 
     audio = None
     a = em.get("audio") or {}
-    if a:
+    if a or orig:
         mix = {"out": "mix.wav", "duration_sec": em["duration_sec"]}
         if a.get("voice_asset_id"):
             mix["voice"] = assets[a["voice_asset_id"]]["path"]
+        elif orig:
+            mix["voice"] = "orig.wav"  # the footage's own sound leads; music ducks under it
         if a.get("music_asset_id"):
             mix["music"] = assets[a["music_asset_id"]]["path"]
             mix["music_gain_db"] = a.get("music_gain_db", -19)
             mix["duck"] = a.get("duck", True)
-        mix["sfx"] = [{"path": assets[s["asset_id"]]["path"], "start_sec": s["start_sec"], "gain_db": s.get("gain_db", -12)}
-                      for s in a.get("sfx", [])]
+        mix["sfx"] = [{"path": assets[x["asset_id"]]["path"], "start_sec": x["start_sec"], "gain_db": x.get("gain_db", -12)}
+                      for x in a.get("sfx", [])]
         steps.append({"op": "mix_audio", "args": mix})
         steps.append({"op": "loudnorm", "args": {"input": "mix.wav", "out": "mix.norm.wav",
                                                  "target_lufs": prof.get("target_lufs", -14),
                                                  "true_peak_dbtp_max": prof.get("true_peak_dbtp_max", -1)}})
         audio = "mix.norm.wav"
 
-    steps.append({"op": "export", "args": {"video": video, "audio": audio, "out": "final.mp4", "crf": 20,
-                                           "preset": "veryfast", "thumbnail": "thumb.jpg", "audio_only": "final.m4a" if audio else None}})
+    steps.append({"op": "export", "args": {"video": video, "audio": audio, "out": "final.mp4", "crf": 18,
+                                           "preset": "veryfast", "thumbnail": "thumb.jpg", "audio_only": "final.m4a" if audio else None,
+                                           "fade_out_sec": em.get("fade_out_sec"), "duration_sec": em["duration_sec"],
+                                           "synthetic": any(x.get("synthetic") for x in am["assets"])}})
 
     plan = {
         "schema_version": "0.1",
@@ -235,18 +285,47 @@ def _op_cut(work: Path, a: dict) -> None:
     dur = a["out_sec"] - a["in_sec"]
     if a["kind"] == "still":
         media.run(["-loop", "1", "-framerate", str(a["fps"]), "-t", f"{dur:.3f}", "-i", str(src),
+                   "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # camera photos often have odd dimensions
                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "12", "-pix_fmt", "yuv420p", str(out)])
         return
-    vf = [f"fps={a['fps']}"]
-    if a.get("pad_to_sec") and a["pad_to_sec"] > dur:
-        vf.append(f"tpad=stop_mode=clone:stop_duration={a['pad_to_sec'] - dur:.3f}")
+    speed = a.get("speed") or 1.0
+    vf = [f"setpts=PTS/{speed:.4f}" if speed != 1.0 else "setpts=PTS-STARTPTS", f"fps={a['fps']:g}",
+          "scale=trunc(iw/2)*2:trunc(ih/2)*2"]
+    shown = dur / speed
+    if a.get("pad_to_sec") and a["pad_to_sec"] > shown:
+        vf.append(f"tpad=stop_mode=clone:stop_duration={a['pad_to_sec'] - shown:.3f}")
     media.run(["-ss", f"{a['in_sec']:.3f}", "-t", f"{dur:.3f}", "-i", str(src), "-an", "-vf", ",".join(vf),
                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "12", "-pix_fmt", "yuv420p", str(out)])
+    if a.get("audio_out"):
+        total = a.get("pad_to_sec") or shown
+        aout = _safe(work, a["audio_out"])
+        if a.get("audio_from_source"):
+            fo = max(dur - 0.03, 0)
+            media.run(["-ss", f"{a['in_sec']:.3f}", "-t", f"{dur:.3f}", "-i", str(src), "-vn",
+                       "-af", f"afade=t=in:d=0.02,afade=t=out:st={fo:.3f}:d=0.03,aresample=48000,apad=whole_dur={total:.3f},"
+                              f"atrim=0:{total:.3f}", "-ac", "2", "-ar", "48000", str(aout)])
+        else:
+            media.run(["-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo", "-t", f"{total:.3f}", str(aout)])
 
 
 def _op_scale(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
-    vf = _motion_filter(a.get("motion", "none"), a["width"], a["height"], a["fps"], a["duration_sec"], a.get("intensity") or 1.0)
+    W, H = a["width"], a["height"]
+    if a.get("motion", "none") == "none":
+        z = a.get("zoom") or 1.0
+        cx = 0.5 if a.get("crop_x") is None else a["crop_x"]
+        # fill the frame, punch in if asked, then crop around the subject (clamped inside the frame)
+        vf = (f"scale={int(W * z)}:{int(H * z)}:force_original_aspect_ratio=increase:flags=lanczos,"
+              f"crop={W}:{H}:x='(iw-{W})*{min(max(cx, 0.0), 1.0):.4f}':y='(ih-{H})/2',fps={a['fps']:g},setsar=1")
+    else:
+        vf = _motion_filter(a["motion"], W, H, a["fps"], a["duration_sec"], a.get("intensity") or 1.0)
+    looks = []
+    if a.get("gamma") and abs(a["gamma"] - 1) > 0.02:
+        looks.append(f"eq=gamma={a['gamma']:.3f}")
+    if a.get("grade"):
+        looks.append(GRADE_FILTERS[a["grade"]])
+    if looks:
+        vf += "," + ",".join(looks)
     media.run(["-i", str(src), "-vf", vf + f",trim=duration={a['duration_sec']:.3f},format=yuv420p",
                "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14", str(out)])
 
@@ -270,6 +349,21 @@ def _op_concat(work: Path, a: dict) -> None:
         filt += "".join(f"[v{i}]" for i in range(len(ins))) + f"concat=n={len(ins)}:v=1:a=0[out]"
     media.run([*args, "-filter_complex", filt, "-map", "[out]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14",
                str(_safe(work, a["out"]))])
+    auds = [_safe(work, p) for p in a.get("audio_inputs") or []]
+    if auds and a.get("audio_out"):
+        aargs: list[str] = []
+        for p in auds:
+            aargs += ["-i", str(p)]
+        if a.get("transition") == "dissolve" and xf > 0 and len(auds) > 1:
+            af, prev = "", "0:a"
+            for i in range(1, len(auds)):
+                label = "aout" if i == len(auds) - 1 else f"ax{i}"
+                af += f"[{prev}][{i}:a]acrossfade=d={xf:.3f}:c1=tri:c2=tri[{label}];"
+                prev = label
+            af = af.rstrip(";")
+        else:
+            af = "".join(f"[{i}:a]" for i in range(len(auds))) + f"concat=n={len(auds)}:v=0:a=1[aout]"
+        media.run([*aargs, "-filter_complex", af, "-map", "[aout]", "-ar", "48000", "-ac", "2", str(_safe(work, a["audio_out"]))])
 
 
 def _op_overlay_text(work: Path, a: dict) -> None:
@@ -354,11 +448,16 @@ def _op_loudnorm(work: Path, a: dict) -> None:
 def _op_export(work: Path, a: dict) -> None:
     out = _safe(work, a["out"])
     args = ["-i", str(_safe(work, a["video"]))]
+    f, D = a.get("fade_out_sec") or 0, a.get("duration_sec") or 0
     if a.get("audio"):
         args += ["-i", str(_safe(work, a["audio"])), "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+        if f and D > f:
+            args += ["-af", f"afade=t=out:st={D - f:.3f}:d={f:.3f}"]
+    if f and D > f:  # output options go after every input
+        args += ["-vf", f"fade=t=out:st={D - f:.3f}:d={f:.3f}"]
+    note = "Made with Kalainova; contains AI-generated media" if a.get("synthetic", True) else "Edited with Kalainova"
     args += ["-c:v", "libx264", "-preset", a.get("preset", "veryfast"), "-crf", str(a.get("crf", 20)), "-profile:v", "high",
-             "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-             "-metadata", "comment=AI-generated with Kalainova; synthetic media", str(out)]
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-metadata", f"comment={note}", str(out)]
     media.run(args)
     if a.get("thumbnail"):
         media.frame_at(out, 0.9, _safe(work, a["thumbnail"]))

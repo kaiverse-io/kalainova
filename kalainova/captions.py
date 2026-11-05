@@ -143,10 +143,12 @@ def _wrap(text: str, max_chars: int) -> str:
             cur = f"{cur} {wd}".strip()
     if cur:
         lines.append(cur)
-    # balance two-line headlines so the last line is never a lone word
-    if len(lines) == 2 and len(lines[1].split()) == 1 and len(lines[0].split()) > 1:
-        a = lines[0].split()
-        lines = [" ".join(a[:-1]), f"{a[-1]} {lines[1]}"]
+    # two lines: choose the break that balances them (and never strands one word)
+    if len(lines) == 2:
+        ws = text.split()
+        best = min(range(1, len(ws)), key=lambda k: (max(len(" ".join(ws[:k])), len(" ".join(ws[k:]))),
+                                                     abs(k - len(ws) / 2)))
+        lines = [" ".join(ws[:best]), " ".join(ws[best:])]
     return "\\N".join(esc(l) for l in lines)
 
 
@@ -161,6 +163,14 @@ def studio_titles(titles: list[dict], w: int, h: int) -> str:
         dur = int((t["end_sec"] - t["start_sec"]) * 1000)
         intro = 420 if hero else 360
         text = _wrap(t["text"], 14 if hero else 17)
+        if t.get("scrim"):  # over real footage: feathered falloff behind the type, never a visible box
+            for k, (frac, alpha) in enumerate(((0.42, "E0"), (0.30, "D0"), (0.20, "C0"), (0.12, "B0"))):
+                band = int(h * frac)
+                lines.append(
+                    f"Dialogue: 0,{ts(t['start_sec'])},{ts(t['end_sec'])},Head,,0,0,0,,"
+                    f"{{\\an7\\pos({-w // 2},{y - band // 2})\\bord0\\shad0\\1c&H000000&\\1a&H{alpha}&"
+                    f"\\blur{int(band * 0.35)}\\fad({intro},260)\\p1}}m 0 0 l {w * 2} 0 l {w * 2} {band} l 0 {band}{{\\p0}}"
+                )
         lines.append(
             f"Dialogue: 1,{ts(t['start_sec'])},{ts(t['end_sec'])},{style},,0,0,0,,"
             f"{{\\move({x},{y + 28},{x},{y},0,{intro})\\fad({intro},260)\\blur6\\t(0,{intro},0.5,\\blur0)}}{text}"
