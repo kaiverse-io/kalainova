@@ -1,0 +1,8 @@
+{
+  "schema_version": "0.1",
+  "job_id": "j1",
+  "runtime": "ffmpeg",
+  "cuts": [
+    1
+  ]
+}

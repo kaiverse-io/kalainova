@@ -1,0 +1,15 @@
+# 0003. No compiler, second format, or SKU before a proof
+
+Status: accepted · 2026-11-05
+
+## Context
+
+Every early build pass ended with a schema and no file. The premortem ranks 'the check is the product' as a top failure.
+
+## Decision
+
+Until one job is `accepted` or `measured`: no compiler, no render plan, no scheduler, no procedural format, no downstream SKU. `check.py` rejects a `render_plan.json` and extension strategies before that.
+
+## Consequences
+
+The first pieces are made with rented tools. Owning the compile path is a later ADR that supersedes this one, opened with the proof in hand.

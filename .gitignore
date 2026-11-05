@@ -12,3 +12,6 @@ dist/
 *.m4a
 *.mov
 *.webm
+
+# operator-local denylist for scripts/lint_docs.py; never commit it
+.denylist.local

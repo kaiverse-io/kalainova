@@ -42,7 +42,7 @@ Counter: the plan is not the volume game. It is one proof inside a hard hour cap
 | The contract check prevents a bad ship | High | It cannot. It only rejects malformed JSON and committed media. |
 | Renting a tool is profit | High | Compare the invoice to `measure.json`. |
 | Generated pieces can start beside a funded cut | High | Do not. One proof first. |
-| This environment can update the GitHub repo | Unknown | 404 from the token here. Do not guess, do not push blind. |
+| This environment can update the GitHub repo | Resolved | Published 2026-11-05. Push only descendants of `8b59afe`. |
 | Agents publishing would be faster | High | It skips the only gate the playbooks kept. |
 
 ## 4. Second order
@@ -115,7 +115,7 @@ Counter: the plan is not the volume game. It is one proof inside a hard hour cap
 - No sample subject.
 - No compiler.
 - `scripts/check.py` stays a contract gate. It is not evidence of a piece.
-- This environment cannot see `https://github.com/kaiverse-io/kalainova` (404). Nothing has been pushed.
+- Correction, 2026-11-05: the repo is public and `main` is published (root `8b59afe`). The 404 above was the token on the machine that wrote this pass, not the remote state.
 
 ## What this review did not do
 

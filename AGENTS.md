@@ -6,7 +6,7 @@ last_reviewed: 2026-11-05
 
 # Kalainova — Agent Context
 
-Content generation engine for any subject. Video, audio, stills, and text. Inspired by `kaiverse-io/chassis` for the cockpit (this file, `just`, CI, docs, an eval slot). Do not copier-stamp a service into this repo.
+Content generation engine for any subject. Video, audio, stills, and text. Inspired by `kaiverse-io/chassis` for the cockpit (this file, `just`, docs and ADRs, a contract eval, pre-commit, a devcontainer, the `open-a-job` skill). Do not copier-stamp a service into this repo.
 
 The brief for the next agent is `CLAUDE_HANDOVER.md`. Read it before changing the tree. Names that appear only in that file stay in that file.
 
@@ -18,7 +18,7 @@ Read `docs/consolidation.md`, then `docs/strategies.md`. Pick **one** peer way (
 
 ## Planes
 
-- **Guardrails.** This file, `ARCHITECTURE.md`, `justfile`, `scripts/check.py`, CI.
+- **Guardrails.** This file, `ARCHITECTURE.md`, `docs/decisions/`, `justfile` (`just ci`), `scripts/check.py`, `scripts/lint_docs.py`, pre-commit.
 - **One strategy per job.** Do not cross strategies inside one job folder.
 - **One distribution identity per strategy.** A funded-clip post never goes out on an identity used for owned or generated work.
 - **Humans gate publish.** Agents do not upload, and they do not submit a campaign URL.
