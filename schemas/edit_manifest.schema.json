@@ -336,6 +336,10 @@
     "original_audio": {
       "type": "boolean"
     },
+    "speech": {
+      "type": "boolean",
+      "description": "The footage's own sound is mostly someone talking, so it gets the voice chain."
+    },
     "fade_in_sec": {
       "type": "number",
       "minimum": 0,

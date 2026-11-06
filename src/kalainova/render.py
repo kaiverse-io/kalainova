@@ -375,6 +375,7 @@ def compile_plan(job: Job) -> dict:
             mix["voice_chain"] = True
         elif orig:
             mix["voice"] = "orig.wav"  # the footage's own sound leads; music ducks under it
+            mix["voice_chain"] = bool(em.get("speech"))
         if a.get("music_asset_id"):
             mix["music"] = assets[a["music_asset_id"]]["path"]
             mix["music_gain_db"] = a.get("music_gain_db", -19)

@@ -13,6 +13,8 @@ import datetime as dt
 import json
 import math
 
+import numpy as np
+
 from .. import config, media
 from ..jobfs import ContractError, Job
 from ..providers import router
@@ -20,8 +22,18 @@ from . import analyze, beats
 from . import notes as notes_mod
 
 PROFILES = {"reel": "short-9x16", "square": "square", "landscape": "landscape", "long": "landscape"}
-BEATS_PER_SHOT = {"fast": 2, "medium": 4, "cinematic": 8}
+# Beats per shot. An edit that cuts every N beats is a metronome, so each pace has a phrase it repeats.
+BEAT_PHRASE = {
+    "fast": [2, 2, 4, 2, 2, 6],
+    "medium": [4, 4, 2, 2, 4, 8],
+    "cinematic": [8, 8, 4, 12, 8],
+}
 MIN_QUALITY = 0.45
+SIMILAR_MIN_CORR = 0.9  # shots this alike read as the same shot twice
+# Pauses in speech: leave short ones, shorten long ones, and never leave a sliver between two cuts.
+MIN_PAUSE_TO_CUT_SEC = 0.9
+PAUSE_KEPT_SEC = 0.3
+MIN_SPEECH_SEC = 1.5
 
 
 # ------------------------------------------------------------------ direction file
@@ -96,13 +108,49 @@ def _matches(shot: dict, sources: dict, needle: str) -> bool:
 
 
 def _gamma(shot: dict) -> float:
-    lum = (
-        sum(shot["series"]["lum"]) / max(len(shot["series"]["lum"]), 1)
-        if shot["series"]["lum"]
-        else 0.46
-    )
-    lum = min(max(lum, 0.05), 0.95)
-    return round(min(max(math.log(0.46) / math.log(lum), 0.75), 1.5), 3)
+    """A small exposure nudge for a shot that is truly off. Night stays night."""
+    lum = shot["series"]["lum"]
+    level = sum(lum) / len(lum) if lum else 0.46
+    if 0.15 <= level <= 0.75:
+        return 1.0
+    level = min(max(level, 0.05), 0.95)
+    # A gamma above 1 brightens, so the exponent that lands on mid-grey is log(level) / log(mid-grey).
+    return round(min(max(math.log(level) / math.log(0.46), 0.85), 1.25), 3)
+
+
+def beats_for(pace: str, index: int) -> int:
+    phrase = BEAT_PHRASE[pace]
+    return phrase[index % len(phrase)]
+
+
+def _looks_like(a: list[float], b: list[float]) -> bool:
+    x, y = np.array(a, np.float64), np.array(b, np.float64)
+    if x.size != y.size or x.std() == 0 or y.std() == 0:
+        return False
+    return float(np.corrcoef(x, y)[0, 1]) >= SIMILAR_MIN_CORR
+
+
+def next_moment(pool: list[dict], used: list[list[float]], last_source: str | None) -> dict | None:
+    """The next moment unlike anything used. None means the footage has run out of new shots."""
+    fresh = [m for m in pool if not any(_looks_like(m["shot"].get("sig", []), sig) for sig in used)]
+    if not fresh:
+        return None
+    return next((m for m in fresh if m["shot"]["source"] != last_source), fresh[0])
+
+
+def speech_keeps(silences: list[tuple[float, float]], duration: float) -> list[tuple[float, float]]:
+    """What to keep of a take. Speech is never cut, and each long pause keeps a natural breath."""
+    keep: list[tuple[float, float]] = []
+    start = 0.0
+    for a, b in silences:
+        if b - a < MIN_PAUSE_TO_CUT_SEC:
+            continue
+        end = a + PAUSE_KEPT_SEC / 2
+        if end - start >= MIN_SPEECH_SEC:
+            keep.append((round(start, 3), round(end, 3)))
+            start = b - PAUSE_KEPT_SEC / 2
+    keep.append((round(start, 3), round(duration, 3)))
+    return keep
 
 
 def _order(shots: list[dict], s: dict, sources: dict) -> list[dict]:
@@ -177,10 +225,9 @@ def _reel(job: Job, footage: dict, s: dict) -> tuple[list, list, dict, list, flo
         assets_extra.append(music)
         grid = beats.beat_grid(job.work / "music.wav", target + 2)
     period = 60 / grid["bpm"] if grid else 0.5
-    k = BEATS_PER_SHOT[s["pace"]]
-    if s["pace"] == "fast" and period < 0.42:
-        k = 4
-    shot_len = min(max(k * period, 0.8), 6.0)
+    # at a fast tempo every beat is too quick to read a picture, so count in twos
+    tempo_factor = 2 if s["pace"] == "fast" and period < 0.42 else 1
+    shot_len = min(max(beats_for(s["pace"], 0) * tempo_factor * period, 0.8), 6.0)
     beat_times = grid["beats"] if grid else [i * period for i in range(int(target / period) + 2)]
 
     # a pool of distinct moments: every usable shot offers non-overlapping windows of one shot length
@@ -205,12 +252,16 @@ def _reel(job: Job, footage: dict, s: dict) -> tuple[list, list, dict, list, flo
     pool.sort(key=lambda m: (m["take"], m["rank"]))
 
     cuts, t, i, last_src = [], 0.0, 0, None
+    used_looks: list[list[float]] = []
     first_beat = next((b for b in beat_times if b > 0.05), 0.0) if beat_times else 0.0
     while t < target - 0.4 and pool:
-        # never the same take twice in a row when another take is available
-        pick = next((m for m in pool if m["shot"]["source"] != last_src), pool[0])
+        pick = next_moment(pool, used_looks, last_src)
+        if pick is None:  # no new picture left, and the note below tells the operator
+            break
         pool.remove(pick)
         shot = pick["shot"]
+        used_looks.append(shot.get("sig", []))
+        shot_len = min(max(beats_for(s["pace"], i) * tempo_factor * period, 0.8), 8.0)
         want = t + shot_len if i else max(first_beat + shot_len, shot_len)
         end = min(
             (b for b in beat_times if b >= want - period * 0.5),
@@ -285,14 +336,7 @@ def _long(job: Job, footage: dict, s: dict) -> tuple[list, list, dict, list, flo
         dur = src["duration_sec"]
         keep = [(0.0, dur)]
         if s["remove_silence"] and src.get("has_audio"):
-            sil = [(a, b) for a, b in media.silencedetect(path, -38, 0.55) if b - a >= 0.55]
-            keep, cur = [], 0.0
-            for a, b in sil:
-                if a - cur > 0.25:
-                    keep.append((max(cur - 0.08, 0), min(a + 0.12, dur)))
-                cur = b
-            if dur - cur > 0.25:
-                keep.append((max(cur - 0.08, 0), dur))
+            keep = speech_keeps(media.silencedetect(path, -38, MIN_PAUSE_TO_CUT_SEC), dur)
         for j, (a, b) in enumerate(keep):
             shot = min(
                 footage["shots"],
@@ -436,6 +480,7 @@ def run(job: Job) -> dict:
         "overlays": [],
         "audio": audio,
         "original_audio": bool(s["original_audio"]),
+        "speech": s["format"] == "long",
         "fade_out_sec": 0.8 if s["format"] != "long" else 1.2,
     }
     if grid:
