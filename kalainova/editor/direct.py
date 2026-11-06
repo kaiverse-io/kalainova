@@ -15,7 +15,7 @@ import math
 
 from .. import config, media
 from ..jobfs import ContractError, Job
-from ..providers import base
+from ..providers import router
 from . import analyze, beats, notes as notes_mod
 
 PROFILES = {"reel": "short-9x16", "square": "square", "landscape": "landscape", "long": "landscape"}
@@ -39,11 +39,16 @@ def add_note(job: Job, text: str) -> dict:
 
 
 def _llm(job: Job):
-    try:
-        p = base.resolve("llm", config.preference("llm", job.job))
-    except LookupError:
+    if not router.available(job, "llm"):
         return None
-    return p
+
+    class Billed:
+        """The notes parser's LLM, with the same cap and ledger as every other call."""
+
+        def llm(self, prompt: str, **kw):
+            return router.generate(job, "llm", "llm", prompt, note="notes", **kw)[1]
+
+    return Billed()
 
 
 def settle(job: Job, footage: dict) -> dict:
@@ -105,8 +110,7 @@ def _order(shots: list[dict], s: dict, sources: dict) -> list[dict]:
 
 
 def _gen_music(job: Job, prompt: str, duration: float) -> tuple[dict, str]:
-    from ..assets import _gen
-    p, res = _gen(job, "music", "music", prompt, job.work / "music.wav", duration=duration, est={"duration": duration})
+    p, res = router.generate(job, "music", "music", prompt, job.work / "music.wav", duration=duration, est={"duration": duration})
     return {"id": "music", "kind": "audio", "role": "music", "path": "music.wav",
             "duration_sec": media.duration(job.work / "music.wav"), "rights": job.job.get("rights", "owned"),
             "provider": p.name, "model": res.model, "prompt": prompt, "synthetic": True}, p.name
