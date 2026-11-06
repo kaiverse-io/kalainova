@@ -6,7 +6,10 @@ This is the ffmpeg-native caption renderer. A browser overlay renderer
 
 from __future__ import annotations
 
-FONT = "Poppins"
+from pathlib import Path
+
+FONT = "Inter SemiBold"
+FONTS = Path(__file__).resolve().parents[2] / "fonts"  # vendored, so every machine sets the same type
 
 
 def ts(sec: float) -> str:
@@ -23,8 +26,7 @@ def esc(text: str) -> str:
 
 
 def header(w: int, h: int) -> str:
-    # libass sizes by line height (ascent+descent); Poppins' tall metrics render ~0.6x.
-    # These give ~70px caption caps on a 1080-wide frame.
+    # libass sizes by line height (ascent+descent). These give ~70px caption caps on a 1080-wide frame.
     k = 1.56
     fs = int(w * 0.105 * k)
     hook = int(w * 0.12 * k)
@@ -113,8 +115,6 @@ def overlay_events(overlays: list[dict], titles: list[dict], w: int, h: int) -> 
 # Keynote restraint: Inter Display (closest open face to SF Pro), sentence case, no outlines,
 # soft shadow, eased fades with a short rise and a blur that resolves. In libass, Inter's size 100
 # renders a 60 px cap height; sizes below are chosen by cap height on a 1080-wide frame.
-STUDIO_FONTS = "/usr/share/fonts/opentype/inter"
-
 
 def studio_header(w: int, h: int) -> str:
     s = w / 1080

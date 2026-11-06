@@ -14,6 +14,28 @@ import numpy as np
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
 
+# Every stage between the source and the delivered file is lossless 10-bit 4:4:4 BT.709, so one final
+# encode is the only place quality is spent. The tags stop players guessing a colour matrix.
+COLOR_TAGS = [
+    "-colorspace",
+    "bt709",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+    "-color_range",
+    "tv",
+]
+MASTER_PIX_FMT = "yuv444p10le"
+MASTER_ARGS = ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", MASTER_PIX_FMT, *COLOR_TAGS]
+_SWS = "out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int"
+_TAG_FRAMES = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
+TO_BT709 = f"scale={_SWS},{_TAG_FRAMES}"
+TO_DELIVERY = f"scale={_SWS},format=yuv420p,{_TAG_FRAMES}"
+# aq-mode 3 spends bits in dark gradients, where 8-bit bands first. Deblock is eased to keep fine detail.
+X264_FINISH = "aq-mode=3:aq-strength=0.9:deblock=-1,-1:psy-rd=1.0,0.15"
+HDR_TO_SDR = "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv"
+
 
 class MediaError(RuntimeError):
     pass
@@ -27,15 +49,60 @@ def has_filter(name: str) -> bool:
 
 
 def run(
-    args: list[str], *, quiet: bool = True, cwd: str | Path | None = None
+    args: list[str], *, cwd: str | Path | None = None, loglevel: str = "error"
 ) -> subprocess.CompletedProcess:
-    cmd = [FFMPEG, "-hide_banner", "-y", "-loglevel", "error" if quiet else "info", *args]
+    cmd = [FFMPEG, "-hide_banner", "-y", "-loglevel", loglevel, *args]
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if proc.returncode != 0:
         raise MediaError(
             f"ffmpeg failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stderr[-2000:]}"
         )
     return proc
+
+
+def filter_path(path: str | Path) -> str:
+    """A path as one filtergraph value, with the characters the parser treats as syntax escaped."""
+    return re.sub(r"([\\:',\[\];])", r"\\\1", str(path))
+
+
+def from_source_color(path: str | Path) -> list[str]:
+    """Filters that bring a source to SDR. Phones shoot HDR, and it looks grey and flat untreated."""
+    transfer = stream_info(path, "video").get("color_transfer")
+    return [HDR_TO_SDR] if transfer in ("arib-std-b67", "smpte2084") else []
+
+
+def encode_rgb48(frames, *, size: tuple[int, int], fps: float, vf: str, out: Path, cwd: Path) -> None:
+    """Encode rgb48 frames from a generator to the master format."""
+    cmd = [
+        FFMPEG,
+        "-hide_banner",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb48le",
+        "-s",
+        f"{size[0]}x{size[1]}",
+        "-r",
+        f"{fps:g}",
+        "-i",
+        "pipe:0",
+        "-vf",
+        vf,
+        *MASTER_ARGS,
+        str(out),
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+    try:
+        for frame in frames:
+            proc.stdin.write(frame)
+    except BrokenPipeError:
+        pass  # ffmpeg stopped early, and its own message explains why
+    _, err = proc.communicate()
+    if proc.returncode != 0:
+        raise MediaError(f"ffmpeg failed ({proc.returncode}) encoding frames:\n{err.decode()[-2000:]}")
 
 
 def probe(path: str | Path) -> dict:

@@ -20,6 +20,8 @@ from . import config, media
 
 Arr = npt.NDArray[Any]
 
+STILL_LEVEL = 0.02  # mean grey-level change per frame below which nothing is moving
+STUTTER_WINDOW = 9
 FLAT_RUN_PX = 12  # a band this wide with a one-level step at each end reads as a contour
 DUPLICATE_MIN_CORR = 0.9
 CORNER_FRACTION = 0.2
@@ -52,11 +54,13 @@ def banding_score(gray: Arr) -> float:
 
 
 def stutter_score(diffs: Arr) -> float:
-    """Unevenness of frame-to-frame change: 0 for a steady move, near 1 when it advances in steps."""
-    if diffs.size < 3 or float(diffs.mean()) <= 1e-6:
+    """Share of frames that barely change while their neighbours do: the signature of judder."""
+    if diffs.size < 3 or float(diffs.mean()) <= STILL_LEVEL:
         return 0.0
-    # One new picture every few frames shows up as a spread much wider than the mean change.
-    return float(min(diffs.std() / (diffs.mean() + 1e-6) / 2, 1.0))
+    window = np.ones(STUTTER_WINDOW) / STUTTER_WINDOW
+    local = np.convolve(diffs, window, mode="same")
+    moving = local > STILL_LEVEL
+    return float((diffs[moving] < 0.3 * local[moving]).mean()) if moving.any() else 0.0
 
 
 def repetition_share(thumbs: Sequence[Arr]) -> float:

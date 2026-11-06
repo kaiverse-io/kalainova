@@ -23,6 +23,7 @@
         "properties": {
           "op": {
             "enum": [
+              "still",
               "cut",
               "concat",
               "scale",

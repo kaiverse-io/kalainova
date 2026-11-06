@@ -17,11 +17,7 @@ from pathlib import Path
 from .. import media
 from .base import Provider, Result, register
 
-FONT_DIRS = [
-    Path("/usr/share/fonts/truetype/google-fonts"),
-    Path("/usr/share/fonts/opentype/inter"),
-    Path("/usr/share/fonts/truetype/dejavu"),
-]
+FONT_DIRS = [Path(__file__).resolve().parents[3] / "fonts"]
 
 
 def find_font(*names: str) -> str | None:
@@ -267,7 +263,7 @@ class LocalProvider(Provider):
         img = img.filter(ImageFilter.GaussianBlur(radius=2))
         draw = ImageDraw.Draw(img, "RGBA")
         headline = (title or prompt).strip()
-        font_path = find_font("Poppins-Bold.ttf", "InterDisplay-Black.otf", "DejaVuSans-Bold.ttf")
+        font_path = find_font("InterDisplay-SemiBold.ttf")
         size = int(width * 0.11)
         lines: list[str] = []
         while size > 24:

@@ -86,7 +86,7 @@ reference_models:
 
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:
-  stutter_max: 0.35
+  stutter_max: 0.08
   cuts_per_min_max: 40
   banding_max: 0.03
   detail_min: 0.002
