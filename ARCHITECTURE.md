@@ -471,7 +471,7 @@ Automated checks before the human gate, including whether the kit lock held.
 Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account.
 
 ### providers
-The router and vendor adapters. Every model call goes through the router.
+The router and vendor adapters. Every model call goes through the router, which refuses a file that is not what was asked for or has no picture in it. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
 
 ### editor
 The footage path: shots, scores, direction, and notes.

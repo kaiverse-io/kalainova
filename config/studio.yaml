@@ -42,6 +42,12 @@ models:
     image_to_video: alibaba/wan-3.0-prime/image-to-video
     music: fal-ai/lyria3                            # takes a prompt only, and returns a fixed length
     transcribe: fal-ai/whisper     # swap for ElevenLabs Scribe v2 (2.2% WER) when added
+  mac:                             # docs/how-to/run-models-on-a-mac.md; check each licence first
+    voice: mlx-community/Kokoro-82M-bf16
+    image: mflux-generate-z-image-turbo
+    video: notapalindrome/ltx2-mlx-av
+    music: mlx-community/MiniMax-Music3-8bit
+    transcribe: mlx-community/whisper-large-v3-turbo-asr-fp16
 
 prices:
   anthropic:
