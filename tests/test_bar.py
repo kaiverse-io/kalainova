@@ -69,7 +69,9 @@ def test_detail_ratio_falls_when_a_frame_was_upscaled():
     soft = np.kron(sharp[:256, :256], np.ones((2, 2)))
     from PIL import Image
 
-    smooth = np.asarray(Image.fromarray(soft.astype(np.uint8)).resize((256, 256)).resize((512, 512)))
+    smooth = np.asarray(
+        Image.fromarray(soft.astype(np.uint8)).resize((256, 256)).resize((512, 512))
+    )
     assert bar.detail_ratio(sharp) > bar.detail_ratio(smooth) * 4
 
 
@@ -143,3 +145,23 @@ def test_duplicate_share_finds_held_frames_and_ignores_black():
     assert bar.duplicate_share(held) > 0.4
     black = np.zeros((5, 20, 20), np.uint8)
     assert bar.duplicate_share(np.concatenate([black, moving, black])) == 0.0
+
+
+def test_moving_share_reads_runtime_on_footage_not_shot_count():
+    em = {
+        "duration_sec": 10.0,
+        "cuts": [{"source": "a", "start_sec": 0.0}, {"source": "b", "start_sec": 8.0}],
+    }
+    am = {"assets": [{"id": "a", "kind": "video"}, {"id": "b", "kind": "still"}]}
+    assert bar.moving_share(em, am) == 0.8
+
+
+def test_only_an_objective_defect_blocks_approval():
+    report = {
+        "readings": [
+            {"id": "x", "value": 1, "limit": "<= 0", "ok": False, "blocks": True},
+            {"id": "y", "value": 1, "limit": "<= 0", "ok": False, "blocks": False},
+            {"id": "z", "value": 0, "limit": "<= 0", "ok": True, "blocks": True},
+        ]
+    }
+    assert [c["status"] for c in bar.as_checks(report)] == ["fail", "warn", "pass"]

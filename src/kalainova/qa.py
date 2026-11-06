@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from . import config, consistency, media, prompts
+from . import bar, config, consistency, media, prompts
 from .jobfs import ContractError, CostCapExceeded, Job
 from .providers import router
 
@@ -219,7 +219,10 @@ def run(job: Job) -> dict:
         abs(dur - em["duration_sec"]) <= 0.35,
         f"{dur:.2f}s vs plan {em['duration_sec']:.2f}s",
     )
-    _check(checks, "duration.short_form", dur <= 179, f"{dur:.1f}s (Shorts limit 3 min)", "warn")
+    if prof.get("aspect") == "9:16":
+        _check(
+            checks, "duration.short_form", dur <= 179, f"{dur:.1f}s (Shorts limit 3 min)", "warn"
+        )
 
     if em.get("audio"):
         loud = media.loudness(final)
@@ -249,16 +252,17 @@ def run(job: Job) -> dict:
     longest = max((b - a for a, b in zip(starts, starts[1:])), default=0)
     metrics["longest_shot_sec"] = round(longest, 2)
     stills = all(not c["source"].endswith(".video") for c in em.get("cuts", []))
-    _check(
-        checks,
-        "pacing.pattern_interrupt",
-        longest <= (5.0 if stills else 6.5),
-        f"longest shot {longest:.1f}s",
-        "warn",
-    )
+    if prof.get("delivery") != "mezzanine":
+        _check(
+            checks,
+            "pacing.pattern_interrupt",
+            longest <= (5.0 if stills else 6.5),
+            f"longest shot {longest:.1f}s",
+            "warn",
+        )
 
     # hook timing
-    caps = em.get("captions", [])
+    caps = em.get("captions") or em.get("closed_captions") or []
     first = caps[0]["start_sec"] if caps else None
     if caps or am.get("words"):  # edits of silent footage carry no captions to time
         _check(
@@ -376,19 +380,24 @@ def run(job: Job) -> dict:
             {"id": "judge.vision", "status": "warn", "detail": f"judge error: {exc}"[:300]}
         )
 
+    studio_bar = bar.measure_job(job.work, em, am)
+    checks.extend(bar.as_checks(studio_bar))
     passed = all(c["status"] != "fail" for c in checks)
     from .publish import sha256_file
 
+    master = job.work / "final.master.mov"
     report = {
         "schema_version": "0.1",
         "job_id": data["job_id"],
         "passed": passed,
         "checks": checks,
         "metrics": metrics,
+        "bar": studio_bar,
         "artifacts": {
             k: v
             for k, v in {
                 "video": "final.mp4",
+                "master": master.name if master.exists() else None,
                 "audio": "final.m4a" if (job.work / "final.m4a").exists() else None,
                 "thumbnail": "thumb.jpg",
                 "contact_sheet": sheet,
@@ -398,6 +407,8 @@ def run(job: Job) -> dict:
         },
     }
     report["artifacts_sha256"] = {"video": sha256_file(final)}
+    if master.exists():
+        report["artifacts_sha256"]["master"] = sha256_file(master)
     if judge:
         report["judge"] = judge
     job.write("qa", report)

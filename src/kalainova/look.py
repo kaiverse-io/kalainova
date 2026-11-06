@@ -30,15 +30,23 @@ class Look:
 LOOKS: dict[str, Look] = {
     "natural": Look(contrast=0.10, saturation=1.04),
     "warm": Look(
-        contrast=0.12, saturation=1.06, shadows=(0.006, 0.0, -0.008), highlights=(0.02, 0.006, -0.02)
+        contrast=0.12,
+        saturation=1.06,
+        shadows=(0.006, 0.0, -0.008),
+        highlights=(0.02, 0.006, -0.02),
     ),
     "cool": Look(
         contrast=0.12, saturation=1.0, shadows=(-0.008, 0.0, 0.012), highlights=(-0.012, 0.0, 0.016)
     ),
     "teal_orange": Look(
-        contrast=0.16, saturation=1.1, shadows=(-0.016, 0.0, 0.02), highlights=(0.024, 0.006, -0.024)
+        contrast=0.16,
+        saturation=1.1,
+        shadows=(-0.016, 0.0, 0.02),
+        highlights=(0.024, 0.006, -0.024),
     ),
-    "film": Look(contrast=0.14, saturation=0.92, black=0.03, white=0.965, shadows=(0.0, 0.0, 0.006)),
+    "film": Look(
+        contrast=0.14, saturation=0.92, black=0.03, white=0.965, shadows=(0.0, 0.0, 0.006)
+    ),
     "bw": Look(contrast=0.18, saturation=0.0),
     "vivid": Look(contrast=0.14, saturation=1.2),
 }

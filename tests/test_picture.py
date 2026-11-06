@@ -79,7 +79,7 @@ def test_a_fallback_font_is_refused():
     with pytest.raises(ContractError, match="No Such Font"):
         render.refuse_fallback_fonts(log)
     render.refuse_fallback_fonts(
-        "fontselect: (Inter Display SemiBold, 400, 0) -> InterDisplay-SemiBold, 0, InterDisplay-SemiBold"
+        "fontselect: (Inter Display SemiBold, 400, 0) -> InterDisplay-SemiBold, 0, Inter"
     )
 
 
@@ -113,7 +113,12 @@ def _local_job(tmp_path, monkeypatch, **edit_opts):
                 "job_id": "pic",
                 "beats": [
                     {"id": "b1", "role": "hook", "text": "First line here.", "on_screen": "Open"},
-                    {"id": "b2", "role": "body", "text": "A second thought lands.", "on_screen": "Two"},
+                    {
+                        "id": "b2",
+                        "role": "body",
+                        "text": "A second thought lands.",
+                        "on_screen": "Two",
+                    },
                     {"id": "b3", "role": "payoff", "text": "And it ends well.", "on_screen": "End"},
                 ],
             }
@@ -134,7 +139,12 @@ def test_a_render_meets_the_picture_bar(tmp_path, monkeypatch):
     job = _local_job(tmp_path, monkeypatch)
     final = _render(job)
     readings = {r["id"]: r for r in bar.measure(final)["readings"]}
-    for rid in ("delivery.color_tags", "delivery.pixel_format", "picture.banding", "picture.stutter"):
+    for rid in (
+        "delivery.color_tags",
+        "delivery.pixel_format",
+        "picture.banding",
+        "picture.stutter",
+    ):
         assert readings[rid]["ok"], readings[rid]
 
 

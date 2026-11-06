@@ -7,6 +7,7 @@
   uv run kalainova publish <job> <platform> [--live]
   uv run kalainova measure <job>
   uv run kalainova status <job>
+  uv run kalainova bar <job or file>   hold it to the studio bar
   uv run kalainova providers
   uv run kalainova intake <job> <file> --record <record.json>   a finished file from an outside tool
 
@@ -93,6 +94,7 @@ def _make(a) -> int:
         if c["status"] != "pass":
             print(f"  [{c['status']}] {c['id']}: {c['detail']}")
     print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.work / 'final.mp4'}")
+    _print_bar(report)
     print(f"spent {job.spent():.4f} of cap {job.job.get('cost_cap')}")
     return 0 if report["passed"] else 2
 
@@ -125,6 +127,31 @@ def _render_edit(job) -> int:
         if c["status"] != "pass":
             print(f"  [{c['status']}] {c['id']}: {c['detail']}")
     print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.work / 'final.mp4'}")
+    _print_bar(report)
+    return 0 if report["passed"] else 2
+
+
+def _print_bar(report: dict) -> None:
+    if report.get("bar"):
+        print(f"studio bar {report['bar']['met']}/{report['bar']['total']}")
+
+
+def _bar(a) -> int:
+    """The studio bar for any file or job, so a piece from anywhere can be held to the same numbers."""
+    from pathlib import Path
+
+    from . import bar
+
+    target = Path(a.target)
+    if target.is_file():
+        report = bar.measure(target)
+    else:
+        job = open_job(a.target)
+        report = bar.measure_job(job.work, job.read("edit_manifest"), job.read("asset_manifest"))
+    for r in report["readings"]:
+        mark = "ok  " if r["ok"] else "MISS"
+        print(f"{mark} {r['id']:<30} {str(r['value'])[:26]:<28} {r['limit']}")
+    print(f"studio bar {report['met']}/{report['total']}")
     return 0 if report["passed"] else 2
 
 
@@ -166,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true", help="snapshot before 48h; does not set views_48h"
     )
     sub.add_parser("status").add_argument("job")
+    sub.add_parser("bar", help="hold a job or any file to the studio bar").add_argument("target")
     sub.add_parser("providers")
     ig = sub.add_parser("ingest")
     ig.add_argument("job")
@@ -200,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
             return _new(a)
         if a.cmd == "make":
             return _make(a)
+        if a.cmd == "bar":
+            return _bar(a)
         if a.cmd == "stage":
             out = STAGES[a.stage](open_job(a.job), a.force)
             print(out if not isinstance(out, dict) else "ok")

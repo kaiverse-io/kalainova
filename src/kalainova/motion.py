@@ -80,8 +80,13 @@ def frame(src: Arr, cam: Camera, width: int, height: int) -> Arr:
     iy, wy = _taps(ys, sh)
     left, right = int(ix[0].min()), int(ix[3].max()) + 1
     window = src[:, left:right]
-    rows = sum(w[:, None, None] * window[i] for i, w in zip(iy, wy, strict=True))
-    return sum(w[None, :, None] * rows[:, i - left] for i, w in zip(ix, wx, strict=True))
+    rows: Arr = np.zeros((height, right - left, 3), np.float32)
+    for i, w in zip(iy, wy, strict=True):
+        rows += w[:, None, None] * window[i]
+    out: Arr = np.zeros((height, width, 3), np.float32)
+    for i, w in zip(ix, wx, strict=True):
+        out += w[None, :, None] * rows[:, i - left]
+    return out
 
 
 def load_still(path: Path, width: int, height: int, *, room: float) -> Arr:
@@ -91,7 +96,7 @@ def load_still(path: Path, width: int, height: int, *, room: float) -> Arr:
     fit = max(width / rgb.width, height / rgb.height) * room
     size = (round(rgb.width * fit), round(rgb.height * fit))
     planes = [
-        np.asarray(band.convert("F").resize(size, Image.LANCZOS), np.float32)
+        np.asarray(band.convert("F").resize(size, Image.Resampling.LANCZOS), np.float32)
         for band in rgb.split()
     ]
     return np.stack(planes, axis=-1) / 255.0

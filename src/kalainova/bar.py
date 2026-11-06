@@ -33,6 +33,7 @@ HARD_CUT_DROP_DB = 28.0
 SPEECH_FLOOR_DB = -36.0
 SILENCE_EPS = 1.0 / 32768
 MAX_MEASURE_FRAMES = 240
+MASTER_SIZES = {(1920, 1080), (3840, 2160), (4096, 2160)}
 
 
 def _db(x: float) -> float:
@@ -115,7 +116,7 @@ def _corner_shares(kept: Arr) -> list[float]:
 
 
 def detail_ratio(gray: Arr) -> float:
-    """Spectral energy above half of Nyquist. An upscaled or over-compressed frame has very little."""
+    """Spectral energy above half of Nyquist. An upscaled or over-compressed frame has little."""
     g = gray.astype(np.float64)
     g = g - g.mean()
     window = np.outer(np.hanning(g.shape[0]), np.hanning(g.shape[1]))
@@ -193,7 +194,7 @@ def longest_digital_silence(x: Arr, sr: int) -> float:
 
 
 def ending_drop_db(x: Arr, sr: int) -> float:
-    """Level of the last 100 ms against the loudest of the last three seconds. Near 0 is a hard stop."""
+    """Level of the last 100 ms against the loudest of the last 3 s. Near 0 is a hard stop."""
     tail = x[-3 * sr :]
     last = tail[-sr // 10 :]
     if tail.size == 0 or last.size == 0:
@@ -228,12 +229,12 @@ def limits() -> dict[str, Any]:
 
 def _at_most(rid: str, value: float, key: str, *, blocks: bool = False) -> Reading:
     limit = float(limits()[key])
-    return Reading(rid, round(value, 4), f"<= {limit:g}", value <= limit, blocks)
+    return Reading(rid, round(float(value), 4), f"<= {limit:g}", bool(value <= limit), blocks)
 
 
 def _at_least(rid: str, value: float, key: str, *, blocks: bool = False) -> Reading:
     limit = float(limits()[key])
-    return Reading(rid, round(value, 4), f">= {limit:g}", value >= limit, blocks)
+    return Reading(rid, round(float(value), 4), f">= {limit:g}", bool(value >= limit), blocks)
 
 
 def _sample_times(duration: float, count: int) -> list[float]:
@@ -323,6 +324,92 @@ def _sound_readings(path: Path) -> list[Reading]:
     ]
 
 
+def _check(rid: str, value: Any, limit: str, ok: bool) -> dict[str, Any]:
+    return asdict(Reading(rid, value, limit, bool(ok), blocks=True))
+
+
+def _head_bytes(path: Path, count: int = 1 << 20) -> bytes:
+    with path.open("rb") as fh:
+        return fh.read(count)
+
+
+def _master_video(path: Path, target_fps: float) -> list[dict[str, Any]]:
+    v = media.stream_info(path, "video")
+    head = _head_bytes(path)
+    tags = {v.get(k) for k in ("color_primaries", "color_transfer", "color_space")}
+    num, _, den = str(v.get("r_frame_rate", "0/1")).partition("/")
+    fps = float(num) / float(den or 1)
+    size = (v.get("width"), v.get("height"))
+    return [
+        _check(
+            "master.codec",
+            f"{v.get('codec_name')} {v.get('profile')}",
+            "prores HQ",
+            v.get("codec_name") == "prores" and "HQ" in str(v.get("profile")),
+        ),
+        _check("master.pixels", v.get("pix_fmt"), "yuv422p10le", v.get("pix_fmt") == "yuv422p10le"),
+        _check("master.size", f"{size[0]}x{size[1]}", "HD or 4K", size in MASTER_SIZES),
+        _check(
+            "master.color", "/".join(map(str, sorted(tags, key=str))), "bt709", tags == {"bt709"}
+        ),
+        _check("master.frame_rate", round(fps, 3), f"{target_fps:g}", abs(fps - target_fps) < 0.01),
+        _check("master.atoms", "fiel colr", "present", all(a in head for a in (b"fiel", b"colr"))),
+    ]
+
+
+def _master_picture(path: Path) -> list[dict[str, Any]]:
+    frames = media.decode_gray(path, width=480)
+    first, last = float(frames[0].mean()), float(frames[-1].mean())
+    held = duplicate_share(frames)
+    limit = float(limits()["duplicate_share_max"])
+    return [
+        _check(
+            "master.black_head_tail",
+            f"{first:.1f}/{last:.1f}",
+            f"< {BLACK_LEVEL:g}",
+            first < BLACK_LEVEL and last < BLACK_LEVEL,
+        ),
+        _check("master.duplicate_frames", round(held, 4), f"<= {limit:g}", held <= limit),
+    ]
+
+
+def _master_sound(path: Path) -> list[dict[str, Any]]:
+    a = media.stream_info(path, "audio")
+    if not a:
+        return [_check("master.audio", None, "LPCM stereo", False)]
+    loud = media.loudness(path)
+    lkfs, peak = loud["integrated_lufs"], loud["true_peak_dbtp"]
+    max_lkfs = float(limits()["master_integrated_lkfs_max"])
+    max_peak = float(limits()["master_true_peak_dbtp_max"])
+    return [
+        _check(
+            "master.audio",
+            f"{a.get('codec_name')} {a.get('sample_rate')} {a.get('channels')}ch",
+            "pcm_s24le 48000 2ch",
+            a.get("codec_name") == "pcm_s24le"
+            and a.get("sample_rate") == "48000"
+            and a.get("channels") == 2,
+        ),
+        _check("master.lkfs", lkfs, f"<= {max_lkfs:g}", lkfs is not None and lkfs <= max_lkfs),
+        _check("master.true_peak", peak, f"<= {max_peak:g}", peak is not None and peak <= max_peak),
+    ]
+
+
+def measure_master(path: Path, *, target_fps: float) -> list[dict[str, Any]]:
+    """The delivery file against a premium platform's published ingest requirements."""
+    return [*_master_video(path, target_fps), *_master_picture(path), *_master_sound(path)]
+
+
+def _summary(readings: list[dict[str, Any]]) -> dict[str, Any]:
+    met = sum(bool(r["ok"]) for r in readings)
+    return {
+        "passed": met == len(readings),
+        "met": met,
+        "total": len(readings),
+        "readings": readings,
+    }
+
+
 def measure(path: Path) -> dict[str, Any]:
     """Every reading the delivered file alone can give."""
     info = media.summarize(path)
@@ -334,10 +421,77 @@ def measure(path: Path) -> dict[str, Any]:
         readings += _motion_readings(path, duration)
     if "sample_rate_hz" in info:
         readings += _sound_readings(path)
-    met = sum(r.ok for r in readings)
-    return {
-        "passed": met == len(readings),
-        "met": met,
-        "total": len(readings),
-        "readings": [asdict(r) for r in readings],
-    }
+    return _summary([asdict(r) for r in readings])
+
+
+def moving_share(em: dict[str, Any], am: dict[str, Any]) -> float:
+    """Share of the runtime on real moving footage. Below this a piece reads as a slideshow."""
+    kinds = {a["id"]: a["kind"] for a in am["assets"]}
+    starts = [float(c.get("start_sec", 0)) for c in em.get("cuts", [])]
+    total = float(em.get("duration_sec") or 0)
+    ends = [*starts[1:], total]
+    moving = sum(
+        end - start
+        for cut, start, end in zip(em.get("cuts", []), starts, ends, strict=True)
+        if kinds.get(cut["source"]) == "video"
+    )
+    return moving / total if total else 0.0
+
+
+def _source_readings(work: Path, em: dict[str, Any], am: dict[str, Any]) -> list[Reading]:
+    """Faults in what went in: found here, they cost nothing to fix."""
+    profile = em.get("profile") or {}
+    used = {c["source"] for c in em.get("cuts", [])}
+    sources = [a for a in am["assets"] if a["id"] in used]
+    readings = [_at_least("edit.moving_share", moving_share(em, am), "moving_share_min")]
+    sizes = [media.summarize(work / a["path"]) for a in sources]
+    want = min(profile.get("width", 1), profile.get("height", 1))
+    scales = [min(s.get("width", want), s.get("height", want)) / want for s in sizes]
+    if scales:
+        readings.append(_at_least("source.scale", min(scales), "source_scale_min"))
+    stills = [a for a in sources if a["kind"] == "still"]
+    if len(stills) >= 3:
+        grays = [media.gray_frame(work / a["path"], 0.0) for a in stills]
+        common = (min(g.shape[0] for g in grays), min(g.shape[1] for g in grays))
+        cropped = [g[-common[0] :, -common[1] :] for g in grays]
+        readings.append(
+            _at_most("source.corner_mark", corner_mark_score(cropped), "source_mark_max")
+        )
+    return readings
+
+
+def _stem_readings(work: Path) -> list[Reading]:
+    voice, music = work / "voice.stem.wav", work / "music.stem.wav"
+    if not (voice.exists() and music.exists()):
+        return []
+    left, _, sr = media.decode_stereo(voice)
+    bed, _, _ = media.decode_stereo(music)
+    return [
+        _at_least(
+            "audio.voice_to_music_db", voice_to_music_db(left, bed, sr), "voice_to_music_db_min"
+        )
+    ]
+
+
+def measure_job(work: Path, em: dict[str, Any], am: dict[str, Any]) -> dict[str, Any]:
+    """Everything the bar can read about a rendered job, including what went into it."""
+    report = measure(work / "final.mp4")
+    readings = list(report["readings"])
+    readings += [asdict(r) for r in _source_readings(work, em, am)]
+    readings += [asdict(r) for r in _stem_readings(work)]
+    master = work / "final.master.mov"
+    if master.exists():
+        readings += measure_master(master, target_fps=float(em["profile"]["fps"]))
+    return _summary(readings)
+
+
+def as_checks(report: dict[str, Any]) -> list[dict[str, str]]:
+    """Readings as QA checks. Only an objective defect blocks. Taste stays with the human."""
+    return [
+        {
+            "id": f"bar.{r['id']}",
+            "status": "pass" if r["ok"] else ("fail" if r["blocks"] else "warn"),
+            "detail": f"{r['value']} (limit {r['limit']})",
+        }
+        for r in report["readings"]
+    ]

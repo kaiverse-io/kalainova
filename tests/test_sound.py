@@ -56,7 +56,9 @@ def test_a_short_music_bed_loops_to_length_with_no_step_at_the_joins(tmp_path):
 
 
 def _mix(tmp_path: Path, *, voice_seconds: float, total: float) -> Path:
-    (tmp_path / "v.wav").write_bytes(_tone(tmp_path / "vs.wav", voice_seconds, volume=0.4).read_bytes())
+    (tmp_path / "v.wav").write_bytes(
+        _tone(tmp_path / "vs.wav", voice_seconds, volume=0.4).read_bytes()
+    )
     _tone(tmp_path / "m.wav", 3.0, freq=110.0, volume=0.5)
     render._op_mix_audio(
         tmp_path,
