@@ -48,6 +48,63 @@ def test_a_pan_never_stops_against_the_edge_of_the_picture(move, crop_x, seconds
     assert path.min() >= half - 1e-9 and path.max() <= 1 - half + 1e-9
 
 
+def _ramp(w=64, h=48):
+    """Red rises left to right and green top to bottom, so any shift shows which way it went."""
+    x = np.linspace(0, 1, w, dtype=np.float32)[None, :].repeat(h, axis=0)
+    y = np.linspace(0, 1, h, dtype=np.float32)[:, None].repeat(w, axis=1)
+    return np.stack([x, y, np.full((h, w), 0.5, np.float32)], axis=-1)
+
+
+def test_a_centred_frame_at_full_size_is_the_picture_itself():
+    src = _ramp()
+    out = motion.frame(src, motion.Camera(1.0, 0.5, 0.5), 64, 48)
+    assert out.shape == (48, 64, 3)
+    assert np.abs(out - src).max() < 1e-3
+
+
+def test_a_camera_to_the_right_sees_the_right_of_the_picture():
+    src = _ramp()
+    left = motion.frame(src, motion.Camera(2.0, 0.3, 0.5), 32, 24)
+    right = motion.frame(src, motion.Camera(2.0, 0.7, 0.5), 32, 24)
+    assert right[..., 0].mean() - left[..., 0].mean() == pytest.approx(0.4, abs=0.02)
+    assert right[..., 1].mean() == pytest.approx(left[..., 1].mean(), abs=1e-3)
+
+
+def test_a_camera_lower_down_sees_the_bottom_of_the_picture():
+    src = _ramp()
+    high = motion.frame(src, motion.Camera(2.0, 0.5, 0.3), 32, 24)
+    low = motion.frame(src, motion.Camera(2.0, 0.5, 0.7), 32, 24)
+    assert low[..., 1].mean() - high[..., 1].mean() == pytest.approx(0.4, abs=0.02)
+
+
+def test_zooming_in_shows_a_smaller_part_of_the_picture():
+    src = _ramp()
+    wide = motion.frame(src, motion.Camera(1.0, 0.5, 0.5), 32, 24)
+    close = motion.frame(src, motion.Camera(2.0, 0.5, 0.5), 32, 24)
+    spread = lambda img: float(img[..., 0].max() - img[..., 0].min())  # noqa: E731
+    assert spread(close) == pytest.approx(spread(wide) / 2, abs=0.03)
+
+
+def test_a_still_is_loaded_with_room_to_move_and_its_values_kept(tmp_path):
+    path = tmp_path / "s.png"
+    Image.new("RGB", (200, 100), (51, 102, 204)).save(path)
+    src = motion.load_still(path, 100, 100, room=1.5)
+    assert src.shape == (150, 300, 3)  # fills the frame's height, then the room on top
+    assert src[..., 0].mean() == pytest.approx(51 / 255, abs=1e-3)
+    assert src[..., 2].mean() == pytest.approx(204 / 255, abs=1e-3)
+
+
+def test_a_shot_comes_out_as_every_frame_in_order_at_sixteen_bits(tmp_path):
+    path = tmp_path / "s.png"
+    Image.fromarray((_ramp(320, 240) * 255).astype(np.uint8)).save(path)
+    frames = list(motion.frames_16bit(path, "pan_right", width=64, height=48, fps=24, duration=1.0))
+    assert len(frames) == 24
+    assert all(len(f) == 64 * 48 * 3 * 2 for f in frames)
+    reds = [np.frombuffer(f, np.uint16).reshape(48, 64, 3)[..., 0].mean() for f in frames]
+    assert all(b > a for a, b in zip(reds, reds[1:], strict=False)), "the frames are in order"
+    assert 0.3 * 65535 < reds[0] < 0.7 * 65535, "scaled to the full 16 bit range"
+
+
 def test_sampled_motion_is_even_frame_to_frame():
     rng = np.random.default_rng(1)
     coarse = rng.uniform(0, 1, (60, 40, 3)).astype(np.float32)
