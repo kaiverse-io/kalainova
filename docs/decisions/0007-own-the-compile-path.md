@@ -8,7 +8,7 @@ ADR 0003 holds the compiler until one job is accepted or measured. The operator 
 
 ## Decision
 
-- The repo owns an ffmpeg compile path (`kalainova/`): plan → assets → edit → compile → render → qa. Rented models still make the bytes; providers and prices live in `config/studio.yaml`, and every capability has a zero-cost local fallback.
+- The repo owns an ffmpeg compile path (`src/kalainova/`): plan → assets → edit → compile → render → qa. Rented models still make the bytes; providers and prices live in `config/studio.yaml`, and every capability has a zero-cost local fallback.
 - The render plan is a closed op list with a typed arg spec per op. Paths stay inside the job's work dir. Text reaches only `.ass` files, never a filtergraph.
 - A render plan is legal only when compiled from an `edit_manifest` with `runtime: ffmpeg`.
 - A human still approves every piece. The approval binds to the sha256 of the exact file QA passed, and `kalainova publish` posts only those bytes. Agents never write `approval.json`. Synthetic media is always labelled, or the post is refused.

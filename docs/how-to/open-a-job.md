@@ -1,5 +1,7 @@
 # How to open a job
 
+For a piece on a channel or with a character, use `docs/how-to/run-a-stream.md` instead. This page is for a one-off job with no stream.
+
 The operator opens a job on his own machine, because the brief, the master, and the publish login are his.
 
 1. Pick **one** peer in `docs/strategies.md`: `funded-clip`, `owned-derivative`, or `generated`.
@@ -17,7 +19,7 @@ The operator opens a job on his own machine, because the brief, the master, and 
    - generated jobs: `cost_cap` before the first render; `skip_funded: true` only if you mean it
 4. Write the subject, the brief, and any source notes inside `jobs/<id>/` only.
 5. If there is a script, add `script_packet.json` with a source for every factual line.
-6. Run `just check` (or `python3 scripts/check.py`) and `just lint`.
+6. Run `just check` and `just ci-docs`.
 7. Render with the rented tool. Veto the hook in ten minutes. A human publishes and submits.
 8. At 48 hours, write `measure.json` and set `status` to `accepted` (funded, tracking) or `measured`.
 

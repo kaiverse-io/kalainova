@@ -24,7 +24,7 @@ Measured by three numbers, nothing else:
 
 Working and tested (`just test`, 33 tests, one is a full render):
 
-- `python3 -m kalainova make <job>` runs **plan → assets → edit → compile → render → qa** from JSON contracts.
+- `uv run kalainova make <job>` runs **plan → assets → edit → compile → render → qa** from JSON contracts.
 - Provider adapters: Anthropic (planner + vision judge), ElevenLabs (voice with word timestamps, music, sfx), fal (image, video, music, transcription), and a zero-cost **local** fallback for every capability so the line never stops.
 - ffmpeg compiler over a closed op list (`cut scale concat overlay_text mix_audio loudnorm burn_captions export`). Paths are jailed to the job work dir, so a model-written plan cannot run a command or touch other files.
 - Retention defaults: hook card, kinetic word-by-word captions with emphasis colour, motion on every still, a shot change every ≤ 4 s, progress bar, sidechain-ducked music, whoosh on cuts, two-pass loudnorm to −14 LUFS / −1 dBTP.

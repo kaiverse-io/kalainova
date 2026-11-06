@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/schedule-0.1.json",
+  "title": "Schedule packet: dated slots on one stream",
+  "description": "Nothing here renders. A slot becomes a job when someone requests it, and that job still passes the human gate.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "stream_id",
+    "slots"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "stream_id": {
+      "type": "string"
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "date",
+          "brief",
+          "status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "brief": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "requested"
+            ]
+          },
+          "cast": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

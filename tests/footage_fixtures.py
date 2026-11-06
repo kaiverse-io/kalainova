@@ -7,7 +7,6 @@ talk(): an audio-bearing clip with speech-like bursts separated by silences (for
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -19,9 +18,11 @@ from kalainova import media
 def landscape(seed: int, w: int = 1280, h: int = 720) -> Image.Image:
     rng = np.random.default_rng(seed)
     y = np.linspace(0, 1, h)[:, None]
-    top = np.array(rng.choice([[40, 90, 170], [250, 140, 80], [90, 60, 140], [70, 140, 200]]), np.float32)
+    top = np.array(
+        rng.choice([[40, 90, 170], [250, 140, 80], [90, 60, 140], [70, 140, 200]]), np.float32
+    )
     bottom = np.array([250, 215, 170], np.float32)
-    sky = top + (bottom - top) * y ** 0.7
+    sky = top + (bottom - top) * y**0.7
     img = np.broadcast_to(sky[:, None, :], (h, w, 3)).copy()
     sx, sy = rng.uniform(0.2, 0.8) * w, rng.uniform(0.25, 0.45) * h
     yy, xx = np.mgrid[0:h, 0:w]
@@ -30,7 +31,10 @@ def landscape(seed: int, w: int = 1280, h: int = 720) -> Image.Image:
     for layer in range(4):
         base = 0.45 + layer * 0.12
         xs = np.arange(w)
-        ridge = base * h + sum(rng.uniform(10, 60) * np.sin(xs / rng.uniform(40, 220) + rng.uniform(0, 6)) for _ in range(4))
+        ridge = base * h + sum(
+            rng.uniform(10, 60) * np.sin(xs / rng.uniform(40, 220) + rng.uniform(0, 6))
+            for _ in range(4)
+        )
         shade = np.array([30, 45, 70]) * (1 - layer * 0.18) + layer * 18
         haze = 0.55 - layer * 0.15
         mask = yy > ridge[None, :]
@@ -39,8 +43,17 @@ def landscape(seed: int, w: int = 1280, h: int = 720) -> Image.Image:
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
 
 
-def clip(dst: Path, seed: int, *, dur: float = 4.0, shake: float = 0.0, blur: float = 0.0, dark: float = 1.0,
-         fps: int = 24, size=(640, 360)) -> Path:
+def clip(
+    dst: Path,
+    seed: int,
+    *,
+    dur: float = 4.0,
+    shake: float = 0.0,
+    blur: float = 0.0,
+    dark: float = 1.0,
+    fps: int = 24,
+    size=(640, 360),
+) -> Path:
     scene = landscape(seed, int(size[0] * 1.4), int(size[1] * 1.4))
     if blur:
         scene = scene.filter(ImageFilter.GaussianBlur(blur))
@@ -59,11 +72,30 @@ def clip(dst: Path, seed: int, *, dur: float = 4.0, shake: float = 0.0, blur: fl
         t = i / max(n - 1, 1)
         x = int((sw - W) * (0.15 + 0.7 * t) + jx[i]) % max(sw - W, 1)
         y = int((sh - H) * 0.5 + jy[i]) % max(sh - H, 1)
-        f = arr[y:y + H, x:x + W] * dark
+        f = arr[y : y + H, x : x + W] * dark
         Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).save(frames_dir / f"{i:04d}.png")
-    media.run(["-framerate", str(fps), "-i", str(frames_dir / "%04d.png"), "-f", "lavfi", "-i",
-               f"anoisesrc=d={dur}:c=pink:a=0.02", "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
-               "-pix_fmt", "yuv420p", "-c:a", "aac", str(dst)])
+    media.run(
+        [
+            "-framerate",
+            str(fps),
+            "-i",
+            str(frames_dir / "%04d.png"),
+            "-f",
+            "lavfi",
+            "-i",
+            f"anoisesrc=d={dur}:c=pink:a=0.02",
+            "-shortest",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(dst),
+        ]
+    )
     for f in frames_dir.iterdir():
         f.unlink()
     frames_dir.rmdir()
@@ -76,12 +108,33 @@ def talk(dst: Path, segments: list[tuple[float, bool]], size=(640, 360)) -> Path
     expr_parts, t = [], 0.0
     for dur, speaking in segments:
         if speaking:
-            expr_parts.append(f"between(t,{t:.2f},{t + dur:.2f})*0.3*sin(2*PI*220*t)*(0.6+0.4*sin(2*PI*4*t))")
+            expr_parts.append(
+                f"between(t,{t:.2f},{t + dur:.2f})*0.3*sin(2*PI*220*t)*(0.6+0.4*sin(2*PI*4*t))"
+            )
         t += dur
     expr = "+".join(expr_parts) + "+0.002*sin(2*PI*50*t)"
-    media.run(["-f", "lavfi", "-i", f"testsrc2=s={size[0]}x{size[1]}:r=24:d={t:.2f}",
-               "-f", "lavfi", "-i", f"aevalsrc='{expr}':s=48000:d={t:.2f}",
-               "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(dst)])
+    media.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=s={size[0]}x{size[1]}:r=24:d={t:.2f}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"aevalsrc='{expr}':s=48000:d={t:.2f}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(dst),
+        ]
+    )
     return dst
 
 

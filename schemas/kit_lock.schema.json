@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/kit_lock-0.1.json",
+  "title": "Kit lock: the exact versions one job used",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "stream",
+    "distribution_identity",
+    "cast",
+    "generators",
+    "kits",
+    "canon"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string"
+    },
+    "stream": {
+      "type": "string"
+    },
+    "distribution_identity": {
+      "type": "string"
+    },
+    "cast": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "generators": {
+      "type": "object"
+    },
+    "kits": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "kit_id",
+          "version",
+          "content_sha256"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kit_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "content_sha256": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "canon": {
+      "type": "object",
+      "required": [
+        "lines",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

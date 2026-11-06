@@ -70,6 +70,33 @@
             "items": {
               "type": "string"
             }
+          },
+          "cast": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Roles visible in this beat. Empty means no people in frame."
+          },
+          "speaker": {
+            "type": "string",
+            "description": "The role whose locked voice reads this line."
+          },
+          "looks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Role to a look its kit holds."
+          },
+          "location": {
+            "type": "string"
+          },
+          "props": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }
@@ -126,6 +153,11 @@
           }
         }
       }
+    },
+    "chosen_hook": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index of the hook used in the first beat."
     }
   }
 }

@@ -33,7 +33,9 @@ models:
     music: music_v1
   fal:
     # Slugs: confirm with the fal MCP search_models/get_model_schema before first paid run.
-    image: fal-ai/nano-banana-2.1                   # default; premium = GPT Image 2.5 via OpenAI
+    image: google/nano-banana-2.1                   # slug from fal's model page; default; premium = GPT Image 2.5 via OpenAI
+    image_edit: google/nano-banana-2.1/edit         # takes reference images; see reference_models
+    reference_to_video: alibaba/wan-3.0-prime/reference-to-video
     video: fal-ai/wan/v3/text-to-video              # Wan 3.0: #1 AA T2V, $0.20/s at 1080p
     image_to_video: fal-ai/wan/v3/image-to-video    # premium = Seedance 2.5 / Kling 4.0
     video_durations: "5,10"                         # seconds the model accepts; VERIFY per model
@@ -52,8 +54,35 @@ prices:
     image: {per_image: 0.05}       # Nano Banana 2.1 2K
     video: {per_sec: 0.20}         # Wan 3.0 1080p
     image_to_video: {per_sec: 0.20}
+    reference_to_video: {per_sec: 0.20}  # ESTIMATE, not a quoted price: check the chosen model. Kling O1 listed $0.112/s.
     music: {per_track: 0.08}
     transcribe: {per_min: 0.01}
+
+# Models that can hold a face: how each takes reference images. Only these may be pinned by a stream
+# with a character. Fields come from fal's public model pages. VERIFY against get_model_schema before
+# the first paid run. tag is how the prompt names the Nth image.
+reference_models:
+  fal:
+    image:
+      google/nano-banana-2.1/edit: {images_param: image_urls, max_images: 14, max_characters: 4, tag: "image {n}"}
+    video:
+      alibaba/wan-3.0-prime/reference-to-video:
+        images_param: reference_image_urls
+        max_images: 10
+        tag: "Image {n}"
+        durations: "5,10"
+        duration_type: int
+        extra: {audio: false}
+      bytedance/seedance-2.0/reference-to-video:
+        images_param: image_urls
+        max_images: 9
+        tag: "@Image{n}"
+        durations: "4,5,6,8,10,12,15"
+        extra: {generate_audio: false}
+      fal-ai/kling-video/o1/reference-to-video:
+        elements: true
+        max_images: 7
+        durations: "5,10"
 
 profiles:
   short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}

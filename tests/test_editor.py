@@ -17,8 +17,18 @@ HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 
 
 def test_notes_accumulate_and_override():
-    s = notes.resolve(["30s reel, warm, cinematic, title: Three days", "faster cuts, cooler, drop shaky, open with sunset"])
-    assert (s["duration_sec"], s["pace"], s["grade"], s["title"]) == (30, "fast", "cool", "Three days")
+    s = notes.resolve(
+        [
+            "30s reel, warm, cinematic, title: Three days",
+            "faster cuts, cooler, drop shaky, open with sunset",
+        ]
+    )
+    assert (s["duration_sec"], s["pace"], s["grade"], s["title"]) == (
+        30,
+        "fast",
+        "cool",
+        "Three days",
+    )
     assert "shaky" in s["drop"] and s["start_with"] == "sunset"
 
 
@@ -35,23 +45,40 @@ def test_long_form_note():
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_footage_edit_rejects_bad_takes(tmp_path, monkeypatch):
     from footage_fixtures import clip, landscape
-    from kalainova import render, qa
+
+    from kalainova import qa, render
     from kalainova.editor import analyze, direct
     from kalainova.jobfs import Job
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     for k in ("ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "FAL_KEY"):
         monkeypatch.delenv(k, raising=False)
     src = tmp_path / "in"
     src.mkdir()
-    files = [clip(src / "a_good.mp4", 1, dur=3, size=(320, 180)), clip(src / "b_shaky.mp4", 2, dur=3, shake=6, size=(320, 180)),
-             clip(src / "c_good.mp4", 5, dur=3, size=(320, 180)), clip(src / "d_dark.mp4", 4, dur=3, dark=0.2, size=(320, 180))]
+    files = [
+        clip(src / "a_good.mp4", 1, dur=3, size=(320, 180)),
+        clip(src / "b_shaky.mp4", 2, dur=3, shake=6, size=(320, 180)),
+        clip(src / "c_good.mp4", 5, dur=3, size=(320, 180)),
+        clip(src / "d_dark.mp4", 4, dur=3, dark=0.2, size=(320, 180)),
+    ]
     photo = src / "e_photo.jpg"
     landscape(7, 800, 533).save(photo)
     files.append(photo)
     folder = tmp_path / "jobs" / "ed"
     folder.mkdir(parents=True)
-    (folder / "job.json").write_text(json.dumps({"schema_version": "0.1", "job_id": "ed", "strategy": "owned-derivative",
-        "media": ["video", "audio"], "rights": "owned", "distribution_identity": "owned", "status": "draft"}))
+    (folder / "job.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "ed",
+                "strategy": "owned-derivative",
+                "media": ["video", "audio"],
+                "rights": "owned",
+                "distribution_identity": "owned",
+                "status": "draft",
+            }
+        )
+    )
     job = Job(folder)
     analyze.ingest(job, files)
     direct.add_note(job, "8s reel, warm, title: Test trip")

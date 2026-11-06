@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1",
+  "job_id": "j1",
+  "strategy": "generated",
+  "media": [
+    "video"
+  ],
+  "rights": "owned",
+  "distribution_identity": "other",
+  "status": "draft",
+  "cost_cap": 5,
+  "stream": "chan",
+  "cast": [
+    "lead"
+  ]
+}

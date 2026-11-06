@@ -1,6 +1,6 @@
 # 0001. The subject is an input on the job
 
-Status: accepted · 2026-11-05
+Status: accepted · 2026-11-05. Amended by 0009 and 0010: the subject is an operator input on a job, kit, or stream, all of which live in a private home.
 
 ## Context
 

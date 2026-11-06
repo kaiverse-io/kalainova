@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1",
+  "stream_id": "chan",
+  "slots": [
+    {
+      "date": "2026-12-01",
+      "brief": "a",
+      "status": "open"
+    },
+    {
+      "date": "2026-12-01",
+      "brief": "b",
+      "status": "open"
+    }
+  ]
+}
