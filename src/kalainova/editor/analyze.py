@@ -32,31 +32,7 @@ AW, AH, AFPS = 160, 90, 4  # analysis frame size and rate
 
 def scenes(path: Path, threshold: float = 0.32) -> list[float]:
     """Cut points (seconds) where the picture changes."""
-    proc = subprocess.run(
-        [
-            media.FFMPEG,
-            "-hide_banner",
-            "-nostats",
-            "-i",
-            str(path),
-            "-an",
-            "-vf",
-            f"scale=320:-2,select='gt(scene,{threshold})',showinfo",
-            "-f",
-            "null",
-            "-",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    cuts = []
-    for line in proc.stderr.splitlines():
-        if "pts_time:" in line and "showinfo" in line:
-            try:
-                cuts.append(float(line.split("pts_time:")[1].split()[0]))
-            except (IndexError, ValueError):
-                pass
-    return cuts
+    return media.scene_changes(path, threshold)
 
 
 def frames(

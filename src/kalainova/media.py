@@ -9,6 +9,8 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
+
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
 
@@ -190,3 +192,83 @@ def silencedetect(
 def frame_at(path: str | Path, t: float, dst: Path) -> Path:
     run(["-ss", f"{t:.3f}", "-i", str(path), "-frames:v", "1", str(dst)])
     return dst
+
+
+def stream_info(path: str | Path, kind: str) -> dict:
+    """The first stream of a kind, as ffprobe reports it."""
+    return next((s for s in probe(path).get("streams", []) if s.get("codec_type") == kind), {})
+
+
+def scene_changes(path: str | Path, threshold: float = 0.32) -> list[float]:
+    """Seconds where the picture changes."""
+    proc = subprocess.run(
+        [
+            FFMPEG,
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(path),
+            "-an",
+            "-vf",
+            f"scale=320:-2,select='gt(scene,{threshold})',showinfo",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return [float(m) for m in re.findall(r"pts_time:([\d.]+)", proc.stderr)]
+
+
+def _decode(args: list[str]) -> bytes:
+    cmd = [FFMPEG, "-hide_banner", "-loglevel", "error", *args]
+    return subprocess.run(cmd, capture_output=True).stdout
+
+
+def decode_gray(
+    path: str | Path,
+    *,
+    width: int,
+    fps: float | None = None,
+    start: float = 0.0,
+    duration: float | None = None,
+) -> "np.ndarray":
+    """Frames as uint8 luma [n, h, w]. Height follows the file's shape."""
+    info = summarize(path)
+    height = max(round(width * info["height"] / info["width"]) // 2 * 2, 2)
+    seek = ["-ss", f"{start:.3f}"] if start else []
+    span = ["-t", f"{duration:.3f}"] if duration else []
+    rate = f"fps={fps:g}," if fps else ""
+    blob = _decode(
+        [
+            *seek,
+            *span,
+            "-i",
+            str(path),
+            "-an",
+            "-vf",
+            f"{rate}scale={width}:{height}:flags=bicubic,format=gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ]
+    )
+    frames = np.frombuffer(blob, np.uint8)
+    n = frames.size // (width * height)
+    return frames[: n * width * height].reshape(n, height, width)
+
+
+def gray_frame(path: str | Path, t: float, *, width: int | None = None) -> "np.ndarray":
+    """One frame as uint8 luma, full size unless a width is given."""
+    info = summarize(path)
+    w = width or info["width"]
+    return decode_gray(path, width=w, start=t, duration=0.08)[0]
+
+
+def decode_stereo(path: str | Path, sr: int = 48000) -> tuple["np.ndarray", "np.ndarray", int]:
+    """Left, right, and sample rate, as float32 in -1..1."""
+    blob = _decode(["-i", str(path), "-vn", "-ac", "2", "-ar", str(sr), "-f", "f32le", "-"])
+    x = np.frombuffer(blob, np.float32)
+    x = x[: x.size // 2 * 2].reshape(-1, 2)
+    return x[:, 0], x[:, 1], sr

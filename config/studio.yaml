@@ -84,6 +84,21 @@ reference_models:
         max_images: 7
         durations: "5,10"
 
+# The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
+bar:
+  stutter_max: 0.35
+  cuts_per_min_max: 40
+  banding_max: 0.03
+  detail_min: 0.002
+  repetition_max: 0.15
+  corner_mark_max: 0.004
+  clipped_share_max: 0.0
+  dc_offset_max: 0.002
+  stereo_correlation_min: 0.0
+  hard_cuts_per_min_max: 6
+  digital_silence_sec_max: 0.2
+  ending_drop_db_max: -12
+
 profiles:
   short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
