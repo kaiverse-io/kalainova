@@ -99,6 +99,17 @@ def _job(tmp_path, monkeypatch):
     return Job(folder)
 
 
+def test_a_paragraph_does_not_end_on_one_short_word():
+    text = (
+        "The box hummed when he reached the top. It always hummed. It had a green light on its "
+        "face that had never once been any other colour, and in the early years he had looked at "
+        "it the way you look at a younger man who has been given your job. These days he only "
+        "nodded to it, the way you nod to a neighbour you have nothing to say to."
+    )
+    lines = story.break_lines(text, measure=1220, size=story.BODY_SIZE, indent=story.INDENT)
+    assert len(lines[-1].words) >= 2
+
+
 def _lines(n):
     return [[story.Line(["word"], 100, True, 0)] * n]
 

@@ -25,6 +25,7 @@ MARGIN_X, MARGIN_TOP, MARGIN_FOOT = 215, 240, 270
 BODY_SIZE, LEADING = 46, 67  # 11 pt on 16 pt
 INDENT = 46
 OPENER_DROP = 620  # a chapter starts a third of the way down its page
+LONE_WORD_COST = 1.0  # worth a much looser line elsewhere in the paragraph
 MIN_LAST_PAGE_LINES = 5  # fewer than this on a chapter's last page looks like a mistake
 BODY_FACE = "Literata.ttf"
 FOOT_DARKNESS = 0.82
@@ -68,7 +69,10 @@ def break_lines(text: str, *, measure: float, size: int, indent: int) -> list[Li
             if used > room and end > start + 1:
                 break
             slack = max(room - used, 0.0)
-            cost = 0.0 if end == count else (slack / max(room, 1.0)) ** 2
+            if end < count:
+                cost = (slack / max(room, 1.0)) ** 2
+            else:  # the last line is free to run short, but not down to one stranded word
+                cost = LONE_WORD_COST if end - start == 1 and start else 0.0
             if best[start] + cost < best[end]:
                 best[end] = best[start] + cost
                 came_from[end] = start
