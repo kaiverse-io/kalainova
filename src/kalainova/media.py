@@ -6,7 +6,7 @@ import json
 import re
 import shutil
 import subprocess
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -15,8 +15,8 @@ FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
 MASTER_PASSES = 3
 
-# Every stage between the source and the delivered file is lossless 10-bit 4:4:4 BT.709, so one final
-# encode is the only place quality is spent. The tags stop players guessing a colour matrix.
+# Every stage between source and delivery is lossless 10-bit 4:4:4 BT.709, so one final encode is
+# the only place quality is spent. The tags stop players guessing a colour matrix.
 COLOR_TAGS = [
     "-colorspace",
     "bt709",
@@ -28,23 +28,48 @@ COLOR_TAGS = [
     "tv",
 ]
 MASTER_PIX_FMT = "yuv444p10le"
-MASTER_ARGS = ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", MASTER_PIX_FMT, *COLOR_TAGS]
+MASTER_ARGS = [
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-qp",
+    "0",
+    "-pix_fmt",
+    MASTER_PIX_FMT,
+    *COLOR_TAGS,
+]
 _SWS = "out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int"
 _TAG_FRAMES = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
 TO_BT709 = f"scale={_SWS},{_TAG_FRAMES}"
 TO_DELIVERY = f"scale={_SWS},format=yuv420p,{_TAG_FRAMES}"
-# aq-mode 3 spends bits in dark gradients, where 8-bit bands first. Deblock is eased to keep fine detail.
+# aq-mode 3 spends bits in dark gradients, where 8-bit bands first. Deblock eased for fine detail.
+TO_PRORES = f"scale={_SWS},format=yuv422p10le,{_TAG_FRAMES}"
+PRORES_ARGS = [
+    "-c:v",
+    "prores_ks",
+    "-profile:v",
+    "3",
+    "-vendor",
+    "apl0",
+    *COLOR_TAGS,
+    "-movflags",
+    "+faststart+write_colr+write_gama",
+]
 X264_FINISH = "aq-mode=3:aq-strength=0.9:deblock=-1,-1:psy-rd=1.0,0.15"
-HDR_TO_SDR = "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv"
+HDR_TO_SDR = (
+    "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,"
+    "zscale=t=bt709:m=bt709:r=tv"
+)
 
 
 class MediaError(RuntimeError):
     pass
 
 
-@lru_cache(maxsize=None)
+@cache
 def has_filter(name: str) -> bool:
-    """Whether this ffmpeg build has a filter. Builds differ, and the engine must say so or adapt."""
+    """Whether this ffmpeg build has a filter. Builds differ, and the engine must adapt."""
     proc = subprocess.run([FFMPEG, "-hide_banner", "-filters"], capture_output=True, text=True)
     return any(line.split()[1:2] == [name] for line in proc.stdout.splitlines())
 
@@ -67,12 +92,14 @@ def filter_path(path: str | Path) -> str:
 
 
 def from_source_color(path: str | Path) -> list[str]:
-    """Filters that bring a source to SDR. Phones shoot HDR, and it looks grey and flat untreated."""
+    """Filters that bring a source to SDR. Phones shoot HDR, which looks grey and flat untreated."""
     transfer = stream_info(path, "video").get("color_transfer")
     return [HDR_TO_SDR] if transfer in ("arib-std-b67", "smpte2084") else []
 
 
-def encode_rgb48(frames, *, size: tuple[int, int], fps: float, vf: str, out: Path, cwd: Path) -> None:
+def encode_rgb48(
+    frames, *, size: tuple[int, int], fps: float, vf: str, out: Path, cwd: Path
+) -> None:
     """Encode rgb48 frames from a generator to the master format."""
     cmd = [
         FFMPEG,
@@ -103,7 +130,9 @@ def encode_rgb48(frames, *, size: tuple[int, int], fps: float, vf: str, out: Pat
         pass  # ffmpeg stopped early, and its own message explains why
     _, err = proc.communicate()
     if proc.returncode != 0:
-        raise MediaError(f"ffmpeg failed ({proc.returncode}) encoding frames:\n{err.decode()[-2000:]}")
+        raise MediaError(
+            f"ffmpeg failed ({proc.returncode}) encoding frames:\n{err.decode()[-2000:]}"
+        )
 
 
 def probe(path: str | Path) -> dict:
@@ -182,7 +211,7 @@ def loudness(path: str | Path) -> dict:
 
 
 def master_loudness(src: Path, dst: Path, target: float, ceiling: float) -> Path:
-    """Set the level with one gain and catch peaks with a true-peak limiter at 4x, then check the result.
+    """Set the level with one gain, catch peaks with a limiter at 4x, and check the result.
 
     A single gain keeps the mix's dynamics. loudnorm's dynamic mode, which it falls back to whenever
     the peaks do not fit, rides the level and audibly pumps music under speech.
@@ -330,7 +359,7 @@ def decode_gray(
     fps: float | None = None,
     start: float = 0.0,
     duration: float | None = None,
-) -> "np.ndarray":
+) -> np.ndarray:
     """Frames as uint8 luma [n, h, w]. Height follows the file's shape."""
     info = summarize(path)
     height = max(round(width * info["height"] / info["width"]) // 2 * 2, 2)
@@ -356,14 +385,14 @@ def decode_gray(
     return frames[: n * width * height].reshape(n, height, width)
 
 
-def gray_frame(path: str | Path, t: float, *, width: int | None = None) -> "np.ndarray":
+def gray_frame(path: str | Path, t: float, *, width: int | None = None) -> np.ndarray:
     """One frame as uint8 luma, full size unless a width is given."""
     info = summarize(path)
     w = width or info["width"]
     return decode_gray(path, width=w, start=t, duration=0.08)[0]
 
 
-def decode_stereo(path: str | Path, sr: int = 48000) -> tuple["np.ndarray", "np.ndarray", int]:
+def decode_stereo(path: str | Path, sr: int = 48000) -> tuple[np.ndarray, np.ndarray, int]:
     """Left, right, and sample rate, as float32 in -1..1."""
     blob = _decode(["-i", str(path), "-vn", "-ac", "2", "-ar", str(sr), "-f", "f32le", "-"])
     x = np.frombuffer(blob, np.float32)

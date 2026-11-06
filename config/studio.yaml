@@ -98,9 +98,20 @@ bar:
   hard_cuts_per_min_max: 6
   digital_silence_sec_max: 0.2
   ending_drop_db_max: -12
+  voice_to_music_db_min: 12
+  source_mark_max: 0.004
+  source_scale_min: 0.75
+  moving_share_min: 0.6
+  duplicate_share_max: 0.0
+  master_integrated_lkfs_max: -18
+  master_true_peak_dbtp_max: -1
 
 profiles:
   short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
+  story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
+  # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
+  film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine}
+  film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine}

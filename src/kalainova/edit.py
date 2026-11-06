@@ -17,6 +17,7 @@ from .jobfs import Job
 MOTIONS = ["push_in", "pan_left", "push_out", "pan_right", "drift_up"]
 STUDIO_MOTIONS = ["push_in", "drift_up", "push_in", "pan_right", "push_out"]  # slow, mostly forward
 THEMES = ("studio", "bold")
+PICTURE_LEAD_SEC = 0.08
 
 
 def caption_cards(
@@ -87,6 +88,8 @@ def run(job: Job, *, force: bool = False) -> dict:
     beats = {b["id"]: b for b in packet["beats"]}
     theme = opts.get("theme", "studio")
     studio = theme == "studio"
+    mezzanine = prof.get("delivery") == "mezzanine"
+    wants_captions = opts.get("captions", True) and not mezzanine
 
     cuts = []
     for i, span in enumerate(am["timeline"]):
@@ -102,7 +105,9 @@ def run(job: Job, *, force: bool = False) -> dict:
             "in_sec": 0,
             "out_sec": dur,
             "role": beat["role"],
-            "start_sec": span["start_sec"],
+            # the picture changes just before the words do, the way a line is cut in a film
+            "start_sec": max(span["start_sec"] - (PICTURE_LEAD_SEC if i else 0.0), 0.0),
+            "grade": opts.get("grade", "natural"),
         }
         if src["kind"] == "still":
             cut["motion"] = (STUDIO_MOTIONS if studio else MOTIONS)[i % len(MOTIONS)]
@@ -110,7 +115,14 @@ def run(job: Job, *, force: bool = False) -> dict:
             cut["out_sec"] = round(src["duration_sec"], 3)
             cut["hold_last_frame"] = True
         # bold typecards bake their headline; everything else gets an animated title (studio: every beat)
-        if beat.get("on_screen") and src.get("model") != "local-typecard" and (studio or i > 0):
+        # Two lines of text at once is noise. With captions up, only the opening and closing keep a title.
+        key_beat = i == 0 or i == len(am["timeline"]) - 1 or not wants_captions
+        if (
+            beat.get("on_screen")
+            and src.get("model") != "local-typecard"
+            and (studio or i > 0)
+            and (key_beat or opts.get("titles") == "all")
+        ):
             cut["title"] = beat["on_screen"]
         cuts.append(cut)
 
@@ -118,9 +130,11 @@ def run(job: Job, *, force: bool = False) -> dict:
         re.sub(r"\W", "", w).lower() for b in packet["beats"] for w in b.get("emphasis", [])
     }
     cw, cc = (4, 22) if studio else (3, 14)
-    captions = (
-        caption_cards(am.get("words", []), emphasis, cw, cc) if opts.get("captions", True) else []
-    )
+    captions = caption_cards(am.get("words", []), emphasis, cw, cc) if wants_captions else []
+    closed = [
+        {k: card[k] for k in ("start_sec", "end_sec", "text")}
+        for card in caption_cards(am.get("words", []), set(), 14, 74)
+    ]
 
     overlays = []
     hook = packet["beats"][0]
@@ -164,12 +178,18 @@ def run(job: Job, *, force: bool = False) -> dict:
             "fps": float(prof.get("fps", 30)),
             "target_lufs": float(prof.get("target_lufs", -14)),
             "true_peak_dbtp_max": float(prof.get("true_peak_dbtp_max", -1)),
+            "delivery": prof.get("delivery", "web"),
         },
         "theme": theme,
-        "transition": opts.get("transition", "dissolve" if studio else "cut"),
-        "caption_style": opts.get("caption_style", "studio" if studio else "kinetic"),
+        "transition": opts.get("transition", "cut"),
+        "caption_style": "none"
+        if mezzanine
+        else opts.get("caption_style", "studio" if studio else "kinetic"),
         "cuts": cuts,
         "captions": captions,
+        "closed_captions": closed,
+        "fade_in_sec": float(opts.get("fade_in_sec", 0.5 if mezzanine else 0.0)),
+        "fade_out_sec": float(opts.get("fade_out_sec", 1.0 if mezzanine else 0.5)),
         "overlays": overlays,
         "audio": audio,
     }

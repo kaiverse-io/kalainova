@@ -117,7 +117,10 @@ class LocalProvider(Provider):
             ]
         )
         return Result(
-            path=dst, model="flite-absent", words=estimate_words(text, dur), meta={"duration_sec": dur}
+            path=dst,
+            model="flite-absent",
+            words=estimate_words(text, dur),
+            meta={"duration_sec": dur},
         )
 
     def image(

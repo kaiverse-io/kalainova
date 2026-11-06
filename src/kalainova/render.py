@@ -12,6 +12,8 @@ import json
 import re
 from pathlib import Path
 
+import numpy as np
+
 from . import captions as ass
 from . import look, media, motion
 from .jobfs import ContractError, Job
@@ -25,6 +27,7 @@ OPS = (
     "mix_audio",
     "loudnorm",
     "burn_captions",
+    "caption_files",
     "export",
 )
 MOTIONS = ("none", "push_in", "push_out", "pan_left", "pan_right", "drift_up")
@@ -44,6 +47,8 @@ DUCK = "sidechaincompress=threshold=0.02:ratio=6:attack=25:release=450:makeup=1"
 # A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
 ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
 MUSIC_FADE_SEC = 2.5
+SAMPLE_WIDTH, SAMPLE_FPS = 270, 2.0
+TITLE_HOLD_SEC = 3.0
 
 # Closed arg spec per op. Every value is coerced to its type before it reaches ffmpeg, so a
 # model-written plan cannot smuggle filtergraph text through a number. Text (titles, captions)
@@ -113,6 +118,7 @@ SPEC = {
         "style": ("studio", "kinetic", "plain"),
         "captions": "list",
     },
+    "caption_files": {"cues": "list", "fps": "num"},
     "mix_audio": {
         "out": "path",
         "duration_sec": "num",
@@ -132,8 +138,11 @@ SPEC = {
         "preset": PRESETS,
         "thumbnail": "path?",
         "audio_only": "path?",
+        "fade_in_sec": "num?",
         "fade_out_sec": "num?",
         "duration_sec": "num?",
+        "fps": "num?",
+        "master": "path?",
         "synthetic": "bool?",
     },
 }
@@ -313,16 +322,12 @@ def compile_plan(job: Job) -> dict:
         if cut.get("title"):
             s = cut.get("start_sec", 0)
             span = _span(em, i)
-            hold = (
-                span - 0.15 if studio else min(2.2, span)
-            )  # studio headlines live for the whole beat
+            hold = min(TITLE_HOLD_SEC, span) - 0.15 if studio else min(2.2, span)
             item = {
                 "text": cut["title"],
                 "start_sec": s + (0.15 if studio else 0.1),
                 "end_sec": s + max(hold, 0.6),
             }
-            if assets[cut["source"]].get("provider") == "operator":
-                item["scrim"] = True
             titles.append(item)
     steps.append(
         {
@@ -340,6 +345,9 @@ def compile_plan(job: Job) -> dict:
         }
     )
     video = "picture.ov.mp4"
+    cues = em.get("closed_captions") or em.get("captions")
+    if cues:
+        steps.append({"op": "caption_files", "args": {"cues": cues, "fps": FPS}})
     if em.get("captions"):
         steps.append(
             {
@@ -404,8 +412,11 @@ def compile_plan(job: Job) -> dict:
                 "preset": "slow",
                 "thumbnail": "thumb.jpg",
                 "audio_only": "final.m4a" if audio else None,
+                "fade_in_sec": em.get("fade_in_sec"),
                 "fade_out_sec": em.get("fade_out_sec"),
                 "duration_sec": em["duration_sec"],
+                "fps": FPS,
+                "master": "final.master.mov" if prof.get("delivery") == "mezzanine" else None,
                 "synthetic": any(x.get("synthetic") for x in am["assets"]),
             },
         }
@@ -482,7 +493,9 @@ def refuse_fallback_fonts(log: str) -> None:
     """libass names a system path when it could not find the font asked for. That is not our type."""
     for wanted, used in re.findall(r"fontselect: \(([^,]+),[^)]*\) -> ([^,]+),", log):
         if "/" in used:
-            raise ContractError(f"font {wanted!r} is not in {ass.FONTS}; libass fell back to {used}")
+            raise ContractError(
+                f"font {wanted!r} is not in {ass.FONTS}; libass fell back to {used}"
+            )
 
 
 def _look_filter(work: Path, a: dict) -> list[str]:
@@ -675,7 +688,7 @@ def _op_overlay_text(work: Path, a: dict) -> None:
     ass_path = work / "overlay.ass"
     studio = a.get("theme") == "studio"
     ass_path.write_text(
-        ass.studio_titles(a.get("titles", []), W, H)
+        ass.studio_titles(_placed_titles(src, a.get("titles", []), W, H), W, H)
         if studio
         else ass.overlay_events(a.get("overlays", []), a.get("titles", []), W, H)
     )
@@ -693,6 +706,48 @@ def _op_overlay_text(work: Path, a: dict) -> None:
         _burn(work, src, out, ["-vf", burn])
 
 
+def _picture_samples(src: Path) -> tuple[np.ndarray, float]:
+    """A small copy of the picture at a few frames a second, for placing type against it."""
+    return media.decode_gray(src, width=SAMPLE_WIDTH, fps=SAMPLE_FPS), SAMPLE_FPS
+
+
+def _frame_at(samples: np.ndarray, rate: float, t: float) -> np.ndarray:
+    return samples[min(int(t * rate), len(samples) - 1)]
+
+
+def _band_level(gray: np.ndarray, center: float, half: float) -> float:
+    """The bright end of a horizontal band, 0..1, which is what type has to read against."""
+    h = gray.shape[0]
+    rows = gray[max(int((center - half) * h), 0) : int((center + half) * h) + 1]
+    return float(np.percentile(rows, 90)) / 255 if rows.size else 0.0
+
+
+def _placed_titles(src: Path, titles: list[dict], w: int, h: int) -> list[dict]:
+    """Put each title where the picture is calm, and darken behind it only if it needs that."""
+    if not titles:
+        return []
+    samples, rate = _picture_samples(src)
+    placed = []
+    for title in titles:
+        frame = _frame_at(samples, rate, (title["start_sec"] + title["end_sec"]) / 2)
+        y = ass.calmest_band(frame, ass.title_centers(w, h))
+        alpha = ass.scrim_alpha(_band_level(frame, y, 0.1))
+        placed.append({**title, "y_frac": y, "scrim_alpha": alpha})
+    return placed
+
+
+def _caption_levels(src: Path, captions: list[dict], w: int, h: int) -> list[float]:
+    samples, rate = _picture_samples(src)
+    line = ass.safe_area(w, h)["bottom"]
+    return [
+        max(
+            _band_level(_frame_at(samples, rate, t), 1 - line - 0.04, 0.05)
+            for t in (card["start_sec"], (card["start_sec"] + card["end_sec"]) / 2)
+        )
+        for card in captions
+    ]
+
+
 def _burn(work: Path, src: Path, out: Path, graph: list[str]) -> None:
     proc = media.run(
         ["-i", src.name, *graph, *media.MASTER_ARGS, out.name], cwd=work, loglevel="verbose"
@@ -702,26 +757,20 @@ def _burn(work: Path, src: Path, out: Path, graph: list[str]) -> None:
 
 def _op_burn_captions(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
-    studio = a.get("style") == "studio"
-    (work / "captions.ass").write_text(
-        ass.studio_captions(a["captions"], a["width"], a["height"])
-        if studio
-        else ass.kinetic(a["captions"], a["width"], a["height"])
-    )
+    caps, W, H = a["captions"], a["width"], a["height"]
+    if a.get("style") == "studio":
+        text, report = ass.studio_captions(caps, W, H, _caption_levels(src, caps, W, H))
+        (work / "type_report.json").write_text(json.dumps(report) + "\n")
+    else:
+        text = ass.kinetic(caps, W, H)
+    (work / "captions.ass").write_text(text)
     burn = f"subtitles=captions.ass:fontsdir={media.filter_path(ass.FONTS)}"
     _burn(work, src, out, ["-vf", burn])
-    (work / "captions.srt").write_text(_srt(a["captions"]))
 
 
-def _srt(caps: list[dict]) -> str:
-    def t(s: float) -> str:
-        ms = int(round(s * 1000))
-        return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
-
-    return "\n".join(
-        f"{i}\n{t(c['start_sec'])} --> {t(c['end_sec'])}\n{c['text']}\n"
-        for i, c in enumerate(caps, 1)
-    )
+def _op_caption_files(work: Path, a: dict) -> None:
+    for name, text in ass.sidecars(a["cues"], a["fps"]).items():
+        (work / name).write_text(text)
 
 
 def _music_chain(index: int, a: dict, duration: float, under_voice: bool) -> str:
@@ -805,10 +854,50 @@ def _op_loudnorm(work: Path, a: dict) -> None:
     )
 
 
+def _fades(a: dict) -> tuple[list[str], list[str]]:
+    """Video and audio fades. The picture is fully black before its last frame, so a master can end on one."""
+    vf, af = [], []
+    D, fps = a.get("duration_sec") or 0, a.get("fps") or 30
+    fin, fout = a.get("fade_in_sec") or 0, a.get("fade_out_sec") or 0
+    if fin:
+        vf.append(f"fade=t=in:st=0:d={fin:.3f}")
+        af.append(f"afade=t=in:d={fin:.3f}")
+    if fout and D > fout:
+        vf.append(f"fade=t=out:st={D - fout:.3f}:d={fout - 1.5 / fps:.3f}")
+        af.append(f"afade=t=out:st={D - fout:.3f}:d={fout:.3f}")
+    return vf, af
+
+
+def _write_master(work: Path, a: dict, vf: list[str], af: list[str], note: str) -> None:
+    """A ProRes 422 HQ master with LPCM stereo: the file a premium platform ingests."""
+    args = ["-i", str(_safe(work, a["video"]))]
+    if a.get("audio"):
+        args += ["-i", str(_safe(work, a["audio"])), "-map", "0:v", "-map", "1:a"]
+        args += ["-c:a", "pcm_s24le", "-ar", "48000", "-ac", "2", "-channel_layout", "stereo"]
+        if af:
+            args += ["-af", ",".join(af)]
+    media.run(
+        [
+            *args,
+            "-vf",
+            ",".join([*vf, media.TO_PRORES]),
+            *media.PRORES_ARGS,
+            "-metadata",
+            f"comment={note}",
+            str(_safe(work, a["master"])),
+        ]
+    )
+
+
 def _op_export(work: Path, a: dict) -> None:
     out = _safe(work, a["out"])
+    vf, af = _fades(a)
+    note = (
+        "Made with Kalainova; contains AI-generated media"
+        if a.get("synthetic", True)
+        else "Edited with Kalainova"
+    )
     args = ["-i", str(_safe(work, a["video"]))]
-    f, D = a.get("fade_out_sec") or 0, a.get("duration_sec") or 0
     if a.get("audio"):
         args += [
             "-i",
@@ -825,18 +914,11 @@ def _op_export(work: Path, a: dict) -> None:
             "48000",
             "-shortest",
         ]
-        if f and D > f:
-            args += ["-af", f"afade=t=out:st={D - f:.3f}:d={f:.3f}"]
-    out_vf = [media.TO_DELIVERY]
-    if f and D > f:  # output options go after every input
-        out_vf.insert(0, f"fade=t=out:st={D - f:.3f}:d={f:.3f}")
-    args += ["-vf", ",".join(out_vf)]
-    note = (
-        "Made with Kalainova; contains AI-generated media"
-        if a.get("synthetic", True)
-        else "Edited with Kalainova"
-    )
+        if af:
+            args += ["-af", ",".join(af)]
     args += [
+        "-vf",
+        ",".join([*vf, media.TO_DELIVERY]),
         "-c:v",
         "libx264",
         "-preset",
@@ -857,8 +939,22 @@ def _op_export(work: Path, a: dict) -> None:
         str(out),
     ]
     media.run(args)
+    if a.get("master"):
+        _write_master(work, a, vf, af, note)
     if a.get("thumbnail"):
-        media.frame_at(out, 0.9, _safe(work, a["thumbnail"]))
+        media.run(
+            [
+                "-ss",
+                "0.9",
+                "-i",
+                str(out),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                str(_safe(work, a["thumbnail"])),
+            ]
+        )
     if a.get("audio_only") and a.get("audio"):
         media.run(
             [
@@ -867,7 +963,7 @@ def _op_export(work: Path, a: dict) -> None:
                 "-c:a",
                 "aac",
                 "-b:a",
-                "192k",
+                "256k",
                 str(_safe(work, a["audio_only"])),
             ]
         )

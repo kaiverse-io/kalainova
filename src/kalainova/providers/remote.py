@@ -125,6 +125,7 @@ class ElevenLabs(Provider):
                     "style": 0.35,
                     "use_speaker_boost": True,
                 },
+                **{k: kw[k] for k in ("previous_text", "next_text") if kw.get(k)},
             },
             timeout=TIMEOUT,
         )

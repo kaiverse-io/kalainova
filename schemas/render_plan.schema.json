@@ -31,6 +31,7 @@
               "mix_audio",
               "loudnorm",
               "burn_captions",
+              "caption_files",
               "export"
             ]
           },
