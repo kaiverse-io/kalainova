@@ -7,6 +7,7 @@ import threading
 import time
 
 import pytest
+from PIL import Image
 
 from kalainova.jobfs import CostCapExceeded, Job
 from kalainova.providers import base, router
@@ -20,11 +21,18 @@ class Flaky(base.Provider):
     cost = 1.0
     fails = None
 
+    wrong_size = False
+    corrupt = False
+
     def image(self, prompt, dst, *, width=64, height=64, **kw):
         type(self).calls += 1
         if type(self).fails:
             raise type(self).fails
-        dst.write_bytes(f"bytes:{prompt}".encode())
+        if type(self).corrupt:
+            dst.write_bytes(b"not an image")
+            return base.Result(path=dst, cost=self.cost, model="flaky-1")
+        size = (8, 8) if type(self).wrong_size else (width, height)
+        Image.new("RGB", size, (len(prompt) % 255, 40, 60)).save(dst, format="PNG")
         return base.Result(path=dst, cost=self.cost, model="flaky-1")
 
     def llm(self, prompt, **kw):
@@ -69,6 +77,7 @@ def providers(monkeypatch, tmp_path):
     for cls in (Flaky, Backup, Placeholder, Hung):
         cls.calls = 0
         cls.fails = None
+        cls.wrong_size = cls.corrupt = False
         monkeypatch.setitem(base._REGISTRY, cls.name, cls)
     monkeypatch.setattr(base.config, "price_for", lambda provider, key: dict(PRICES.get(provider, {}).get(key, {})))
     yield
@@ -155,6 +164,30 @@ def test_a_hung_call_is_abandoned_charged_and_cannot_overwrite_the_result(tmp_pa
     good = (job.work / "a.png").read_bytes()
     time.sleep(1.2)
     assert (job.work / "a.png").read_bytes() == good
+
+
+@pytest.mark.parametrize("fault", ["wrong_size", "corrupt"])
+def test_a_bad_file_is_rejected_charged_and_never_reaches_the_destination(tmp_path, fault):
+    job = job_with(tmp_path, ["flaky"])
+    setattr(Flaky, fault, True)
+    with pytest.raises(router.ProviderError, match="rejected output"):
+        image(job, width=64, height=64)
+    assert not (job.work / "a.png").exists()
+    assert job.spent() == 1.0  # the provider was paid for a file we refused
+
+
+def test_a_bad_file_fails_over_to_the_next_provider(tmp_path):
+    job = job_with(tmp_path, ["flaky", "backup"])
+    Flaky.wrong_size = True
+    p, res = image(job, width=64, height=64)
+    assert p.name == "backup"
+    assert Image.open(res.path).size == (64, 64)
+
+
+def test_a_larger_image_of_the_right_shape_is_accepted(tmp_path):
+    job = job_with(tmp_path, ["flaky"])
+    assert image(job, width=32, height=32)[0].name == "flaky"
+    assert router._check_output("image", job.work / "a.png", {"width": 16, "height": 16}) is None
 
 
 def test_a_capped_job_refuses_an_unpriced_provider_before_calling_it(tmp_path, monkeypatch):
