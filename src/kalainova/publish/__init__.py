@@ -12,7 +12,6 @@ approval is the gate; the posting itself can be automatic.
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 import os
 import re
@@ -21,15 +20,8 @@ from pathlib import Path
 import requests
 
 from .. import consistency, streams
+from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _now() -> str:

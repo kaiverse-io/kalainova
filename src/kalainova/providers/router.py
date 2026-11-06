@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config, media
+from ..blobstore import sha256_file
 from ..jobfs import ContractError, CostCapExceeded, Job
 from . import base
 
@@ -113,18 +114,10 @@ def _check_output(capability: str, path: Path, kw: dict) -> None:
         raise ValueError("file has no duration")
 
 
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _request_key(capability: str, fn_name: str, args: tuple, kw: dict) -> str:
     def plain(value):
         if isinstance(value, Path):
-            return _sha256(value) if value.is_file() else str(value)
+            return sha256_file(value) if value.is_file() else str(value)
         if isinstance(value, dict):
             return {k: plain(v) for k, v in value.items()}
         if isinstance(value, list | tuple):
@@ -151,7 +144,7 @@ def _saved(
         return None
     entries = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     entry = next((e for e in reversed(entries) if e["key"] == key), None)
-    if not entry or entry["provider"] not in names or entry["sha256"] != _sha256(dst):
+    if not entry or entry["provider"] not in names or entry["sha256"] != sha256_file(dst):
         return None
     provider = base.get(entry["provider"])
     return provider, base.Result(
@@ -165,7 +158,7 @@ def _record(job: Job, key: str, provider: base.Provider, res: base.Result, dst: 
         "provider": provider.name,
         "model": res.model,
         "file": dst.name,
-        "sha256": _sha256(dst),
+        "sha256": sha256_file(dst),
         "cost": round(res.cost, 6),
         "words": res.words,
         "meta": res.meta,
