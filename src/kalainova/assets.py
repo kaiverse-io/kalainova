@@ -292,7 +292,9 @@ def run(job: Job, *, force: bool = False) -> dict:
     # --- music bed and transition sfx ---------------------------------------
     if "audio" in media_kinds or "video" in media_kinds:
         _sound(job, "music", "music", fixed_sound.get("theme"), total + 1.0, add, _gen, data)
-        _sound(job, "whoosh", "sfx", fixed_sound.get("whoosh"), 0.6, add, _gen, data)
+        edit_opts = data.get("edit") or {}
+        if edit_opts.get("whoosh", edit_opts.get("theme", "studio") != "studio"):
+            _sound(job, "whoosh", "sfx", fixed_sound.get("whoosh"), 0.6, add, _gen, data)
 
     manifest = {
         "schema_version": "0.1",

@@ -111,9 +111,18 @@ def run(job: Job, *, force: bool = False) -> dict:
         }
         if src["kind"] == "still":
             cut["motion"] = (STUDIO_MOTIONS if studio else MOTIONS)[i % len(MOTIONS)]
-        if src["kind"] == "video" and src.get("duration_sec", dur) < dur:
-            cut["out_sec"] = round(src["duration_sec"], 3)
-            cut["hold_last_frame"] = True
+        # A shot runs to where the next one starts, which is earlier than the next line's first word.
+        next_start = (
+            am["timeline"][i + 1]["start_sec"] - PICTURE_LEAD_SEC
+            if i + 1 < len(am["timeline"])
+            else span["end_sec"]
+        )
+        needed = round(next_start - cut["start_sec"], 3)
+        if src["kind"] == "video":
+            have = src.get("duration_sec", needed)
+            cut["out_sec"] = round(min(have, needed), 3)
+            if have < needed:
+                cut["hold_last_frame"] = True
         # bold typecards bake their headline; everything else gets an animated title (studio: every beat)
         # Two lines of text at once is noise. With captions up, only the opening and closing keep a title.
         key_beat = i == 0 or i == len(am["timeline"]) - 1 or not wants_captions

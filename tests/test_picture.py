@@ -155,3 +155,48 @@ def test_every_intermediate_is_lossless_ten_bit(tmp_path, monkeypatch):
     video = media.stream_info(job.work / "seg" / "00.mp4", "video")
     assert video["pix_fmt"] == "yuv444p10le"
     assert video["color_space"] == "bt709"
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_studio_piece_makes_no_sound_it_will_not_use(tmp_path, monkeypatch):
+    job = _local_job(tmp_path, monkeypatch)
+    manifest = assets.run(job)
+    assert "whoosh" not in {a["id"] for a in manifest["assets"]}
+
+
+def test_a_clip_long_enough_is_cut_to_its_shot_with_no_frozen_frames(tmp_path, monkeypatch):
+    job = _local_job(tmp_path, monkeypatch)
+    timeline = [
+        {"beat_id": "b1", "start_sec": 0.0, "end_sec": 3.0},
+        {"beat_id": "b2", "start_sec": 3.0, "end_sec": 6.0},
+        {"beat_id": "b3", "start_sec": 6.0, "end_sec": 9.0},
+    ]
+    clips = [
+        {
+            "id": f"{b}.video",
+            "kind": "video",
+            "role": "visual",
+            "beat_id": b,
+            "path": f"beats/{b}.mp4",
+            "duration_sec": 5.0,
+            "rights": "owned",
+            "synthetic": True,
+            "provider": "test",
+        }
+        for b in ("b1", "b2", "b3")
+    ]
+    job.write(
+        "asset_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": "pic",
+            "assets": clips,
+            "timeline": timeline,
+            "duration_sec": 9.0,
+        },
+    )
+    cuts = edit.run(job)["cuts"]
+    ends = [c["start_sec"] for c in cuts[1:]] + [9.0]
+    for cut, end in zip(cuts, ends, strict=True):
+        assert "hold_last_frame" not in cut
+        assert cut["out_sec"] - cut["in_sec"] >= end - cut["start_sec"]
