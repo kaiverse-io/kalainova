@@ -31,6 +31,20 @@ MOTIONS = ("none", "push_in", "push_out", "pan_left", "pan_right", "drift_up")
 PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")
 GRADES = tuple(look.LOOKS)
 
+# The sound of a finished voice: rumble out, sibilance tamed, mud eased, presence and air lifted, level
+# held. Fixed strings, so no value from a plan enters them.
+VOICE_CHAIN = (
+    "highpass=f=75,deesser=i=0.4:m=0.5:f=0.5,equalizer=f=220:t=q:w=1.2:g=-1.5,"
+    "equalizer=f=3000:t=q:w=1.5:g=1.5,equalizer=f=9500:t=h:w=2000:g=1,"
+    "acompressor=threshold=-22dB:ratio=2.5:attack=6:release=120:makeup=3dB,"
+    "alimiter=limit=0.9:attack=2:release=50:level=disabled"
+)
+MUSIC_POCKET = "equalizer=f=2800:t=q:w=1.4:g=-3"  # a space in the music for the words to sit in
+DUCK = "sidechaincompress=threshold=0.02:ratio=6:attack=25:release=450:makeup=1"
+# A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
+ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
+MUSIC_FADE_SEC = 2.5
+
 # Closed arg spec per op. Every value is coerced to its type before it reaches ffmpeg, so a
 # model-written plan cannot smuggle filtergraph text through a number. Text (titles, captions)
 # only ever goes into .ass files, never into a filtergraph.
@@ -103,6 +117,7 @@ SPEC = {
         "out": "path",
         "duration_sec": "num",
         "voice": "path?",
+        "voice_chain": "bool?",
         "music": "path?",
         "music_gain_db": "num?",
         "duck": "bool?",
@@ -349,6 +364,7 @@ def compile_plan(job: Job) -> dict:
         mix = {"out": "mix.wav", "duration_sec": em["duration_sec"]}
         if a.get("voice_asset_id"):
             mix["voice"] = assets[a["voice_asset_id"]]["path"]
+            mix["voice_chain"] = True
         elif orig:
             mix["voice"] = "orig.wav"  # the footage's own sound leads; music ducks under it
         if a.get("music_asset_id"):
@@ -708,33 +724,49 @@ def _srt(caps: list[dict]) -> str:
     )
 
 
+def _music_chain(index: int, a: dict, duration: float, under_voice: bool) -> str:
+    fade = min(MUSIC_FADE_SEC, duration * 0.25)
+    pocket = f"{MUSIC_POCKET}," if under_voice else ""
+    gain = a.get("music_gain_db", -19)
+    return (
+        f"[{index}:a]aresample=48000,aformat=channel_layouts=stereo,{pocket}volume={gain:.2f}dB,"
+        f"afade=t=in:d=0.2,afade=t=out:st={duration - fade:.3f}:d={fade:.3f}"
+    )
+
+
 def _op_mix_audio(work: Path, a: dict) -> None:
     D = a["duration_sec"]
-    ins, chains, labels = [], [], []
+    ins: list[str] = []
+    chains: list[str] = []
+    labels: list[str] = []
+    maps: list[str] = []
     idx = 0
-    voice_label = None
-    if a.get("voice"):
+    has_voice = bool(a.get("voice"))
+    if has_voice:
         ins += ["-i", str(_safe(work, a["voice"]))]
+        polish = f"{VOICE_CHAIN}," if a.get("voice_chain") else ""
         chains.append(
-            f"[{idx}:a]aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={D:.3f}[voice]"
+            f"[0:a]aresample=48000,aformat=channel_layouts=stereo,{polish}"
+            f"apad=whole_dur={D:.3f},atrim=0:{D:.3f},asplit=3[voice][vkey][vstem]"
         )
-        voice_label, idx = "voice", idx + 1
+        chains.append(ROOM_TONE.format(duration=D))
+        labels += ["[voice]", "[room]"]
+        maps += ["-map", "[vstem]", str(work / "voice.stem.wav")]
+        idx = 1
     if a.get("music"):
-        ins += ["-i", str(_safe(work, a["music"]))]
-        g = a.get("music_gain_db", -19)
-        chains.append(
-            f"[{idx}:a]aresample=48000,aformat=channel_layouts=stereo,aloop=loop=-1:size=2147483647,"
-            f"volume={g:.2f}dB,atrim=0:{D:.3f}[mus]"
-        )
+        bed = media.loop_audio(_safe(work, a["music"]), work / "music.bed.wav", D)
+        ins += ["-i", str(bed)]
+        music = _music_chain(idx, a, D, has_voice)
         idx += 1
-        if voice_label and a.get("duck"):
-            chains.append("[voice]asplit=2[voice][vkey]")
-            chains.append(
-                "[mus][vkey]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=350:makeup=1[musd]"
-            )
-            labels.append("[musd]")
+        if has_voice and a.get("duck"):
+            chains.append(f"{music}[mus]")
+            chains.append(f"[mus][vkey]{DUCK},asplit=2[musd][mstem]")
         else:
-            labels.append("[mus]")
+            chains.append(f"{music},asplit=2[musd][mstem]")
+        labels.append("[musd]")
+        maps += ["-map", "[mstem]", str(work / "music.stem.wav")]
+    if has_voice and not a.get("music"):
+        chains.append("[vkey]anullsink")
     for k, s in enumerate(a.get("sfx", [])):
         ins += ["-i", str(_safe(work, s["path"]))]
         ms = max(int(float(s["start_sec"]) * 1000), 0)
@@ -744,23 +776,31 @@ def _op_mix_audio(work: Path, a: dict) -> None:
         )
         labels.append(f"[sfx{k}]")
         idx += 1
-    if voice_label:
-        labels.insert(0, "[voice]")
     if not labels:
         return
     filt = (
         ";".join(chains)
         + ";"
         + "".join(labels)
-        + f"amix=inputs={len(labels)}:normalize=0:duration=first,atrim=0:{D:.3f}[out]"
+        + f"amix=inputs={len(labels)}:normalize=0:duration=longest,atrim=0:{D:.3f}[out]"
     )
     media.run(
-        [*ins, "-filter_complex", filt, "-map", "[out]", "-ar", "48000", str(_safe(work, a["out"]))]
+        [
+            *ins,
+            "-filter_complex",
+            filt,
+            "-map",
+            "[out]",
+            "-ar",
+            "48000",
+            str(_safe(work, a["out"])),
+            *maps,
+        ]
     )
 
 
 def _op_loudnorm(work: Path, a: dict) -> None:
-    media.loudnorm_two_pass(
+    media.master_loudness(
         _safe(work, a["input"]), _safe(work, a["out"]), a["target_lufs"], a["true_peak_dbtp_max"]
     )
 

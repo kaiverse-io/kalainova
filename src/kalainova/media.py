@@ -13,6 +13,7 @@ import numpy as np
 
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
+MASTER_PASSES = 3
 
 # Every stage between the source and the delivered file is lossless 10-bit 4:4:4 BT.709, so one final
 # encode is the only place quality is spent. The tags stop players guessing a colour matrix.
@@ -172,40 +173,69 @@ def loudness(path: str | Path) -> dict:
     summary = text[text.rfind("Summary:") :] if "Summary:" in text else text
     i = re.search(r"I:\s+(-?[\d.]+) LUFS", summary)
     tp = re.search(r"Peak:\s+(-?[\d.]+) dBFS", summary)
+    lra = re.search(r"LRA:\s+([\d.]+) LU", summary)
     return {
         "integrated_lufs": float(i.group(1)) if i else None,
         "true_peak_dbtp": float(tp.group(1)) if tp else None,
+        "loudness_range_lu": float(lra.group(1)) if lra else None,
     }
 
 
-def loudnorm_two_pass(
-    src: Path, dst: Path, target: float = -14.0, tp: float = -1.0, lra: float = 11.0
-) -> dict:
-    first = subprocess.run(
+def master_loudness(src: Path, dst: Path, target: float, ceiling: float) -> Path:
+    """Set the level with one gain and catch peaks with a true-peak limiter at 4x, then check the result.
+
+    A single gain keeps the mix's dynamics. loudnorm's dynamic mode, which it falls back to whenever
+    the peaks do not fit, rides the level and audibly pumps music under speech.
+    """
+    measured = loudness(src)["integrated_lufs"]
+    if measured is None:  # digital silence has no loudness to set
+        run(["-i", str(src), "-c:a", "pcm_s24le", "-ar", "48000", "-ac", "2", str(dst)])
+        return dst
+    limit = 10 ** ((ceiling - 0.3) / 20)
+    gain = target - measured
+    for _ in range(MASTER_PASSES):
+        chain = (
+            f"volume={gain:.3f}dB,aresample=192000,"
+            f"alimiter=limit={limit:.5f}:attack=1:release=60:level=disabled,aresample=48000"
+        )
+        run(["-i", str(src), "-af", chain, "-c:a", "pcm_s24le", "-ac", "2", str(dst)])
+        miss = target - (loudness(dst)["integrated_lufs"] or target)
+        if abs(miss) <= 0.1:
+            break
+        gain += miss
+    return dst
+
+
+def loop_audio(src: Path, dst: Path, seconds: float, crossfade: float = 1.5) -> Path:
+    """Extend a bed to length with equal-power crossfades, so the joins are never heard."""
+    length = duration(src)
+    if length >= seconds:
+        run(["-i", str(src), "-t", f"{seconds:.3f}", "-ar", "48000", "-ac", "2", str(dst)])
+        return dst
+    fade = min(crossfade, length / 3)
+    copies = int(np.ceil((seconds - fade) / (length - fade))) + 1
+    inputs = [arg for _ in range(copies) for arg in ("-i", str(src))]
+    graph, last = "", "0:a"
+    for i in range(1, copies):
+        graph += f"[{last}][{i}:a]acrossfade=d={fade:.3f}:c1=qsin:c2=qsin[x{i}];"
+        last = f"x{i}"
+    run(
         [
-            FFMPEG,
-            "-hide_banner",
-            "-nostats",
-            "-i",
-            str(src),
-            "-af",
-            f"loudnorm=I={target}:TP={tp}:LRA={lra}:print_format=json",
-            "-f",
-            "null",
-            "-",
-        ],
-        capture_output=True,
-        text=True,
+            *inputs,
+            "-filter_complex",
+            graph.rstrip(";"),
+            "-map",
+            f"[{last}]",
+            "-t",
+            f"{seconds:.3f}",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            str(dst),
+        ]
     )
-    blob = first.stderr[first.stderr.rfind("{") : first.stderr.rfind("}") + 1]
-    m = json.loads(blob)
-    af = (
-        f"loudnorm=I={target}:TP={tp}:LRA={lra}:measured_I={m['input_i']}:measured_TP={m['input_tp']}"
-        f":measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}"
-        ":linear=true:print_format=summary"
-    )
-    run(["-i", str(src), "-af", af, "-ar", "48000", "-ac", "2", str(dst)])
-    return m
+    return dst
 
 
 def blackdetect(path: str | Path, min_dur: float = 0.5) -> list[tuple[float, float]]:

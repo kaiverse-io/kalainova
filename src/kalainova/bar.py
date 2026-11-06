@@ -20,6 +20,8 @@ from . import config, media
 
 Arr = npt.NDArray[Any]
 
+BLACK_LEVEL = 20.0
+DUPLICATE_LEVEL = 0.005
 STILL_LEVEL = 0.02  # mean grey-level change per frame below which nothing is moving
 STUTTER_WINDOW = 9
 FLAT_RUN_PX = 12  # a band this wide with a one-level step at each end reads as a contour
@@ -38,6 +40,15 @@ def _db(x: float) -> float:
 
 
 # ------------------------------------------------------------------ picture signals
+def duplicate_share(frames: Arr) -> float:
+    """Share of picture frames identical to the one before. Black heads and tails do not count."""
+    if len(frames) < 2:
+        return 0.0
+    moved = np.abs(np.diff(frames.astype(np.int16), axis=0)).mean(axis=(1, 2))
+    lit = frames[1:].mean(axis=(1, 2)) > BLACK_LEVEL
+    return float((moved[lit] < DUPLICATE_LEVEL).mean()) if lit.any() else 0.0
+
+
 def banding_score(gray: Arr) -> float:
     """Share of the frame inside flat runs bounded by one-level steps. Contours on a gradient."""
     rows = gray.astype(np.int16)
@@ -136,6 +147,20 @@ def hard_cuts_per_min(x: Arr, sr: int) -> float:
     hit = (now > SPEECH_FLOOR_DB) & (now >= before - 6.0) & (after < now - HARD_CUT_DROP_DB)
     events = np.count_nonzero(np.diff(hit.astype(np.int8)) == 1)
     return events / max(x.size / sr / 60, 1e-6)
+
+
+def voice_to_music_db(voice: Arr, music: Arr, sr: int) -> float:
+    """How far the music sits under the voice, measured only where someone is speaking."""
+    hop = max(sr // 10, 1)
+    n = min(voice.size, music.size) // hop
+    if n == 0:
+        return 0.0
+    v = np.sqrt((voice[: n * hop].reshape(n, hop) ** 2).mean(axis=1))
+    m = np.sqrt((music[: n * hop].reshape(n, hop) ** 2).mean(axis=1))
+    speaking = v > 10 ** (SPEECH_FLOOR_DB / 20)
+    if not speaking.any():
+        return 0.0
+    return float(np.median(20 * np.log10(v[speaking] / np.maximum(m[speaking], 1e-9))))
 
 
 def clipped_share(x: Arr) -> float:

@@ -123,3 +123,23 @@ def test_beat_alignment_scores_cuts_on_and_off_the_grid():
     assert bar.beat_alignment([1.0, 2.0, 3.5], beats, 0.05) == 1.0
     assert bar.beat_alignment([1.2, 2.2, 3.7], beats, 0.05) == 0.0
     assert bar.beat_alignment([], beats, 0.05) == 0.0
+
+
+def test_voice_to_music_reads_the_gap_while_someone_is_speaking():
+    t = np.arange(SR * 2) / SR
+    voice = 0.3 * np.sin(2 * np.pi * 220 * t)
+    voice[SR:] = 0.0
+    music = 0.03 * np.sin(2 * np.pi * 110 * t)
+    music[SR:] = 0.3 * np.sin(2 * np.pi * 110 * t[SR:])  # loud only where nobody speaks
+    assert abs(bar.voice_to_music_db(voice, music, SR) - 20.0) < 1.0
+    assert bar.voice_to_music_db(np.zeros(SR), music[:SR], SR) == 0.0
+
+
+def test_duplicate_share_finds_held_frames_and_ignores_black():
+    rng = np.random.default_rng(14)
+    moving = rng.integers(40, 200, (6, 20, 20)).astype(np.uint8)
+    held = np.concatenate([moving, np.repeat(moving[-1:], 6, axis=0)])
+    assert bar.duplicate_share(moving) == 0.0
+    assert bar.duplicate_share(held) > 0.4
+    black = np.zeros((5, 20, 20), np.uint8)
+    assert bar.duplicate_share(np.concatenate([black, moving, black])) == 0.0
