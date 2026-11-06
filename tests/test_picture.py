@@ -35,6 +35,19 @@ def test_a_pan_stays_inside_the_picture():
         assert half <= cam.cx <= 1 - half
 
 
+@pytest.mark.parametrize("move", ["pan_left", "pan_right", "drift_up"])
+@pytest.mark.parametrize("crop_x", [0.1, 0.5, 0.9])
+@pytest.mark.parametrize("seconds", [2.0, 8.0, 30.0])
+def test_a_pan_never_stops_against_the_edge_of_the_picture(move, crop_x, seconds):
+    cams = [motion.camera(move, i / 24, seconds, crop_x=crop_x) for i in range(int(seconds * 24))]
+    path = np.array([c.cy if move == "drift_up" else c.cx for c in cams])
+    steps = np.diff(path)
+    assert np.abs(steps).min() > 0, "the camera froze"
+    assert steps.max() - steps.min() < 1e-9, "the camera changed speed"
+    half = 0.5 / cams[0].zoom
+    assert path.min() >= half - 1e-9 and path.max() <= 1 - half + 1e-9
+
+
 def test_sampled_motion_is_even_frame_to_frame():
     rng = np.random.default_rng(1)
     coarse = rng.uniform(0, 1, (60, 40, 3)).astype(np.float32)

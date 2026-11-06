@@ -22,6 +22,7 @@ Arr = npt.NDArray[Any]
 
 ZOOM_PER_SEC = 0.012  # a push the eye reads as intent, not as a wobble
 PAN_PER_SEC = 0.009  # share of the picture width per second
+WIDEST_PAN_ZOOM = 1.3  # past this a pan shows softness from the enlargement
 HEADROOM = 1.06  # the frame stays this far inside the still, so a pan has room to travel
 BATCH_FRAMES = 32
 
@@ -35,8 +36,6 @@ class Camera:
 
 def camera(motion: str, t: float, duration: float, *, crop_x: float = 0.5) -> Camera:
     """Where the camera is at t seconds. Zoom moves exponentially, so its speed looks constant."""
-    middle = duration / 2
-    swing = (t - middle) * PAN_PER_SEC
     grow = (1 + ZOOM_PER_SEC) ** t
     full = (1 + ZOOM_PER_SEC) ** duration
     if motion == "push_in":
@@ -44,12 +43,29 @@ def camera(motion: str, t: float, duration: float, *, crop_x: float = 0.5) -> Ca
     if motion == "push_out":
         return _inside(HEADROOM * full / grow, crop_x, 0.5)
     if motion == "pan_left":
-        return _inside(HEADROOM, crop_x - swing, 0.5)
+        zoom, x = _pan(t, duration, crop_x, -1.0)
+        return _inside(zoom, x, 0.5)
     if motion == "pan_right":
-        return _inside(HEADROOM, crop_x + swing, 0.5)
+        zoom, x = _pan(t, duration, crop_x, 1.0)
+        return _inside(zoom, x, 0.5)
     if motion == "drift_up":
-        return _inside(HEADROOM, crop_x, 0.5 - swing)
+        zoom, y = _pan(t, duration, 0.5, -1.0)
+        return _inside(zoom, crop_x, y)
     return _inside(1.0, crop_x, 0.5)
+
+
+def _pan(t: float, duration: float, centre: float, sign: float) -> tuple[float, float]:
+    """A zoom with room for the whole journey, and the position on it at t.
+
+    Fixed headroom stopped a long shot dead against the edge of the picture, then started it. Only a
+    shot long enough to need more than the widest zoom travels more slowly.
+    """
+    rate = min(PAN_PER_SEC, (1 - 1 / WIDEST_PAN_ZOOM) / max(duration, 1e-3))
+    travel = rate * duration
+    zoom = max(HEADROOM, 1 / (1 - travel))
+    margin = 0.5 / zoom + travel / 2
+    middle = min(max(centre, margin), 1 - margin)
+    return zoom, middle + sign * (t - duration / 2) * rate
 
 
 def _inside(zoom: float, cx: float, cy: float) -> Camera:
