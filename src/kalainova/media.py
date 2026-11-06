@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
@@ -14,6 +15,13 @@ FFPROBE = shutil.which("ffprobe") or "ffprobe"
 
 class MediaError(RuntimeError):
     pass
+
+
+@lru_cache(maxsize=None)
+def has_filter(name: str) -> bool:
+    """Whether this ffmpeg build has a filter. Builds differ, and the engine must say so or adapt."""
+    proc = subprocess.run([FFMPEG, "-hide_banner", "-filters"], capture_output=True, text=True)
+    return any(line.split()[1:2] == [name] for line in proc.stdout.splitlines())
 
 
 def run(

@@ -77,6 +77,8 @@ class LocalProvider(Provider):
     VOICES = ("slt", "awb", "rms", "kal16", "kal")
 
     def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw) -> Result:
+        if not media.has_filter("flite"):  # many ffmpeg builds ship without it
+            return self._murmur(text, dst)
         v = voice if voice in self.VOICES else "slt"
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
             fh.write(text)
@@ -102,6 +104,24 @@ class LocalProvider(Provider):
             model=f"flite-{v}",
             words=estimate_words(text, dur),
             meta={"duration_sec": dur},
+        )
+
+    def _murmur(self, text: str, dst: Path) -> Result:
+        """Syllable-paced tone at speech length, for an ffmpeg with no flite. Timing stays testable."""
+        dur = max(len(re.findall(r"\S+", text)) / 2.6, 0.5)
+        media.run(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"aevalsrc='0.25*sin(2*PI*180*t)*(0.55+0.45*sin(2*PI*4.5*t))':s=48000:d={dur:.3f}",
+                "-ac",
+                "1",
+                str(dst),
+            ]
+        )
+        return Result(
+            path=dst, model="flite-absent", words=estimate_words(text, dur), meta={"duration_sec": dur}
         )
 
     def image(
