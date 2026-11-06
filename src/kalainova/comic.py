@@ -377,8 +377,24 @@ def _scroll(pages: list[Image.Image], rects_by_page: list[list[Rect]]) -> Image.
     return out
 
 
+def preflight(job: Job, script: dict[str, Any]) -> None:
+    """Refuse a script that cannot be lettered before any art is paid for."""
+    for number, spec in enumerate(script["pages"], 1):
+        rects = panel_rects(spec["rows"], PAGE_W, PAGE_H, margin=MARGIN, gutter=GUTTER)
+        panels = spec["panels"]
+        if len(rects) != len(panels):
+            raise ContractError(
+                f"{job.id}: page {number} lays out {len(rects)} panels and lists {len(panels)}"
+            )
+        for rect, panel in zip(rects, panels, strict=True):
+            for line in panel.get("lines") or []:
+                if line["kind"] != "sfx":
+                    fit_lettering(line["text"], rect)
+
+
 def run(job: Job) -> Path:
     script = job.read("comic_script")
+    preflight(job, script)
     locked = consistency.for_job(job)
     resolved, lock = locked if locked else (None, {})
     style = script.get("style") or (job.job.get("brief") or {}).get("visual_style") or ""

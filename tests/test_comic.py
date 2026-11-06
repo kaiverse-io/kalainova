@@ -154,3 +154,25 @@ def test_a_comic_passes_qa_and_its_placeholder_art_cannot_be_approved(tmp_path, 
     assert any(c["id"] == "comic.lettering_size" for c in report["checks"])
     with pytest.raises(ContractError, match="placeholder"):
         publish.approve(job, "human", platforms=["youtube"])
+
+
+def test_a_page_whose_panels_do_not_match_its_layout_is_refused_before_any_art_is_made(
+    tmp_path, monkeypatch
+):
+    job = _job(tmp_path, monkeypatch)
+    script = job.read("comic_script")
+    script["pages"][0]["panels"].pop()
+    job.write("comic_script", script)
+    with pytest.raises(ContractError, match="lists 2"):
+        comic.run(job)
+    assert not (job.work / "panels").exists()
+
+
+def test_too_many_words_is_refused_before_any_art_is_made(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    script = job.read("comic_script")
+    script["pages"][0]["panels"][1]["lines"][0]["text"] = "word " * 400
+    job.write("comic_script", script)
+    with pytest.raises(ContractError, match="too much text"):
+        comic.run(job)
+    assert not (job.work / "panels").exists()
