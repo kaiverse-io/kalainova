@@ -6,7 +6,7 @@ generate() walks the job's provider list and, for each attempt, applies the same
   deadline  a call that outlives its deadline is abandoned, and its estimate is charged
   failure   a provider failure moves to the next listed provider and says so on stderr;
             a bug in an adapter (TypeError, AttributeError) is raised, not hidden
-  output    a file must match the request, and reaches its destination only after that
+  output    a file must match the request and hold a picture, and only then reaches its destination
   reuse     a paid file is recorded the moment it exists, so a restart does not pay twice
 
 Only providers named in the list are tried. Nothing is added to it here.
@@ -34,6 +34,7 @@ OUTPUT_ARG = {"voice": 1, "image": 1, "video": 1, "music": 1, "song": 1, "sfx": 
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = "generations.jsonl"
+PICTURE_OUTPUTS = ("image", "video")
 ASPECT_TOLERANCE = 0.03
 MIN_SCALE = 0.5  # the editor can upscale a large image, not rescue a thumbnail
 
@@ -112,6 +113,8 @@ def _check_output(capability: str, path: Path, kw: dict) -> None:
                 raise ValueError(f"image is {width}x{height}, too small for {want_w}x{want_h}")
     elif media.duration(path) <= 0:
         raise ValueError("file has no duration")
+    if capability in PICTURE_OUTPUTS and not media.has_picture(path):
+        raise ValueError("no picture: one flat tone throughout, the model's decode failed")
 
 
 def _request_key(capability: str, fn_name: str, args: tuple, kw: dict) -> str:

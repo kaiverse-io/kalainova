@@ -9,13 +9,14 @@ import time
 import pytest
 from PIL import Image
 
+from kalainova import media
 from kalainova.jobfs import CostCapExceeded, Job
 from kalainova.providers import base, router
 
 
 class Flaky(base.Provider):
     name = "flaky"
-    capabilities = ("image", "llm")
+    capabilities = ("image", "video", "llm")
     env_key = None
     calls = 0
     cost = 1.0
@@ -23,6 +24,8 @@ class Flaky(base.Provider):
 
     wrong_size = False
     corrupt = False
+    blank = False
+    clip = "testsrc2=s=64x64:d=1:r=8"
 
     def image(self, prompt, dst, *, width=64, height=64, **kw):
         type(self).calls += 1
@@ -32,7 +35,15 @@ class Flaky(base.Provider):
             dst.write_bytes(b"not an image")
             return base.Result(path=dst, cost=self.cost, model="flaky-1")
         size = (8, 8) if type(self).wrong_size else (width, height)
-        Image.new("RGB", size, (len(prompt) % 255, 40, 60)).save(dst, format="PNG")
+        picture = Image.linear_gradient("L").resize(size).convert("RGB")
+        if type(self).blank:
+            picture = Image.new("RGB", size, (0, 0, 0))
+        picture.putpixel((0, 0), (len(prompt) % 255, 40, 60))
+        picture.save(dst, format="PNG")
+        return base.Result(path=dst, cost=self.cost, model="flaky-1")
+
+    def video(self, prompt, dst, **kw):
+        media.run(["-f", "lavfi", "-i", type(self).clip, "-pix_fmt", "yuv420p", str(dst)])
         return base.Result(path=dst, cost=self.cost, model="flaky-1")
 
     def llm(self, prompt, **kw):
@@ -80,7 +91,8 @@ def providers(monkeypatch, tmp_path):
     for cls in (Flaky, Backup, Placeholder, Hung):
         cls.calls = 0
         cls.fails = None
-        cls.wrong_size = cls.corrupt = False
+        cls.wrong_size = cls.corrupt = cls.blank = False
+        cls.clip = Flaky.clip
         monkeypatch.setitem(base._REGISTRY, cls.name, cls)
     monkeypatch.setattr(
         base.config, "price_for", lambda provider, key: dict(PRICES.get(provider, {}).get(key, {}))
@@ -102,7 +114,7 @@ def job_with(tmp_path, order, cap=None):
                 "distribution_identity": "t",
                 "status": "draft",
                 "cost_cap": cap,
-                "providers": {"image": order, "llm": order},
+                "providers": {"image": order, "video": order, "llm": order},
             }
         )
     )
@@ -182,7 +194,7 @@ def test_a_hung_call_is_abandoned_charged_and_cannot_overwrite_the_result(tmp_pa
     assert (job.work / "a.png").read_bytes() == good
 
 
-@pytest.mark.parametrize("fault", ["wrong_size", "corrupt"])
+@pytest.mark.parametrize("fault", ["wrong_size", "corrupt", "blank"])
 def test_a_bad_file_is_rejected_charged_and_never_reaches_the_destination(tmp_path, fault):
     job = job_with(tmp_path, ["flaky"])
     setattr(Flaky, fault, True)
@@ -190,6 +202,28 @@ def test_a_bad_file_is_rejected_charged_and_never_reaches_the_destination(tmp_pa
         image(job, width=64, height=64)
     assert not (job.work / "a.png").exists()
     assert job.spent() == 1.0  # the provider was paid for a file we refused
+
+
+@pytest.mark.parametrize("flat", ["black", "0x101010", "gray"])
+def test_a_clip_with_no_picture_in_it_is_refused(tmp_path, flat):
+    job = job_with(tmp_path, ["flaky"])
+    Flaky.clip = f"color=c={flat}:s=64x64:d=1:r=8"
+    with pytest.raises(router.ProviderError, match="no picture"):
+        router.generate(job, "video", "video", "p", job.work / "c.mp4")
+    assert not (job.work / "c.mp4").exists()
+
+
+@pytest.mark.parametrize(
+    "dark",
+    [
+        "testsrc2=s=64x64:d=1:r=8,eq=brightness=-0.45:contrast=0.25",
+        "color=c=gray:s=64x64:d=1:r=8,fade=in:0:8",
+    ],
+)
+def test_a_dark_clip_or_a_fade_from_black_is_still_a_picture(tmp_path, dark):
+    job = job_with(tmp_path, ["flaky"])
+    Flaky.clip = dark
+    assert router.generate(job, "video", "video", "p", job.work / "c.mp4")[0].name == "flaky"
 
 
 def test_a_bad_file_fails_over_to_the_next_provider(tmp_path):

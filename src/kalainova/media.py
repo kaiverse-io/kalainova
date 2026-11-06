@@ -14,6 +14,8 @@ import numpy as np
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
 MASTER_PASSES = 3
+# Luma levels of 255: an encoder keeps a flat field this tight, and a dark shot is never this flat.
+FLAT_TONE_LEVELS = 3
 
 # Every stage between source and delivery is lossless 10-bit 4:4:4 BT.709, so one final encode is
 # the only place quality is spent. The tags stop players guessing a colour matrix.
@@ -390,6 +392,12 @@ def gray_frame(path: str | Path, t: float, *, width: int | None = None) -> np.nd
     info = summarize(path)
     w = width or info["width"]
     return decode_gray(path, width=w, start=t, duration=0.08)[0]
+
+
+def has_picture(path: str | Path) -> bool:
+    """False when an image or clip is one flat tone from start to end, as a failed decode leaves."""
+    low, high = np.percentile(decode_gray(path, width=64), [0.5, 99.5])
+    return bool(high - low >= FLAT_TONE_LEVELS)
 
 
 def decode_stereo(path: str | Path, sr: int = 48000) -> tuple[np.ndarray, np.ndarray, int]:

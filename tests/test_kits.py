@@ -331,6 +331,7 @@ def fake_media(monkeypatch):
     """The asset stage without ffmpeg: file operations only, so this runs anywhere."""
     monkeypatch.setattr(media, "duration", lambda path: 2.0)
     monkeypatch.setattr(media, "summarize", lambda path: {})
+    monkeypatch.setattr(media, "has_picture", lambda path: True)
 
     def run(args):
         open(args[-1], "wb").close()
