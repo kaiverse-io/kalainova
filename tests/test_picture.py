@@ -48,6 +48,28 @@ def test_a_pan_never_stops_against_the_edge_of_the_picture(move, crop_x, seconds
     assert path.min() >= half - 1e-9 and path.max() <= 1 - half + 1e-9
 
 
+def test_each_move_goes_the_way_it_says():
+    start, end = {}, {}
+    for move in ("pan_left", "pan_right", "drift_up", "push_in", "push_out", "none"):
+        start[move] = motion.camera(move, 0.0, 6.0)
+        end[move] = motion.camera(move, 6.0, 6.0)
+    assert end["pan_left"].cx < start["pan_left"].cx
+    assert end["pan_right"].cx > start["pan_right"].cx
+    assert end["drift_up"].cy < start["drift_up"].cy
+    assert end["push_in"].zoom > start["push_in"].zoom
+    assert end["push_out"].zoom < start["push_out"].zoom
+    assert end["push_out"].zoom == pytest.approx(motion.HEADROOM), "it lands on the full frame"
+    assert start["none"] == end["none"] and start["none"].zoom == 1.0
+
+
+def test_a_very_long_pan_slows_down_before_it_enlarges_the_picture_too_far():
+    for seconds in (60.0, 300.0):
+        cam = motion.camera("pan_right", 0.0, seconds)
+        assert cam.zoom <= motion.WIDEST_PAN_ZOOM + 1e-9
+        travel = motion.camera("pan_right", seconds, seconds).cx - cam.cx
+        assert travel == pytest.approx(1 - 1 / motion.WIDEST_PAN_ZOOM, abs=1e-6)
+
+
 def _ramp(w=64, h=48):
     """Red rises left to right and green top to bottom, so any shift shows which way it went."""
     x = np.linspace(0, 1, w, dtype=np.float32)[None, :].repeat(h, axis=0)
