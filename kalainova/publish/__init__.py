@@ -40,9 +40,10 @@ def _qa_bound(job: Job, final: Path) -> dict:
     if not qa.get("passed"):
         failing = [c["id"] for c in qa["checks"] if c["status"] == "fail"]
         raise ContractError(f"{job.id}: QA failed ({failing}); fix and re-render before approval")
-    checked = (qa.get("artifacts_sha256") or {}).get("video")
+    hashes = qa.get("artifacts_sha256") or {}
+    checked = hashes.get("video") or hashes.get("audio")
     if not checked or checked != sha256_file(final):
-        raise ContractError(f"{job.id}: final.mp4 is not the file QA checked; run qa again")
+        raise ContractError(f"{job.id}: {final.name} is not the file QA checked; run qa again")
     return qa
 
 
@@ -65,16 +66,17 @@ def _not_placeholder(job: Job) -> None:
     if local:
         raise ContractError(f"{job.id}: placeholder; the local provider made {local}. Render again with the paid models")
     made_from = job.read_stamp()
-    if not made_from or made_from.get("video_sha256") != sha256_file(job.work / "final.mp4") \
+    final = job.artifact()
+    if not made_from or made_from.get("artifact_sha256") != sha256_file(final) \
             or made_from.get("asset_manifest_sha256") != sha256_file(job.path("asset_manifest")):
-        raise ContractError(f"{job.id}: final.mp4 was not rendered from this asset_manifest.json; render again")
+        raise ContractError(f"{job.id}: {final.name} was not rendered from this asset_manifest.json; render again")
 
 
 def approve(job: Job, reviewer: str, *, platforms: list[str], notes: str = "", privacy: str = "public") -> dict:
-    final = job.work / "final.mp4"
+    final = job.artifact()
     _qa_bound(job, final)
     _not_placeholder(job)
-    packet = job.read("script_packet")
+    packet = job.read("script_packet") if job.has("script_packet") else {}
     pub = packet.get("publish") or {}
     record = {
         "schema_version": "0.1",
@@ -105,9 +107,9 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
     appr = job.read("approval")
     if platform not in appr["platforms"]:
         raise ContractError(f"{job.id}: {platform} not in approved platforms {appr['platforms']}")
-    final = job.work / "final.mp4"
+    final = job.artifact()
     if sha256_file(final) != appr["artifact_sha256"]:
-        raise ContractError(f"{job.id}: final.mp4 changed after approval; re-run QA and approval")
+        raise ContractError(f"{job.id}: {final.name} changed after approval; re-run QA and approval")
     _qa_bound(job, final)
     _not_placeholder(job)
     if not dry_run and job.has("publish_log"):
@@ -125,6 +127,8 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
     entry = {"platform": platform, "identity": identity, "at": _now(), "dry_run": dry_run, "title": appr["title"]}
     if dry_run:
         entry["status"] = "dry_run"
+    elif final.suffix != ".mp4":
+        raise ContractError(f"{job.id}: no publisher takes audio-only {final.name} yet; the approval still stands")
     elif platform not in ("youtube", "instagram", "tiktok", "x", "linkedin", "facebook", "threads"):
         raise ContractError(f"no publisher for {platform}")
     else:
@@ -230,7 +234,7 @@ def measure(job: Job, *, force: bool = False) -> dict:
             out["comments"] = int(stats.get("commentCount", 0))
             out["posted_at"] = post["at"]
             out["url"] = post.get("url")
-    out["artifact_path"] = str(job.work / "final.mp4")
+    out["artifact_path"] = str(job.artifact())
     if job.ledger_path.exists():
         out["cost"] = round(job.spent(), 4)
     job.write("measure", out)

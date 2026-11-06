@@ -262,7 +262,8 @@ def check_approval(path: Path, data: dict) -> None:
     qa = load(qa_path)
     if qa.get("passed") is not True:
         fail(f"{rel(path)}: approval exists but qa.json did not pass")
-    checked = (qa.get("artifacts_sha256") or {}).get("video")
+    hashes = qa.get("artifacts_sha256") or {}
+    checked = hashes.get("video") or hashes.get("audio")
     if checked != data.get("artifact_sha256"):
         fail(f"{rel(path)}: approved sha256 is not the file QA checked")
     manifest_path = path.parent / "asset_manifest.json"
@@ -277,7 +278,7 @@ def check_approval(path: Path, data: dict) -> None:
     stamp_path = path.parent / "render_stamp.json"
     stamp = load(stamp_path) if stamp_path.exists() else {}
     manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    if stamp.get("asset_manifest_sha256") != manifest_sha or stamp.get("video_sha256") != checked:
+    if stamp.get("asset_manifest_sha256") != manifest_sha or stamp.get("artifact_sha256") != checked:
         fail(f"{rel(path)}: approved file was not rendered from this asset_manifest.json")
 
 

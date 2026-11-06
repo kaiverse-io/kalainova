@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from . import media
+from . import config, media
 from .jobfs import CostCapExceeded, Job
 from .providers import router
 
@@ -50,7 +50,51 @@ def contact_sheet(job: Job, final, em: dict) -> str | None:
     return "contact.jpg"
 
 
+def run_file(job: Job) -> dict:
+    """Checks that need only the delivered file and its record, for files the engine did not render."""
+    data, am, final = job.job, job.read("asset_manifest"), job.artifact()
+    checks: list[dict] = []
+    metrics: dict = {}
+    if not final.exists():
+        _check(checks, "render.exists", False, f"{final.name} missing")
+        report = {"schema_version": "0.1", "job_id": data["job_id"], "passed": False, "checks": checks}
+        job.write("qa", report)
+        return report
+    prof = config.profile(data.get("profile") or ("short-9x16" if final.suffix == ".mp4" else "podcast"))
+    info = media.summarize(final)
+    dur = media.duration(final)
+    metrics.update(info, duration_sec=round(dur, 3))
+    _check(checks, "duration", dur > 0, f"{dur:.2f}s")
+    if final.suffix == ".mp4":
+        _check(checks, "frame.size", (info.get("width"), info.get("height")) == (prof.get("width"), prof.get("height")),
+               f"{info.get('width')}x{info.get('height')} vs {prof.get('width')}x{prof.get('height')}", "warn")
+        black = media.blackdetect(final, 0.5)
+        _check(checks, "picture.black_frames", not black, f"{len(black)} black spans ≥0.5s")
+    if final.suffix != ".mp4" or info.get("sample_rate_hz"):
+        loud = media.loudness(final)
+        metrics.update(loud)
+        tgt, tp_max = prof.get("target_lufs", -14), prof.get("true_peak_dbtp_max", -1)
+        il, tp = loud["integrated_lufs"], loud["true_peak_dbtp"]
+        _check(checks, "audio.loudness", il is not None and abs(il - tgt) <= 1.0, f"{il} LUFS (target {tgt}±1)", "warn")
+        _check(checks, "audio.true_peak", tp is not None and tp <= tp_max + 0.3, f"{tp} dBTP (max {tp_max})")
+    synthetic = any(a.get("synthetic") for a in am["assets"])
+    metrics["synthetic"] = synthetic
+    _check(checks, "disclosure.synthetic_flag", not synthetic or data.get("synthetic_disclosure", True),
+           "synthetic assets present; publish must set the platform AI label")
+    _check(checks, "rights.assets", all(a.get("rights") in ("owned", "licensed", "funded-brief") for a in am["assets"]),
+           "every asset carries rights")
+    checks.append({"id": "judge.content", "status": "warn", "detail": "no content review for this file; human reviews it"})
+    from .publish import sha256_file
+    report = {"schema_version": "0.1", "job_id": data["job_id"], "passed": all(c["status"] != "fail" for c in checks),
+              "checks": checks, "metrics": metrics, "artifacts": {"video" if final.suffix == ".mp4" else "audio": final.name},
+              "artifacts_sha256": {"video" if final.suffix == ".mp4" else "audio": sha256_file(final)}}
+    job.write("qa", report)
+    return report
+
+
 def run(job: Job) -> dict:
+    if not job.has("edit_manifest"):
+        return run_file(job)
     data = job.job
     em = job.read("edit_manifest")
     packet = job.read("script_packet")
