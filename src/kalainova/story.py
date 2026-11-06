@@ -25,6 +25,7 @@ MARGIN_X, MARGIN_TOP, MARGIN_FOOT = 215, 240, 270
 BODY_SIZE, LEADING = 46, 67  # 11 pt on 16 pt
 INDENT = 46
 OPENER_DROP = 620  # a chapter starts a third of the way down its page
+MIN_LAST_PAGE_LINES = 5  # fewer than this on a chapter's last page looks like a mistake
 BODY_FACE = "Literata.ttf"
 FOOT_DARKNESS = 0.82
 INK = (22, 22, 24)
@@ -135,6 +136,21 @@ def paginate(
     return [page for page in pages if page]
 
 
+def set_chapter(
+    paragraphs: list[list[Line]], lines_per_page: int, opener: int
+) -> tuple[list[list[Line]], int]:
+    """A chapter's pages, and the lines its opener holds.
+
+    A typesetter's move: when a chapter would end on a page of a few lines, the opener starts a
+    little higher and takes them up.
+    """
+    for room in range(opener, opener + MIN_LAST_PAGE_LINES):
+        pages = paginate(paragraphs, lines_per_page, room)
+        if len(pages) == 1 or len(pages[-1]) >= MIN_LAST_PAGE_LINES:
+            return pages, room
+    return paginate(paragraphs, lines_per_page, opener), opener
+
+
 # ------------------------------------------------------------------ the printed book
 def _draw_line(draw: ImageDraw.ImageDraw, line: Line, y: float, measure: float) -> None:
     font = _font(BODY_SIZE)
@@ -158,17 +174,23 @@ def _chapter_pages(chapter: dict[str, Any], first_folio: int) -> list[Image.Imag
         break_lines(text, measure=measure, size=BODY_SIZE, indent=INDENT if n else 0)
         for n, text in enumerate(chapter["paragraphs"])
     ]
+    pages, room = set_chapter(paragraphs, per_page, opener)
+    lift = (room - opener) * LEADING
     images = []
-    for n, lines in enumerate(paginate(paragraphs, per_page, opener)):
+    for n, lines in enumerate(pages):
         page = Image.new("RGB", (PAGE_W, PAGE_H), PAPER)
         draw = ImageDraw.Draw(page)
         y = float(MARGIN_TOP)
         if n == 0:
             title = _font(92, weight=400, optical=48)
             draw.text(
-                (PAGE_W / 2, MARGIN_TOP + 240), chapter["title"], font=title, fill=INK, anchor="mm"
+                (PAGE_W / 2, MARGIN_TOP + 240 - lift / 2),
+                chapter["title"],
+                font=title,
+                fill=INK,
+                anchor="mm",
             )
-            y += OPENER_DROP
+            y += OPENER_DROP - lift
         for line in lines:
             _draw_line(draw, line, y, measure)
             y += LEADING

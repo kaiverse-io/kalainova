@@ -99,6 +99,30 @@ def _job(tmp_path, monkeypatch):
     return Job(folder)
 
 
+def _lines(n):
+    return [[story.Line(["word"], 100, True, 0)] * n]
+
+
+@pytest.mark.parametrize("spill", [1, 2, 3, 4])
+def test_a_chapter_opener_takes_up_a_few_stranded_lines(spill):
+    pages, room = story.set_chapter(_lines(10 + spill), lines_per_page=20, opener=10)
+    assert [len(p) for p in pages] == [10 + spill]
+    assert room == 10 + spill
+
+
+def test_a_chapter_opener_keeps_its_place_when_the_last_page_is_already_full_enough():
+    pages, room = story.set_chapter(_lines(10 + story.MIN_LAST_PAGE_LINES), 20, 10)
+    assert [len(p) for p in pages] == [10, story.MIN_LAST_PAGE_LINES]
+    assert room == 10
+
+
+def test_a_long_chapter_never_ends_on_a_page_of_a_few_lines():
+    for total in range(10, 80):
+        pages, _ = story.set_chapter(_lines(total), 20, 10)
+        assert sum(len(p) for p in pages) == total
+        assert len(pages) == 1 or len(pages[-1]) >= story.MIN_LAST_PAGE_LINES
+
+
 def test_a_story_delivers_a_valid_epub_with_the_whole_text(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     story.run(job)
