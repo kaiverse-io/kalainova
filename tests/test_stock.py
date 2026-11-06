@@ -119,7 +119,7 @@ def test_reel_from_mocked_pexels(tmp_path, monkeypatch):
         return Resp(blob=blobs[k % 3])
 
     monkeypatch.setattr(stock.requests, "get", fake_get)
-    monkeypatch.setattr(cli, "REPO", tmp_path)
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
     (tmp_path / "jobs").mkdir()
     rc = cli.main(["reel", "ct", "Test City", "8s reel, warm, title: Test City", "--count", "4"])
     folder = tmp_path / "jobs" / "ct"
