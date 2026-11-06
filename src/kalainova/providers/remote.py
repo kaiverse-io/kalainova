@@ -14,7 +14,7 @@ from pathlib import Path
 
 import requests
 
-from ..config import model_for, price_for, reference_spec
+from ..config import model_for, price_for, reference_spec, video_spec
 from .base import Provider, Result, register
 
 TIMEOUT = 120
@@ -163,6 +163,7 @@ class ElevenLabs(Provider):
                 "text": prompt,
                 "duration_seconds": max(0.5, min(duration, 22)),
                 "prompt_influence": 0.5,
+                "model_id": model_for("elevenlabs", "sfx"),
             },
             timeout=TIMEOUT,
         )
@@ -303,6 +304,8 @@ class Fal(Provider):
             payload["image_size"] = {"width": width, "height": height}
         else:  # Nano Banana-family models take an aspect ratio, not pixel sizes
             payload["aspect_ratio"] = aspect_for(width, height)
+            if model_for("fal", "image_resolution"):
+                payload["resolution"] = model_for("fal", "image_resolution")
         refs = kw.get("references")
         if refs:
             payload["prompt"], fields, spec = self._with_references("image", model, prompt, refs)
@@ -326,11 +329,14 @@ class Fal(Provider):
             return self._reference_video(prompt, dst, duration, aspect, kw.get("model"), refs)
         key = "image_to_video" if image else "video"
         model = kw.get("model") or model_for("fal", key)
-        allowed = [int(x) for x in str(model_for("fal", key + "_durations") or "5,10").split(",")]
+        spec = video_spec("fal", model)
+        allowed = [int(x) for x in str(spec.get("durations") or "5,10").split(",")]
         billed = min((d for d in allowed if d >= duration), default=max(allowed))
-        payload = {"prompt": prompt, "aspect_ratio": aspect, "duration": str(billed)}
+        length = billed if spec.get("duration_type") == "int" else str(billed)
+        payload = {"prompt": prompt, "aspect_ratio": aspect, "duration": length}
+        payload.update(spec.get("extra", {}))
         if image:
-            payload["image_url"] = self._upload(image)
+            payload[spec.get("image_param", "image_url")] = self._upload(image)
         data = self._run(model, payload, timeout=1800)
         _download(data["video"]["url"], dst)
         cost = billed * price_for("fal", key).get("per_sec", 0)
@@ -360,7 +366,7 @@ class Fal(Provider):
 
     def music(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
         model = kw.get("model") or model_for("fal", "music")
-        data = self._run(model, {"prompt": prompt, "seconds_total": int(duration)})
+        data = self._run(model, {"prompt": prompt})
         url = (data.get("audio_file") or data.get("audio") or {}).get("url")
         raw = dst.with_suffix(".src")
         _download(url, raw)

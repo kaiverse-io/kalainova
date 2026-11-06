@@ -30,17 +30,17 @@ models:
   elevenlabs:
     voice: eleven_v4_turbo            # Eleven v4 Turbo: #2 TTS arena, half v4's price. Premium: eleven_v4. VERIFY id in ElevenLabs docs.
     voice_id: JBFqnCBsd6RMkjVDRZzb   # replace with your house voice
-    music: music_v1
+    music: music_v2_5                 # music_v1 is deprecated, removed 2027-01-31
+    sfx: eleven_text_to_sound_v3
   fal:
     # Slugs: confirm with the fal MCP search_models/get_model_schema before first paid run.
-    image: google/nano-banana-2.1                   # slug from fal's model page; default; premium = GPT Image 2.5 via OpenAI
+    image: google/nano-banana-2.1                   # checked on fal 2026-11-06; premium = GPT Image 2.5
     image_edit: google/nano-banana-2.1/edit         # takes reference images; see reference_models
+    image_resolution: 2K                            # the model defaults to 1K, which comes back soft
     reference_to_video: alibaba/wan-3.0-prime/reference-to-video
-    video: fal-ai/wan/v3/text-to-video              # Wan 3.0: #1 AA T2V, $0.20/s at 1080p
-    image_to_video: fal-ai/wan/v3/image-to-video    # premium = Seedance 2.5 / Kling 4.0
-    video_durations: "5,10"                         # seconds the model accepts; VERIFY per model
-    image_to_video_durations: "5,10"
-    music: fal-ai/lyria3                            # Lyria 3 Pro ~$0.08/song; alt ElevenLabs Music v2
+    video: alibaba/wan-3.0-prime/text-to-video      # checked on fal 2026-11-06; see video_models
+    image_to_video: alibaba/wan-3.0-prime/image-to-video
+    music: fal-ai/lyria3                            # takes a prompt only, and returns a fixed length
     transcribe: fal-ai/whisper     # swap for ElevenLabs Scribe v2 (2.2% WER) when added
 
 prices:
@@ -51,11 +51,11 @@ prices:
     music: {per_min: 0.80}
     sfx: {per_min: 0.50}
   fal:
-    image: {per_image: 0.05}       # Nano Banana 2.1 2K
-    video: {per_sec: 0.20}         # Wan 3.0 1080p
-    image_to_video: {per_sec: 0.20}
-    reference_to_video: {per_sec: 0.20}  # ESTIMATE, not a quoted price: check the chosen model. Kling O1 listed $0.112/s.
-    music: {per_track: 0.08}
+    image: {per_image: 0.15}       # ESTIMATE: Nano Banana 2.1 bills by tokens and rises with resolution
+    video: {per_sec: 0.28}         # Wan 3.0 Prime at 1080p
+    image_to_video: {per_sec: 0.28}
+    reference_to_video: {per_sec: 0.28}
+    music: {per_track: 0.04}
     transcribe: {per_min: 0.01}
 
 # Models that can hold a face: how each takes reference images. Only these may be pinned by a stream
@@ -70,19 +70,37 @@ reference_models:
         images_param: reference_image_urls
         max_images: 10
         tag: "Image {n}"
-        durations: "5,10"
+        durations: "3,4,5,6,7,8,9,10,12,15,20,30"
         duration_type: int
-        extra: {audio: false}
+        extra: {audio: false, resolution: "1080p"}
       bytedance/seedance-2.0/reference-to-video:
         images_param: image_urls
         max_images: 9
         tag: "@Image{n}"
         durations: "4,5,6,8,10,12,15"
         extra: {generate_audio: false}
-      fal-ai/kling-video/o1/reference-to-video:
+      fal-ai/kling-video/o3/pro/reference-to-video:
         elements: true
         max_images: 7
-        durations: "5,10"
+        durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
+
+# How each plain video model takes its inputs, from the vendor's published schema.
+video_models:
+  fal:
+    alibaba/wan-3.0-prime/image-to-video: &wan
+      image_param: image_url
+      durations: "3,4,5,6,7,8,9,10,12,15,20,30"
+      duration_type: int
+      extra: {audio: false, resolution: "1080p"}
+    alibaba/wan-3.0-prime/text-to-video: *wan
+    fal-ai/kling-video/v3/pro/image-to-video:
+      image_param: start_image_url
+      durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
+      extra: {generate_audio: false}
+    bytedance/seedance-2.5/image-to-video:
+      image_param: image_url
+      durations: "4,5,6,8,10,12,15"
+      extra: {generate_audio: false}
 
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:
