@@ -16,6 +16,9 @@ FFPROBE = shutil.which("ffprobe") or "ffprobe"
 MASTER_PASSES = 3
 # Luma levels of 255: an encoder keeps a flat field this tight, and a dark shot is never this flat.
 FLAT_TONE_LEVELS = 3
+FULL_FRAME = (0.0, 0.0, 1.0, 1.0)
+BAR_LEVEL = 24  # 8-bit luma: video black is 16, and compression lifts it a little
+BAR_MISMATCH = 0.01  # a letterbox is centred, to within this share of the frame
 
 # Every stage between source and delivery is lossless 10-bit 4:4:4 BT.709, so one final encode is
 # the only place quality is spent. The tags stop players guessing a colour matrix.
@@ -398,6 +401,41 @@ def has_picture(path: str | Path) -> bool:
     """False when an image or clip is one flat tone from start to end, as a failed decode leaves."""
     low, high = np.percentile(decode_gray(path, width=64), [0.5, 99.5])
     return bool(high - low >= FLAT_TONE_LEVELS)
+
+
+def _bar_lengths(line: np.ndarray) -> tuple[int, int]:
+    """How far black runs in from each end of a row or column. Bars match; a dark sky does not."""
+    lit = np.flatnonzero(line > BAR_LEVEL)
+    if not lit.size:
+        return 0, 0
+    first, last = int(lit[0]), int(line.size - 1 - lit[-1])
+    if not (first and last) or abs(first - last) > max(line.size * BAR_MISMATCH, 1):
+        return 0, 0
+    return first + 1, last + 1  # scaling blurs the edge, so take one more than was measured
+
+
+def picture_box(path: str | Path, samples: int = 24) -> tuple[float, float, float, float]:
+    """The part of a source that ever holds picture, as shares of the frame: x, y, w, h.
+
+    A bar has to stay black across the whole source. In any one frame, black space below a planet
+    or a night sky above a horizon looks the same.
+    """
+    width = min(summarize(path).get("width", 0), 640)
+    if not width:
+        return FULL_FRAME
+    frames = decode_gray(path, width=width, fps=samples / max(duration(path), 0.1))
+    if not frames.size:
+        return FULL_FRAME
+    peak = frames.max(axis=0)
+    rows, cols = peak.max(axis=1), peak.max(axis=0)
+    top, bottom = _bar_lengths(rows)
+    left, right = _bar_lengths(cols)
+    return (
+        left / cols.size,
+        top / rows.size,
+        (cols.size - left - right) / cols.size,
+        (rows.size - top - bottom) / rows.size,
+    )
 
 
 def decode_stereo(path: str | Path, sr: int = 48000) -> tuple[np.ndarray, np.ndarray, int]:

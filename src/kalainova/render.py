@@ -87,6 +87,7 @@ SPEC = {
         "fps": "num",
         "duration_sec": "num",
         "crop_x": "num?",
+        "picture_box": "box?",
         "zoom": "num?",
         "grade": GRADES + (None,),
         "gamma": "num?",
@@ -192,6 +193,9 @@ def _coerce(op: str, args: dict, n: int) -> dict:
             elif kind == "list":
                 if not isinstance(v, list):
                     raise ValueError("expected a list")
+            elif kind == "box":
+                if not _is_box(v):
+                    raise ValueError(f"{v!r} is not x, y, w, h inside the frame")
         except ValueError as exc:
             raise ContractError(f"step {n} ({op}): {key}: {exc}") from exc
         out[key] = v
@@ -268,6 +272,16 @@ def _sound_only_steps(em: dict, assets: dict, synthetic: bool) -> list[dict]:
     return [*steps, {"op": "export_audio", "args": export}]
 
 
+def _is_box(v: object) -> bool:
+    """Four finite shares of the frame, x, y, w, h, with a picture left inside it."""
+    if not isinstance(v, list) or len(v) != 4:
+        return False
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+        return False
+    x, y, w, h = v
+    return 0 <= x and 0 <= y and 0 < w and 0 < h and x + w <= 1 and y + h <= 1
+
+
 def compile_plan(job: Job) -> dict:
     em = job.read("edit_manifest")
     am = job.read("asset_manifest")
@@ -295,6 +309,7 @@ def compile_plan(job: Job) -> dict:
     n_cuts = len(em.get("cuts", []))
     seg_durs: list[float] = []
     seg_audio: list[str] = []
+    boxes: dict[str, tuple[float, float, float, float]] = {}
     orig = bool(em.get("original_audio"))
 
     for i, cut in enumerate(em.get("cuts", [])):
@@ -359,6 +374,10 @@ def compile_plan(job: Job) -> dict:
         for key in ("crop_x", "zoom", "grade", "gamma"):
             if cut.get(key) is not None:
                 scale_args[key] = cut[key]
+        if src["kind"] == "video":
+            box = boxes.setdefault(src["path"], media.picture_box(job.work / src["path"]))
+            if box != media.FULL_FRAME:
+                scale_args["picture_box"] = list(box)
         steps.append({"op": "scale", "args": scale_args})
         segs.append(out)
 
@@ -629,9 +648,11 @@ def _op_scale(work: Path, a: dict) -> None:
     W, H = a["width"], a["height"]
     z = a.get("zoom") or 1.0
     cx = 0.5 if a.get("crop_x") is None else a["crop_x"]
+    box = a.get("picture_box")
+    bars = f"crop=iw*{box[2]:.5f}:ih*{box[3]:.5f}:iw*{box[0]:.5f}:ih*{box[1]:.5f}," if box else ""
     # fill the frame, punch in if asked, then crop around the subject (clamped inside the frame)
     fit = (
-        f"scale={int(W * z)}:{int(H * z)}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"{bars}scale={int(W * z)}:{int(H * z)}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={W}:{H}:x='(iw-{W})*{min(max(cx, 0.0), 1.0):.4f}':y='(ih-{H})/2',fps={a['fps']:g},setsar=1"
     )
     trim = f"trim=duration={a['duration_sec']:.3f}"

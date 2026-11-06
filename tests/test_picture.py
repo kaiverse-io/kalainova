@@ -200,3 +200,84 @@ def test_a_clip_long_enough_is_cut_to_its_shot_with_no_frozen_frames(tmp_path, m
     for cut, end in zip(cuts, ends, strict=True):
         assert "hold_last_frame" not in cut
         assert cut["out_sec"] - cut["in_sec"] >= end - cut["start_sec"]
+
+
+def _clip(tmp_path, chain, name="s.mp4"):
+    path = tmp_path / name
+    media.run(["-f", "lavfi", "-i", chain, "-t", "3", "-pix_fmt", "yuv420p", str(path)])
+    return path
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_letterbox_bars_baked_into_a_source_are_found(tmp_path):
+    clip = _clip(tmp_path, "testsrc2=s=320x180:r=8,pad=320:240:0:30:black")
+    x, y, w, h = media.picture_box(clip)
+    assert (x, w) == (0.0, 1.0)
+    assert 30 / 240 <= y <= 34 / 240
+    assert 172 / 240 <= h <= 180 / 240
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_pillar_bars_baked_into_a_source_are_found(tmp_path):
+    clip = _clip(tmp_path, "testsrc2=s=240x180:r=8,pad=320:180:40:0:black")
+    x, y, w, h = media.picture_box(clip)
+    assert (y, h) == (0.0, 1.0)
+    assert 40 / 320 <= x <= 44 / 320
+    assert 232 / 320 <= w <= 240 / 320
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_full_picture_has_nothing_to_remove(tmp_path):
+    assert media.picture_box(_clip(tmp_path, "testsrc2=s=320x180:r=8")) == media.FULL_FRAME
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_night_sky_is_part_of_the_picture_not_a_bar(tmp_path):
+    # black above the horizon in every frame, with nothing matching below: not a letterbox
+    clip = _clip(tmp_path, "testsrc2=s=320x120:r=8,pad=320:180:0:60:black")
+    assert media.picture_box(clip) == media.FULL_FRAME
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_black_that_is_only_sometimes_there_is_part_of_the_picture(tmp_path):
+    # the limb of a planet: black at the edges early on, full of picture later
+    clip = _clip(
+        tmp_path,
+        "testsrc2=s=320x180:r=8,drawbox=y=0:w=iw:h=40:c=black:t=fill:enable='lt(t,1.5)',"
+        "drawbox=y=140:w=iw:h=40:c=black:t=fill:enable='lt(t,1.5)'",
+    )
+    assert media.picture_box(clip) == media.FULL_FRAME
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_render_crops_a_baked_in_letterbox_away(tmp_path):
+    source = _clip(tmp_path, "testsrc2=s=320x180:r=24,pad=320:240:0:30:black")
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "raw.mp4").write_bytes(source.read_bytes())
+    args = {
+        "input": "raw.mp4",
+        "out": "out.mp4",
+        "width": 320,
+        "height": 180,
+        "fps": 24,
+        "duration_sec": 1.0,
+        "picture_box": list(media.picture_box(source)),
+    }
+    render._op_scale(work, args)
+    frame = media.gray_frame(work / "out.mp4", 0.5)
+    assert frame[:3].mean() > 30 and frame[-3:].mean() > 30
+
+
+def test_a_plan_refuses_a_picture_box_outside_the_frame():
+    args = {
+        "input": "a.mp4",
+        "out": "b.mp4",
+        "width": 64,
+        "height": 64,
+        "fps": 24,
+        "duration_sec": 1.0,
+        "picture_box": [0.0, 0.1, 2.0, 0.8],
+    }
+    with pytest.raises(ContractError):
+        render._coerce("scale", args, 0)
