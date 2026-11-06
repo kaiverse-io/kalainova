@@ -3,6 +3,7 @@
 **An AI production studio you run yourself. Turn a one-line brief into finished video, audio, stills, and text, keep the same characters across every piece, and publish only what a human approved.**
 
 [![CI](https://github.com/kaiverse-io/kalainova/actions/workflows/ci.yaml/badge.svg)](https://github.com/kaiverse-io/kalainova/actions/workflows/ci.yaml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange)
 
@@ -139,6 +140,6 @@ just ci    # contract, lint, types, secrets, semantic rules, tests, docs, archit
 
 ## License
 
-**All rights reserved for now.** The source is public, but [LICENSE](LICENSE) doesn't yet grant open-source rights. Please check back before building on it.
+[Apache License 2.0](LICENSE). Copyright 2026 kaiverse-io.
 
 Third-party notes are in [NOTICE.md](NOTICE.md).

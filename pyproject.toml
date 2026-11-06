@@ -3,9 +3,9 @@ name = "kalainova"
 version = "0.1.0"
 description = "Content generation engine for any subject"
 readme = "README.md"
-license = { text = "Proprietary" }
+license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
-authors = [{ name = "Kartik Mittal" }]
+authors = [{ name = "kaiverse.io" }]
 dependencies = [
     "jsonschema>=4.20",
     "requests>=2.31",
