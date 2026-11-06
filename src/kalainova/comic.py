@@ -394,6 +394,13 @@ def _scroll(pages: list[Image.Image], rects_by_page: list[list[Rect]]) -> Image.
     return out
 
 
+def empty_page_folder(folder: Path) -> None:
+    """A render with fewer pages than the last one must not leave the old ones behind."""
+    folder.mkdir(exist_ok=True)
+    for old in folder.glob("*.png"):
+        old.unlink()
+
+
 def preflight(job: Job, script: dict[str, Any]) -> None:
     """Refuse a script that cannot be lettered before any art is paid for."""
     for number, spec in enumerate(script["pages"], 1):
@@ -420,7 +427,7 @@ def run(job: Job) -> Path:
     built = [_page(job, spec, ctx, records) for spec in script["pages"]]
     pages = [p for p, _ in built]
     folder = job.work / "pages"
-    folder.mkdir(exist_ok=True)
+    empty_page_folder(folder)
     names = []
     for n, page in enumerate(pages, 1):
         names.append(f"{n:03d}.png")

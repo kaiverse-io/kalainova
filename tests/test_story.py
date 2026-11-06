@@ -123,6 +123,14 @@ def test_a_long_chapter_never_ends_on_a_page_of_a_few_lines():
         assert len(pages) == 1 or len(pages[-1]) >= story.MIN_LAST_PAGE_LINES
 
 
+def test_a_second_render_leaves_no_page_from_a_longer_first_one(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    story.run(job)
+    (job.work / "book" / "099.png").write_bytes(b"from an earlier, longer layout")
+    story.run(job)
+    assert not (job.work / "book" / "099.png").exists()
+
+
 def test_a_story_delivers_a_valid_epub_with_the_whole_text(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     story.run(job)

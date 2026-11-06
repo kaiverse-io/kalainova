@@ -366,7 +366,7 @@ def run(job: Job) -> Path:
     for chapter in script["chapters"]:
         pages += _chapter_pages(chapter, len(pages))
     folder = job.work / "book"
-    folder.mkdir(exist_ok=True)
+    comic.empty_page_folder(folder)
     for n, page in enumerate(pages, 1):
         page.save(folder / f"{n:03d}.png", dpi=(300, 300))
     final = job.work / "final.pdf"

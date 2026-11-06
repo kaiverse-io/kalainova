@@ -142,6 +142,15 @@ def _job(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_second_render_leaves_no_page_from_a_longer_first_one(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    comic.run(job)
+    (job.work / "pages" / "099.png").write_bytes(b"from an earlier, longer layout")
+    comic.run(job)
+    assert not (job.work / "pages" / "099.png").exists()
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_comic_job_delivers_print_and_reader_files(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     comic.run(job)
