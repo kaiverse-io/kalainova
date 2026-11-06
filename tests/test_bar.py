@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from kalainova import bar
+from kalainova import bar, config
 
 SR = 48000
 
@@ -125,6 +125,13 @@ def test_beat_alignment_scores_cuts_on_and_off_the_grid():
     assert bar.beat_alignment([1.0, 2.0, 3.5], beats, 0.05) == 1.0
     assert bar.beat_alignment([1.2, 2.2, 3.7], beats, 0.05) == 0.0
     assert bar.beat_alignment([], beats, 0.05) == 0.0
+
+
+def test_an_older_private_config_still_gets_every_limit(monkeypatch):
+    monkeypatch.setattr(config, "studio", lambda: {"bar": {"stutter_max": 0.01}})
+    limits = bar.limits()
+    assert limits["stutter_max"] == 0.01
+    assert "voice_to_music_db_max" in limits
 
 
 def test_voice_to_music_reads_the_gap_while_someone_is_speaking():

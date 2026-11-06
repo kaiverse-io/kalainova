@@ -105,8 +105,18 @@ def _swinging_bed(path: Path) -> Path:
     return path
 
 
-def _gap(tmp_path: Path, voice_volume: float = 1.0) -> float:
-    _tone(tmp_path / "v.wav", 16.0, volume=voice_volume)
+def _speech_like(path: Path, volume: float) -> None:
+    """A tone that swells and falls about as often as syllables do, so the ducker reacts to it."""
+    media.run(
+        [
+            "-f", "lavfi", "-i", "sine=f=330:d=16:r=48000",
+            "-af", f"volume={volume},tremolo=f=4:d=0.9", "-ac", "2", str(path),
+        ]
+    )  # fmt: skip
+
+
+def _gap(tmp_path: Path, voice_volume: float = 2.0) -> float:
+    _speech_like(tmp_path / "v.wav", voice_volume)
     _swinging_bed(tmp_path / "m.wav")
     render._op_mix_audio(
         tmp_path,
@@ -138,7 +148,7 @@ def test_a_score_with_big_swings_stays_audible_under_the_voice(tmp_path):
 def test_the_music_is_set_against_the_voice_it_will_sit_under(tmp_path):
     (tmp_path / "loud").mkdir()
     (tmp_path / "soft").mkdir()
-    assert abs(_gap(tmp_path / "loud", 1.0) - _gap(tmp_path / "soft", 0.4)) < 3.0
+    assert abs(_gap(tmp_path / "loud", 2.0) - _gap(tmp_path / "soft", 0.8)) < 3.0
 
 
 def test_music_too_quiet_to_hear_misses_the_bar(tmp_path):

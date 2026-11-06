@@ -224,7 +224,7 @@ class Reading:
 
 
 def limits() -> dict[str, Any]:
-    return dict(config.studio().get("bar") or {})
+    return config.bar_limits()
 
 
 def _at_most(rid: str, value: float, key: str, *, blocks: bool = False) -> Reading:

@@ -14,8 +14,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import bar, look, media, motion
 from . import captions as ass
-from . import look, media, motion
 from .jobfs import ContractError, Job
 
 OPS = (
@@ -44,11 +44,11 @@ VOICE_CHAIN = (
     "alimiter=limit=0.9:attack=2:release=50:level=disabled"
 )
 MUSIC_POCKET = "equalizer=f=2800:t=q:w=1.4:g=-3"  # a space in the music for the words to sit in
-DUCK = "sidechaincompress=threshold=0.02:ratio=6:attack=25:release=450:makeup=1"
+DUCK = "sidechaincompress=threshold=0.05:ratio=3:attack=25:release=450:makeup=1"  # gently: 5 dB
 # A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
 ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
 MUSIC_FADE_SEC = 2.5
-# Against the voice's loudness, before ducking takes it about 6 dB further while someone speaks.
+# Against the voice where it speaks, before ducking. On real speech it lands 15 dB under the words.
 MUSIC_UNDER_VOICE_DB = -10.0
 DUCK_KEY_LUFS = -27.0  # where the ducker hears the voice, so it ducks the same for any voice
 SAMPLE_WIDTH, SAMPLE_FPS = 270, 2.0
@@ -831,15 +831,12 @@ def _op_caption_files(work: Path, a: dict) -> None:
 def _music_under_voice(work: Path, a: dict, bed: Path) -> tuple[Path, float, float]:
     """The bed to mix, its gain, and the ducking key's gain, all set against the measured voice."""
     level = media.even_out(bed, work / "music.even.wav")
-    voice = media.loudness(_safe(work, a["voice"])).get("integrated_lufs")
-    music = media.loudness(level).get("integrated_lufs")
-    if voice is None or music is None:
-        return level, a.get("music_gain_db", MUSIC_UNDER_VOICE_DB), 0.0
-    return (
-        level,
-        voice - music + a.get("music_gain_db", MUSIC_UNDER_VOICE_DB),
-        DUCK_KEY_LUFS - voice,
-    )
+    voice_path = _safe(work, a["voice"])
+    voice, _, sr = media.decode_stereo(voice_path)
+    music, _, _ = media.decode_stereo(level)
+    gain = bar.voice_to_music_db(voice, music, sr) + a.get("music_gain_db", MUSIC_UNDER_VOICE_DB)
+    lufs = media.loudness(voice_path).get("integrated_lufs")
+    return level, gain, DUCK_KEY_LUFS - lufs if lufs is not None else 0.0
 
 
 def _music_chain(index: int, gain: float, duration: float, under_voice: bool) -> str:

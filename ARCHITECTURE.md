@@ -157,6 +157,7 @@ flowchart TB
     jobfs --> schemas
     router --> config
     render --> media
+    render --> bar
 ```
 
 ## Component view: model access

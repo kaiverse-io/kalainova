@@ -21,6 +21,17 @@ def studio() -> dict:
     return yaml.safe_load(path.read_text()) if path.exists() else {}
 
 
+@lru_cache(maxsize=1)
+def _repo_bar() -> dict:
+    path = REPO / "config" / "studio.yaml"
+    return yaml.safe_load(path.read_text()).get("bar", {}) if path.exists() else {}
+
+
+def bar_limits() -> dict:
+    """The repo's limits, under a private config's, so an older config still has every limit."""
+    return {**_repo_bar(), **(studio().get("bar") or {})}
+
+
 def preference(capability: str, job: dict | None = None) -> list[str]:
     """The providers to try, in order. A job's own list replaces the studio's, so naming one provider pins it."""
     job_pref = ((job or {}).get("providers") or {}).get(capability)
