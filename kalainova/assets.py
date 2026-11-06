@@ -83,7 +83,7 @@ def run(job: Job, *, force: bool = False) -> dict:
         # one manifest entry covers every beat, so one local beat after a fallback marks the whole track
         p, res = next((m for m in voice_makers if m[0].name == "local"), voice_makers[-1])
         add(id="voice", kind="audio", role="voice", path="voice.wav", duration_sec=media.duration(work / "voice.wav"),
-            rights=_rights(data), provider=p.name, model=res.model, synthetic=True, probe=media.summarize(work / "voice.wav"))
+            rights=_rights(data), provider=p.name, model=res.model, provenance=res.meta.get("provenance"), synthetic=True, probe=media.summarize(work / "voice.wav"))
 
     # --- visuals per beat ---------------------------------------------------
     if "video" in media_kinds or "still" in media_kinds:
@@ -97,7 +97,7 @@ def run(job: Job, *, force: bool = False) -> dict:
                           title=beat.get("on_screen") or beat["text"], palette=i,
                           style=(data.get("edit") or {}).get("theme", "studio"))
             add(id=f"{bid}.still", kind="still", role="visual", beat_id=bid, path=f"beats/{bid}.still.png",
-                rights=_rights(data), provider=p.name, model=res.model, prompt=prompt, synthetic=True,
+                rights=_rights(data), provider=p.name, model=res.model, provenance=res.meta.get("provenance"), prompt=prompt, synthetic=True,
                 probe=media.summarize(still))
             if beat.get("visual_kind") == "video" and video_budget > 0 and "video" in media_kinds:
                 clip = work / "beats" / f"{bid}.video.mp4"
@@ -106,7 +106,7 @@ def run(job: Job, *, force: bool = False) -> dict:
                                   est={"duration": span, "image": True})
                     video_budget -= 1
                     add(id=f"{bid}.video", kind="video", role="visual", beat_id=bid, path=f"beats/{bid}.video.mp4",
-                        duration_sec=media.duration(clip), rights=_rights(data), provider=p.name, model=res.model,
+                        duration_sec=media.duration(clip), rights=_rights(data), provider=p.name, model=res.model, provenance=res.meta.get("provenance"),
                         prompt=prompt, synthetic=True, probe=media.summarize(clip))
                 except RuntimeError as exc:  # still + motion covers this beat, and the operator is told
                     print(f"{job.id}: {bid}: no video clip, using the still: {exc}", file=sys.stderr)
@@ -117,11 +117,11 @@ def run(job: Job, *, force: bool = False) -> dict:
         bed = work / "music.wav"
         p, res = _gen("music", "music", mood, bed, duration=total + 1.0, est={"duration": total + 1.0})
         add(id="music", kind="audio", role="music", path="music.wav", duration_sec=media.duration(bed),
-            rights=_rights(data), provider=p.name, model=res.model, prompt=mood, synthetic=True)
+            rights=_rights(data), provider=p.name, model=res.model, provenance=res.meta.get("provenance"), prompt=mood, synthetic=True)
         whoosh = work / "whoosh.wav"
         p, res = _gen("sfx", "sfx", "soft cinematic whoosh transition", whoosh, duration=0.6, est={"duration": 0.6})
         add(id="whoosh", kind="audio", role="sfx", path="whoosh.wav", duration_sec=media.duration(whoosh),
-            rights=_rights(data), provider=p.name, model=res.model, synthetic=True)
+            rights=_rights(data), provider=p.name, model=res.model, provenance=res.meta.get("provenance"), synthetic=True)
 
     manifest = {
         "schema_version": "0.1",

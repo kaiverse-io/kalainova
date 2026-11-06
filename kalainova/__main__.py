@@ -8,6 +8,7 @@
   python3 -m kalainova measure <job>
   python3 -m kalainova status <job>
   python3 -m kalainova providers
+  python3 -m kalainova intake <job> <file> --record <record.json>   a finished file from an outside tool
 
 Editing arm (your own footage):
   python3 -m kalainova ingest <job> <files or folders...>   split into shots, score every shot
@@ -149,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
         e.add_argument("job")
         e.add_argument("note", nargs="?", default="")
     sub.add_parser("shots").add_argument("job")
+    it = sub.add_parser("intake")
+    it.add_argument("job")
+    it.add_argument("file")
+    it.add_argument("--record", required=True)
     st = sub.add_parser("stock")
     st.add_argument("job")
     st.add_argument("subject")
@@ -209,6 +214,12 @@ def main(argv: list[str] | None = None) -> int:
             if a.note:
                 direct.add_note(job, a.note)
             return _render_edit(job)
+        if a.cmd == "intake":
+            from pathlib import Path
+            from . import intake
+            job = open_job(a.job)
+            print(intake.run(job, Path(a.file), json.loads(Path(a.record).read_text())))
+            return 0
         if a.cmd == "shots":
             import json as _j
             job = open_job(a.job)
@@ -241,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             from .providers import base
             for name in base.names():
                 pr = base.get(name)
-                print(f"{name:<11} {'ready' if pr.available() else 'needs ' + str(pr.env_key):<26} {', '.join(pr.capabilities)}")
+                print(f"{name:<11} {'ready' if pr.available() else 'needs ' + ', '.join(pr.missing_env()):<26} {', '.join(pr.capabilities)}")
             return 0
     except ContractError as exc:
         print(f"error: {exc}", file=sys.stderr)

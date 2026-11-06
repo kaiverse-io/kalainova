@@ -42,7 +42,7 @@ flowchart TB
         direction LR
         contract["Job contract<br/>brief, rights, budget"]:::built
         selector["Producer selection"]:::planned
-        intake["Intake of outside files"]:::planned
+        intake["Intake of outside files"]:::built
         qa["QA"]:::partial
         gate["Human gate<br/>hash-bound approval"]:::partial
         publish["Publish"]:::built
@@ -296,9 +296,9 @@ These change only with a version bump. A new interface waits for a second real u
 
 | Interface | In | Out | State |
 |---|---|---|---|
-| **Provider** | Request, deadline, and budget, through the router | File, cost, model | Built. Requests are not typed yet, and a song request does not fit. |
-| **Producer** | Job bundle in a mounted folder | Files and a record | Planned. Tools run by a coding agent need a container wrapper, and their output varies between runs. |
-| **QA check** | Any file and its format | Pass or fail, with evidence | Planned. QA today requires the engine's own `edit_manifest.json`. |
+| **Provider** | Request, deadline, and budget, through the router | File, cost, model, provenance | Built, including song requests. No song adapter exists yet, and requests are not typed. |
+| **Producer** | Job bundle in a mounted folder | Files and a record, through `kalainova intake` | Partial. Intake is built. Tools run by a coding agent still need a container wrapper, and their output varies between runs. |
+| **QA check** | Any file and its format | Pass or fail, with evidence | Partial. Files the engine did not render get technical checks only, and checks are not plug-ins yet. |
 
 ## Standing rules
 
@@ -313,11 +313,9 @@ These change only with a version bump. A new interface waits for a second real u
 
 | Gap | Effect |
 |---|---|
-| Plug-in registered before the built-ins load | Built-in providers disappear |
-| QA requires `edit_manifest.json` | An outside tool's file cannot be checked |
-| Gate is built around `final.mp4` | An audio-only piece cannot be approved |
-| Asset schema has no open provenance field | GPU node, weights hash, and seed cannot be recorded |
-| `music()` takes no lyrics | Songs do not fit the provider contract |
+| No publisher takes audio-only files | A song can be approved but not posted |
+| No content review on files from outside tools | A human is the only check on their content |
+| No song adapter or container runner | The contracts exist, and nothing uses them in production yet |
 | Cap checks run one call at a time | Parallel calls could overshoot the cap together |
 | QA does not predict the operator's verdict | A file can pass QA and still be rejected on review |
 

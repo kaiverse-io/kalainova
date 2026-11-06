@@ -28,6 +28,7 @@ CONTRACT_FILES = {
 
 
 RENDER_STAMP = "render_stamp.json"
+AUDIO_SUFFIXES = (".wav", ".m4a", ".mp3", ".flac")
 
 
 class ContractError(RuntimeError):
@@ -93,6 +94,17 @@ class Job:
         path = self.path(name)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
         return path
+
+    def artifact(self) -> Path:
+        """The file this job delivers. A job with video always delivers final.mp4, so a stray audio file
+        cannot stand in for it."""
+        if "video" in self.job.get("media", []):
+            return self.work / "final.mp4"
+        for suffix in AUDIO_SUFFIXES:
+            path = self.work / f"final{suffix}"
+            if path.exists():
+                return path
+        return self.work / f"final{AUDIO_SUFFIXES[0]}"
 
     def write_stamp(self, data: dict) -> None:
         (self.folder / RENDER_STAMP).write_text(json.dumps(data, indent=2) + "\n")

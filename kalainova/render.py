@@ -264,7 +264,7 @@ def _motion_filter(motion: str, w: int, h: int, fps: float, dur: float, k: float
 def stamp(job: Job, video: Path) -> None:
     """Tie the rendered file to the asset record it was made from."""
     if job.has("asset_manifest"):
-        job.write_stamp({"video_sha256": hashlib.sha256(video.read_bytes()).hexdigest(),
+        job.write_stamp({"artifact_sha256": hashlib.sha256(video.read_bytes()).hexdigest(),
                          "asset_manifest_sha256": hashlib.sha256(job.path("asset_manifest").read_bytes()).hexdigest()})
 
 

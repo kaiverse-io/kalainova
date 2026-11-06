@@ -285,7 +285,7 @@ def test_one_local_beat_marks_the_whole_voice_track(tmp_path, monkeypatch):
 
     def fake_gen(*a, **k):
         name, model = next(makers)
-        return NS(name=name), NS(model=model, words=[])
+        return NS(name=name), NS(model=model, words=[], meta={})
     monkeypatch.setattr(assets.router, "generate", fake_gen)
     monkeypatch.setattr(assets.media, "run", lambda *a, **k: None)
     monkeypatch.setattr(assets.media, "duration", lambda *a, **k: 1.0)

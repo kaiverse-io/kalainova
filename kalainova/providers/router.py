@@ -28,7 +28,7 @@ from ..jobfs import ContractError, CostCapExceeded, Job
 from . import base
 
 # capability -> the position of the destination path in the call's arguments
-OUTPUT_ARG = {"voice": 1, "image": 1, "video": 1, "music": 1, "sfx": 1}
+OUTPUT_ARG = {"voice": 1, "image": 1, "video": 1, "music": 1, "song": 1, "sfx": 1}
 # OSError covers connection, timeout, and HTTP errors. ValueError, KeyError, and IndexError cover a malformed reply.
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError)
 DEFAULT_DEADLINE_SEC = 600.0
@@ -60,7 +60,7 @@ def _usable(capability: str, names: list[str]) -> tuple[list[base.Provider], lis
         if capability not in p.capabilities:
             skipped.append(f"{name}: no {capability}")
         elif not p.available():
-            skipped.append(f"{name}: missing {p.env_key}")
+            skipped.append(f"{name}: missing {', '.join(p.missing_env())}")
         else:
             usable.append(p)
     return usable, skipped

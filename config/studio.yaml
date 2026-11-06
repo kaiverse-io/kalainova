@@ -11,6 +11,7 @@ preference:
   music: [elevenlabs, fal, local]
   sfx: [elevenlabs, local]
   transcribe: [fal]
+  song: []
 
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:
@@ -21,6 +22,7 @@ deadlines_sec:
   music: 960
   sfx: 180
   transcribe: 960
+  song: 960
 
 models:
   anthropic:

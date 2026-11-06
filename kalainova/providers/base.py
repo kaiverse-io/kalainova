@@ -4,19 +4,25 @@ A provider turns a request for one capability into a local file plus metadata.
 The engine never cares which vendor made the bytes; it records provider, model,
 prompt, cost, and rights on the asset so the job folder stays the source of truth.
 
-Capabilities: llm, voice, image, video, music, sfx, transcribe.
+Capabilities: llm, voice, image, video, music, song, sfx, transcribe.
+
+To add a provider, put a module in this package or name one under provider_modules in
+config/studio.yaml. It registers a Provider subclass, and config/studio.yaml lists it and prices it.
 """
 
 from __future__ import annotations
 
+import importlib
 import os
+import pkgutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from .. import config
 
-CAPABILITIES = ("llm", "voice", "image", "video", "music", "sfx", "transcribe")
+CAPABILITIES = ("llm", "voice", "image", "video", "music", "song", "sfx", "transcribe")
 
 
 @dataclass
@@ -34,12 +40,17 @@ class Provider:
     name = "base"
     capabilities: tuple[str, ...] = ()
     env_key: str | None = None  # env var that must be set for the provider to be usable
+    env_keys: tuple[str, ...] = ()  # for a provider that needs more than one
     synthetic = True  # output is AI-generated and must be declared where platforms ask
     free = False  # calls cost nothing, so no price is needed under a cost cap
     placeholder = False  # output never counts as a real result
 
+    def missing_env(self) -> list[str]:
+        needed = ((self.env_key,) if self.env_key else ()) + tuple(self.env_keys)
+        return [key for key in needed if not os.environ.get(key)]
+
     def available(self) -> bool:
-        return self.env_key is None or bool(os.environ.get(self.env_key))
+        return not self.missing_env()
 
     def price_key(self, capability: str, request: dict) -> str:
         """The row in config/studio.yaml that prices this request."""
@@ -71,6 +82,9 @@ class Provider:
     def music(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
         raise NotImplementedError
 
+    def song(self, lyrics: str, dst: Path, *, style: str = "", duration: float | None = None, **kw) -> Result:
+        raise NotImplementedError
+
     def sfx(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
         raise NotImplementedError
 
@@ -79,6 +93,7 @@ class Provider:
 
 
 _REGISTRY: dict[str, Callable[[], Provider]] = {}
+_loaded = False
 
 
 def register(factory: Callable[[], Provider]) -> Callable[[], Provider]:
@@ -100,9 +115,20 @@ def names() -> list[str]:
 
 
 def _load_builtin() -> None:
-    if _REGISTRY:
+    """Import every provider module once. A plug-in registered first must not hide the others, and one
+    module with a missing dependency must not take the rest down."""
+    global _loaded
+    if _loaded:
         return
-    from . import local, remote  # noqa: F401  (register on import)
+    _loaded = True
+    package = __name__.rsplit(".", 1)[0]
+    modules = [f"{package}.{m.name}" for m in pkgutil.iter_modules([str(Path(__file__).parent)])
+               if m.name not in ("base", "router")]
+    for module in modules + list(config.studio().get("provider_modules") or []):
+        try:
+            importlib.import_module(module)
+        except ImportError as exc:
+            print(f"provider module {module} not loaded: {exc}", file=sys.stderr)
 
 
 def resolve(capability: str, preference: list[str]) -> Provider:
@@ -118,7 +144,7 @@ def resolve(capability: str, preference: list[str]) -> Provider:
             tried.append(f"{name} (no {capability})")
             continue
         if not p.available():
-            tried.append(f"{name} (missing {p.env_key})")
+            tried.append(f"{name} (missing {', '.join(p.missing_env())})")
             continue
         return p
     raise LookupError(f"no provider for {capability}: tried {', '.join(tried) or 'nothing'}")

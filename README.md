@@ -18,6 +18,7 @@ just ci        # check + contract eval + docs lint
 pip install -r requirements.txt     # plus ffmpeg on PATH
 python3 -m kalainova providers      # which rented models have keys; local fallbacks run the line, but approve refuses their output
 python3 -m kalainova make jobs/<id> # plan → assets → edit → compile → render → qa
+python3 -m kalainova intake jobs/<id> <file> --record <record.json>  # a finished file from an outside tool
 python3 -m kalainova approve jobs/<id> --reviewer <you> --platforms youtube
 python3 -m kalainova publish jobs/<id> youtube --live
 python3 -m kalainova measure jobs/<id>   # at 48 h

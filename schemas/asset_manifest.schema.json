@@ -109,6 +109,10 @@
           },
           "synthetic": {
             "type": "boolean"
+          },
+          "provenance": {
+            "type": "object",
+            "description": "Open record of how the provider made this asset, such as a node, a weights hash, or a seed."
           }
         }
       }
