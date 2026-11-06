@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .. import config
+
 CAPABILITIES = ("llm", "voice", "image", "video", "music", "sfx", "transcribe")
 
 
@@ -33,12 +35,28 @@ class Provider:
     capabilities: tuple[str, ...] = ()
     env_key: str | None = None  # env var that must be set for the provider to be usable
     synthetic = True  # output is AI-generated and must be declared where platforms ask
+    free = False  # calls cost nothing, so no price is needed under a cost cap
+    placeholder = False  # output never counts as a real result
 
     def available(self) -> bool:
         return self.env_key is None or bool(os.environ.get(self.env_key))
 
+    def price_key(self, capability: str, request: dict) -> str:
+        """The row in config/studio.yaml that prices this request."""
+        return capability
+
+    def estimate(self, capability: str, **request) -> float | None:
+        """Pre-call cost in dollars. None means this provider has no price for the request."""
+        if self.free:
+            return 0.0
+        key = self.price_key(capability, request)
+        if not config.price_for(self.name, key):
+            return None
+        return config.estimate(self.name, capability, key=key, chars=request.get("chars", 0),
+                               duration=request.get("duration", 0.0))
+
     # Each capability is a method. Unimplemented ones raise.
-    def llm(self, prompt: str, *, system: str = "", max_tokens: int = 4000, **kw) -> Result:
+    def llm(self, prompt: str, *, system: str = "", max_tokens: int = 4000, images: list[Path] | None = None, **kw) -> Result:
         raise NotImplementedError
 
     def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw) -> Result:

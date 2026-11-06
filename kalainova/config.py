@@ -22,10 +22,11 @@ def studio() -> dict:
 
 
 def preference(capability: str, job: dict | None = None) -> list[str]:
+    """The providers to try, in order. A job's own list replaces the studio's, so naming one provider pins it."""
     job_pref = ((job or {}).get("providers") or {}).get(capability)
     if job_pref:
-        return list(job_pref) + ["local"]
-    return list(studio().get("preference", {}).get(capability, [])) + ["local"]
+        return list(job_pref)
+    return list(studio().get("preference", {}).get(capability, []))
 
 
 def model_for(provider: str, key: str) -> str:

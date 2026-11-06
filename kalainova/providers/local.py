@@ -57,6 +57,8 @@ class LocalProvider(Provider):
     capabilities = ("voice", "image", "music", "sfx")
     env_key = None
     synthetic = True
+    free = True
+    placeholder = True
 
     # flite voices bundled with ffmpeg's libflite
     VOICES = ("slt", "awb", "rms", "kal16", "kal")

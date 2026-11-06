@@ -1,15 +1,26 @@
 # Kalainova studio config. Swap models here, not in code.
-# Preference: first provider with a key wins; "local" is always the last fallback.
+# Preference: providers are tried in order, and only those listed. "local" makes placeholders that
+# `approve` refuses; remove it here, or pin providers in job.json, to stop a job instead.
 # Prices are estimates for the job cost cap; the invoice is the truth. Re-check monthly.
 
 preference:
   llm: [anthropic]
-  voice: [elevenlabs]
-  image: [fal]
+  voice: [elevenlabs, local]
+  image: [fal, local]
   video: [fal]
-  music: [elevenlabs, fal]
-  sfx: [elevenlabs]
+  music: [elevenlabs, fal, local]
+  sfx: [elevenlabs, local]
   transcribe: [fal]
+
+# How long the engine waits for one call. A provider's own timeouts should be shorter.
+deadlines_sec:
+  llm: 660
+  voice: 180
+  image: 960
+  video: 1900
+  music: 960
+  sfx: 180
+  transcribe: 960
 
 models:
   anthropic:

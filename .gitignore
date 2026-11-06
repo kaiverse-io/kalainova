@@ -20,3 +20,6 @@ dist/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# per-job write lock
+.lock

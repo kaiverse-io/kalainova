@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 SCHEMAS = REPO / "schemas"
@@ -115,10 +118,20 @@ class Job:
                 f"{self.id}: {provider}/{capability} estimated {estimate:.4f}; spent {self.spent():.4f} of cap {cap}"
             )
 
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        """Serialize writers to this job's records, across threads and processes."""
+        with open(self.folder / ".lock", "w") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            yield
+
     def charge(self, provider: str, capability: str, cost: float, note: str = "") -> None:
-        entries = json.loads(self.ledger_path.read_text()) if self.ledger_path.exists() else []
-        entries.append({"provider": provider, "capability": capability, "cost": round(cost, 6), "note": note})
-        self.ledger_path.write_text(json.dumps(entries, indent=2) + "\n")
+        with self.locked():
+            entries = json.loads(self.ledger_path.read_text()) if self.ledger_path.exists() else []
+            entries.append({"provider": provider, "capability": capability, "cost": round(cost, 6), "note": note})
+            tmp = self.ledger_path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+            tmp.write_text(json.dumps(entries, indent=2) + "\n")
+            os.replace(tmp, self.ledger_path)  # a reader sees the old ledger or the new one, never part of one
         cap = self.job.get("cost_cap")
         if cap is not None and self.spent() > cap:
             raise CostCapExceeded(f"{self.id}: spent {self.spent():.4f} is over cap {cap}; stop rendering")

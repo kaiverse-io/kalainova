@@ -1,7 +1,7 @@
 """INTENT -> SCRIPT. Writes script_packet.json from job.brief.
 
 Two planners:
-  * an LLM provider (anthropic) when a key is set, or
+  * an LLM provider when one is ready, or
   * the agent driving the session writes script_packet.json directly; this stage
     then only validates it. That is the default inside Claude Code / agent containers.
 """
@@ -11,9 +11,8 @@ from __future__ import annotations
 import json
 import re
 
-from . import config
 from .jobfs import ContractError, Job
-from .providers import base
+from .providers import router
 
 SYSTEM = """You are the head writer of an AI-native content studio. You write short-form scripts that earn
 retention and are safe to monetize.
@@ -67,19 +66,15 @@ def run(job: Job, *, force: bool = False) -> dict:
     data = job.job
     if not data.get("brief"):
         raise ContractError(f"{job.id}: job.brief is required to plan (subject, audience, outcome)")
-    try:
-        llm = base.resolve("llm", config.preference("llm", data))
-    except LookupError as exc:
+    if not router.available(job, "llm"):
         raise ContractError(
-            f"{job.id}: no LLM provider ({exc}). Either set ANTHROPIC_API_KEY or have the agent write "
-            f"{job.path('script_packet')} directly."
-        ) from exc
+            f"{job.id}: no LLM provider is ready. Set the key for one listed in config/studio.yaml, or have the "
+            f"agent write {job.path('script_packet')} directly."
+        )
     last_err = None
     for attempt in range(3):
         prompt = _prompt(data) + (f"\n\nYour previous output failed validation:\n{last_err}\nFix it." if last_err else "")
-        job.reserve(llm.name, "llm", config.estimate(llm.name, "llm"))
-        res = llm.llm(prompt, system=SYSTEM, max_tokens=4000)
-        job.charge(llm.name, "llm", res.cost, "plan")
+        _, res = router.generate(job, "llm", "llm", prompt, system=SYSTEM, max_tokens=4000, note="plan")
         try:
             packet = extract_json(res.text)
             packet["schema_version"] = "0.1"

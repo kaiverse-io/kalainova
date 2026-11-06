@@ -166,6 +166,9 @@ class Fal(Provider):
     capabilities = ("image", "video", "music", "transcribe")
     env_key = "FAL_KEY"
 
+    def price_key(self, capability: str, request: dict) -> str:
+        return "image_to_video" if capability == "video" and request.get("image") else capability
+
     def _run(self, model: str, payload: dict, timeout: float = 900) -> dict:
         h = {"Authorization": f"Key {os.environ[self.env_key]}", "content-type": "application/json"}
         r = requests.post(f"https://queue.fal.run/{model}", headers=h, json=payload, timeout=TIMEOUT)

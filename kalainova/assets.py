@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import sys
+
 from . import config, media
-from .jobfs import CostCapExceeded, Job
-from .providers import base
+from .jobfs import Job
+from .providers import router
 
 GAP = 0.12  # seconds of air between beats
 
@@ -25,32 +27,6 @@ def _style(job: dict) -> str:
     return brief.get("visual_style") or "cinematic, high contrast, shallow depth of field, rich color, vertical composition"
 
 
-def _gen(job: Job, capability: str, fn_name: str, *args, est: dict | None = None, **kw):
-    """Try providers in preference order; fall back on errors, not just missing keys.
-
-    Each paid call reserves its estimate against the cap first. CostCapExceeded always propagates."""
-    data = job.job
-    errors = []
-    for name in config.preference(capability, data):
-        try:
-            p = base.get(name)
-        except KeyError:
-            continue
-        if capability not in p.capabilities or not p.available():
-            continue
-        job.reserve(p.name, capability, config.estimate(p.name, capability, **(est or {})))
-        try:
-            res = getattr(p, fn_name)(*args, **kw)
-        except CostCapExceeded:
-            raise
-        except Exception as exc:  # degrade to the next provider
-            errors.append(f"{name}: {exc}")
-            continue
-        job.charge(p.name, capability, res.cost, fn_name)
-        return p, res
-    raise RuntimeError(f"{capability}: every provider failed: {errors}")
-
-
 def run(job: Job, *, force: bool = False) -> dict:
     if job.has("asset_manifest") and not force:
         return job.read("asset_manifest")
@@ -62,6 +38,9 @@ def run(job: Job, *, force: bool = False) -> dict:
     (work / "beats").mkdir(exist_ok=True)
     brief = data.get("brief") or {}
     media_kinds = set(data.get("media", []))
+
+    def _gen(capability: str, fn_name: str, *args, **kw):
+        return router.generate(job, capability, fn_name, *args, fresh=force, **kw)
 
     assets: list[dict] = []
     words: list[dict] = []
@@ -81,7 +60,7 @@ def run(job: Job, *, force: bool = False) -> dict:
         start = t
         if "audio" in media_kinds or "video" in media_kinds:
             dst = work / "beats" / f"{bid}.voice.wav"
-            p, res = _gen(job, "voice", "voice", beat["text"], dst, voice=brief.get("voice"), est={"chars": len(beat["text"])})
+            p, res = _gen("voice", "voice", beat["text"], dst, voice=brief.get("voice"), est={"chars": len(beat["text"])})
             dur = media.duration(dst)
             for w in res.words:
                 words.append({**w, "start_sec": round(w["start_sec"] + start, 3), "end_sec": round(w["end_sec"] + start, 3)})
@@ -114,7 +93,7 @@ def run(job: Job, *, force: bool = False) -> dict:
             span = timeline[i]["end_sec"] - timeline[i]["start_sec"]
             prompt = f"{beat.get('visual_cue') or beat['text']}. {_style(data)}"
             still = work / "beats" / f"{bid}.still.png"
-            p, res = _gen(job, "image", "image", prompt, still, width=W, height=H,
+            p, res = _gen("image", "image", prompt, still, width=W, height=H,
                           title=beat.get("on_screen") or beat["text"], palette=i,
                           style=(data.get("edit") or {}).get("theme", "studio"))
             add(id=f"{bid}.still", kind="still", role="visual", beat_id=bid, path=f"beats/{bid}.still.png",
@@ -123,24 +102,24 @@ def run(job: Job, *, force: bool = False) -> dict:
             if beat.get("visual_kind") == "video" and video_budget > 0 and "video" in media_kinds:
                 clip = work / "beats" / f"{bid}.video.mp4"
                 try:
-                    p, res = _gen(job, "video", "video", prompt, clip, duration=span, aspect="9:16", image=still,
-                                  est={"duration": span, "key": "image_to_video"})
+                    p, res = _gen("video", "video", prompt, clip, duration=span, aspect=prof.get("aspect", "9:16"), image=still,
+                                  est={"duration": span, "image": True})
                     video_budget -= 1
                     add(id=f"{bid}.video", kind="video", role="visual", beat_id=bid, path=f"beats/{bid}.video.mp4",
                         duration_sec=media.duration(clip), rights=_rights(data), provider=p.name, model=res.model,
                         prompt=prompt, synthetic=True, probe=media.summarize(clip))
-                except RuntimeError:
-                    pass  # still + motion covers this beat
+                except RuntimeError as exc:  # still + motion covers this beat, and the operator is told
+                    print(f"{job.id}: {bid}: no video clip, using the still: {exc}", file=sys.stderr)
 
     # --- music bed and transition sfx ---------------------------------------
     if "audio" in media_kinds or "video" in media_kinds:
         mood = brief.get("music") or "warm modern instrumental bed, steady pulse, no vocals"
         bed = work / "music.wav"
-        p, res = _gen(job, "music", "music", mood, bed, duration=total + 1.0, est={"duration": total + 1.0})
+        p, res = _gen("music", "music", mood, bed, duration=total + 1.0, est={"duration": total + 1.0})
         add(id="music", kind="audio", role="music", path="music.wav", duration_sec=media.duration(bed),
             rights=_rights(data), provider=p.name, model=res.model, prompt=mood, synthetic=True)
         whoosh = work / "whoosh.wav"
-        p, res = _gen(job, "sfx", "sfx", "soft cinematic whoosh transition", whoosh, duration=0.6, est={"duration": 0.6})
+        p, res = _gen("sfx", "sfx", "soft cinematic whoosh transition", whoosh, duration=0.6, est={"duration": 0.6})
         add(id="whoosh", kind="audio", role="sfx", path="whoosh.wav", duration_sec=media.duration(whoosh),
             rights=_rights(data), provider=p.name, model=res.model, synthetic=True)
 

@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import re
 
+from ..jobfs import CostCapExceeded
+
 FORMATS = ("reel", "square", "landscape", "long")
 PACES = ("fast", "medium", "cinematic")
 GRADES = ("natural", "warm", "cool", "teal_orange", "film", "bw", "vivid")
@@ -160,6 +162,8 @@ def resolve(notes: list[str], *, shots: list[dict] | None = None, llm=None) -> d
                                             shots=json.dumps({x["id"]: x.get("name", "") for x in shots or []})),
                           max_tokens=800)
             s = validate({**s, **extract_json(res.text)})
+        except CostCapExceeded:
+            raise
         except Exception:
             pass  # rules already produced a valid answer
     return validate(s)

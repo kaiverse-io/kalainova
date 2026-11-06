@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import re
 
-from . import config, media
+from . import media
 from .jobfs import CostCapExceeded, Job
-from .providers import base
+from .providers import router
 
 RUBRIC = """You are the quality gate of a content studio. Score this short vertical video from its contact sheet
 and script. Return JSON only: {"hook": 0-10, "visual_quality": 0-10, "clarity": 0-10, "originality": 0-10,
@@ -139,20 +139,17 @@ def run(job: Job) -> dict:
     sheet = contact_sheet(job, final, em)
     judge = None
     try:
-        llm = base.resolve("llm", config.preference("llm", data))
         if sheet:
             from .plan import extract_json
-            job.reserve(llm.name, "llm", config.estimate(llm.name, "llm"))
-            res = llm.llm(f"Script:\n{[b['text'] for b in packet['beats']]}\n\n{RUBRIC}", images=[job.work / sheet],
-                          max_tokens=800)
-            job.charge(llm.name, "llm", res.cost, "qa-judge")
+            _, res = router.generate(job, "llm", "llm", f"Script:\n{[b['text'] for b in packet['beats']]}\n\n{RUBRIC}",
+                                     images=[job.work / sheet], max_tokens=800, note="qa-judge")
             judge = extract_json(res.text)
             _check(checks, "judge.verdict", judge.get("verdict") != "kill", f"judge: {judge.get('verdict')}")
             _check(checks, "judge.policy", judge.get("policy_risk") != "high", f"policy risk {judge.get('policy_risk')}")
     except CostCapExceeded:
         raise
     except LookupError:
-        checks.append({"id": "judge.vision", "status": "warn", "detail": "no LLM key; human reviews contact sheet"})
+        checks.append({"id": "judge.vision", "status": "warn", "detail": "no LLM provider ready; human reviews contact sheet"})
     except Exception as exc:  # judge is advisory
         checks.append({"id": "judge.vision", "status": "warn", "detail": f"judge error: {exc}"[:300]})
 

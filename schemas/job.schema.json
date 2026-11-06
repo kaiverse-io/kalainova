@@ -151,7 +151,7 @@
     },
     "providers": {
       "type": "object",
-      "description": "Per-job provider preference by capability; local is always the fallback.",
+      "description": "Per-job provider list by capability. It replaces the studio list, and only listed providers are tried.",
       "additionalProperties": {
         "type": "array",
         "items": {
