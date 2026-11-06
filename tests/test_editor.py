@@ -16,6 +16,18 @@ from kalainova.editor import notes
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 
 
+def test_a_title_ends_where_the_next_instruction_begins():
+    s = notes.resolve(["30s landscape reel, medium pace, title: Lift Off, no captions"])
+    assert s["title"] == "Lift Off"
+    assert s["captions"] is False
+
+
+def test_a_quoted_title_keeps_its_comma():
+    s = notes.resolve(['title: "Three days, two nights", warm'])
+    assert s["title"] == "Three days, two nights"
+    assert s["grade"] == "warm"
+
+
 def test_notes_accumulate_and_override():
     s = notes.resolve(
         [
