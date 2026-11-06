@@ -475,7 +475,7 @@ def run(job: Job) -> dict:
     audio = {}
     if extra_assets:
         audio["music_asset_id"] = "music"
-        audio["music_gain_db"] = -24.0 if s["original_audio"] else -12.0
+        audio["music_gain_db"] = -18.0 if s["original_audio"] else -12.0  # against its own sound
         audio["duck"] = bool(s["original_audio"])
     em = {
         "schema_version": "0.1",

@@ -48,6 +48,9 @@ DUCK = "sidechaincompress=threshold=0.02:ratio=6:attack=25:release=450:makeup=1"
 # A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
 ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
 MUSIC_FADE_SEC = 2.5
+# Against the voice's loudness, before ducking takes it about 6 dB further while someone speaks.
+MUSIC_UNDER_VOICE_DB = -10.0
+DUCK_KEY_LUFS = -27.0  # where the ducker hears the voice, so it ducks the same for any voice
 SAMPLE_WIDTH, SAMPLE_FPS = 270, 2.0
 TITLE_HOLD_SEC = 3.0
 
@@ -239,7 +242,7 @@ def _audio_steps(em: dict, assets: dict, *, original: bool) -> list[dict]:
         mix["voice_chain"] = bool(em.get("speech"))
     if a.get("music_asset_id"):
         mix["music"] = assets[a["music_asset_id"]]["path"]
-        mix["music_gain_db"] = a.get("music_gain_db", -19)
+        mix["music_gain_db"] = a.get("music_gain_db", MUSIC_UNDER_VOICE_DB)
         mix["duck"] = a.get("duck", True)
     mix["sfx"] = [
         {
@@ -825,10 +828,23 @@ def _op_caption_files(work: Path, a: dict) -> None:
         (work / name).write_text(text)
 
 
-def _music_chain(index: int, a: dict, duration: float, under_voice: bool) -> str:
+def _music_under_voice(work: Path, a: dict, bed: Path) -> tuple[Path, float, float]:
+    """The bed to mix, its gain, and the ducking key's gain, all set against the measured voice."""
+    level = media.even_out(bed, work / "music.even.wav")
+    voice = media.loudness(_safe(work, a["voice"])).get("integrated_lufs")
+    music = media.loudness(level).get("integrated_lufs")
+    if voice is None or music is None:
+        return level, a.get("music_gain_db", MUSIC_UNDER_VOICE_DB), 0.0
+    return (
+        level,
+        voice - music + a.get("music_gain_db", MUSIC_UNDER_VOICE_DB),
+        DUCK_KEY_LUFS - voice,
+    )
+
+
+def _music_chain(index: int, gain: float, duration: float, under_voice: bool) -> str:
     fade = min(MUSIC_FADE_SEC, duration * 0.25)
     pocket = f"{MUSIC_POCKET}," if under_voice else ""
-    gain = a.get("music_gain_db", -19)
     return (
         f"[{index}:a]aresample=48000,aformat=channel_layouts=stereo,{pocket}volume={gain:.2f}dB,"
         f"afade=t=in:d=0.2,afade=t=out:st={duration - fade:.3f}:d={fade:.3f}"
@@ -856,12 +872,16 @@ def _op_mix_audio(work: Path, a: dict) -> None:
         idx = 1
     if a.get("music"):
         bed = media.loop_audio(_safe(work, a["music"]), work / "music.bed.wav", D)
+        gain, key_gain = a.get("music_gain_db", MUSIC_UNDER_VOICE_DB), 0.0
+        if has_voice:
+            bed, gain, key_gain = _music_under_voice(work, a, bed)
         ins += ["-i", str(bed)]
-        music = _music_chain(idx, a, D, has_voice)
+        music = _music_chain(idx, gain, D, has_voice)
         idx += 1
         if has_voice and a.get("duck"):
             chains.append(f"{music}[mus]")
-            chains.append(f"[mus][vkey]{DUCK},asplit=2[musd][mstem]")
+            chains.append(f"[vkey]volume={key_gain:.2f}dB[key]")
+            chains.append(f"[mus][key]{DUCK},asplit=2[musd][mstem]")
         else:
             chains.append(f"{music},asplit=2[musd][mstem]")
         labels.append("[musd]")

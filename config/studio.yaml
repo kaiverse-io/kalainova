@@ -117,6 +117,7 @@ bar:
   digital_silence_sec_max: 0.2
   ending_drop_db_max: -12
   voice_to_music_db_min: 12
+  voice_to_music_db_max: 26
   source_mark_max: 0.004
   source_scale_min: 0.75
   moving_share_min: 0.6

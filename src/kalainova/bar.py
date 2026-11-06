@@ -466,10 +466,10 @@ def _stem_readings(work: Path) -> list[Reading]:
         return []
     left, _, sr = media.decode_stereo(voice)
     bed, _, _ = media.decode_stereo(music)
+    gap = voice_to_music_db(left, bed, sr)
     return [
-        _at_least(
-            "audio.voice_to_music_db", voice_to_music_db(left, bed, sr), "voice_to_music_db_min"
-        )
+        _at_least("audio.voice_to_music_db", gap, "voice_to_music_db_min"),
+        _at_most("audio.music_audible", gap, "voice_to_music_db_max"),
     ]
 
 

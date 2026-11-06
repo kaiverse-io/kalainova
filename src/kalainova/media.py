@@ -16,6 +16,10 @@ FFPROBE = shutil.which("ffprobe") or "ffprobe"
 MASTER_PASSES = 3
 # Luma levels of 255: an encoder keeps a flat field this tight, and a dark shot is never this flat.
 FLAT_TONE_LEVELS = 3
+RIDE_WINDOW = 9  # half-second frames: the level it follows, about four seconds wide
+RIDE_SHARE = 0.85  # how much of each swing it takes out, so a score keeps some of its shape
+RIDE_MOST_DB = 30.0
+RIDE_SILENCE_DB = -70.0
 FULL_FRAME = (0.0, 0.0, 1.0, 1.0)
 BAR_LEVEL = 24  # 8-bit luma: video black is 16, and compression lifts it a little
 BAR_MISMATCH = 0.01  # a letterbox is centred, to within this share of the frame
@@ -237,6 +241,46 @@ def master_loudness(src: Path, dst: Path, target: float, ceiling: float) -> Path
         if abs(miss) <= 0.1:
             break
         gain += miss
+    return dst
+
+
+def fader_ride(mono: np.ndarray, sr: int) -> np.ndarray:
+    """Gain for each sample that lifts quiet passages toward the loud ones, as a hand on a fader.
+
+    It only lifts, keeps a little of the shape, and leaves silence alone. A generated score can sit
+    30 dB under itself for half its length, which no fixed gain can put under a voice.
+    """
+    hop = sr // 2
+    n = mono.size // hop
+    if n == 0:
+        return np.ones(mono.size)
+    power = (mono[: n * hop].reshape(n, hop).astype(np.float64) ** 2).mean(axis=1)
+    reach = min(RIDE_WINDOW, n)
+    slow = np.convolve(power, np.ones(reach) / reach, mode="same")
+    level = 10 * np.log10(np.maximum(slow, 1e-12))
+    sounding = level > RIDE_SILENCE_DB
+    if not sounding.any():
+        return np.ones(mono.size)
+    top = float(np.percentile(level[sounding], 90))
+    lift = np.where(sounding, np.clip((top - level) * RIDE_SHARE, 0.0, RIDE_MOST_DB), 0.0)
+    centres = (np.arange(n) + 0.5) * hop
+    return 10 ** (np.interp(np.arange(mono.size), centres, lift) / 20)
+
+
+def even_out(src: Path, dst: Path) -> Path:
+    """Write a music bed with its slow swings in level ridden out."""
+    left, right, sr = decode_stereo(src)
+    gain = fader_ride((left + right) / 2, sr)
+    pcm = np.stack([left * gain, right * gain], axis=1).astype(np.float32)
+    subprocess.run(
+        [
+            FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "f32le", "-ar", str(sr), "-ac", "2", "-i", "-",
+            str(dst),
+        ],
+        input=pcm.tobytes(),
+        check=True,
+    )  # fmt: skip
     return dst
 
 

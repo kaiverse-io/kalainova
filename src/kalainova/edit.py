@@ -167,7 +167,8 @@ def run(job: Job, *, force: bool = False) -> dict:
         audio["voice_asset_id"] = "voice"
     if "music" in by_id:
         audio["music_asset_id"] = "music"
-        audio["music_gain_db"] = float(opts.get("music_gain_db", -21 if studio else -19))
+        if "music_gain_db" in opts:
+            audio["music_gain_db"] = float(opts["music_gain_db"])
         audio["duck"] = True
     if "whoosh" in by_id and opts.get("whoosh", not studio):
         audio["sfx"] = [

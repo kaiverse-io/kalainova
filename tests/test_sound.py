@@ -76,6 +76,78 @@ def _mix(tmp_path: Path, *, voice_seconds: float, total: float) -> Path:
     return tmp_path / "mix.wav"
 
 
+def test_a_fader_lifts_the_quiet_passage_and_leaves_the_loud_one_and_silence_alone():
+    sr = 48000
+    t = np.arange(sr * 8) / sr
+    tone = np.sin(2 * np.pi * 110 * t)
+    quiet, loud, silent = 0.005 * tone, 0.5 * tone, np.zeros(t.size)
+    gain = media.fader_ride(np.concatenate([quiet, loud, silent]), sr)
+    assert 20 * np.log10(gain[sr * 3]) > 25  # 40 dB under, and most of that is taken back
+    assert gain[sr * 13] == pytest.approx(1.0, abs=0.02)
+    assert gain[sr * 21] == pytest.approx(1.0, abs=0.02)
+
+
+def test_a_fader_on_nothing_changes_nothing():
+    assert (media.fader_ride(np.zeros(48000 * 3), 48000) == 1.0).all()
+    assert (media.fader_ride(np.zeros(100), 48000) == 1.0).all()
+
+
+def _swinging_bed(path: Path) -> Path:
+    """A score that spends half its length 30 dB under the rest, as a generated one can."""
+    media.run(
+        [
+            "-f", "lavfi", "-i", "sine=f=110:d=8,volume=-42dB",
+            "-f", "lavfi", "-i", "sine=f=110:d=8,volume=-12dB",
+            "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1,aformat=channel_layouts=stereo",
+            "-ar", "48000", str(path),
+        ]
+    )  # fmt: skip
+    return path
+
+
+def _gap(tmp_path: Path, voice_volume: float = 1.0) -> float:
+    _tone(tmp_path / "v.wav", 16.0, volume=voice_volume)
+    _swinging_bed(tmp_path / "m.wav")
+    render._op_mix_audio(
+        tmp_path,
+        {
+            "out": "mix.wav",
+            "duration_sec": 16.0,
+            "voice": "v.wav",
+            "voice_chain": False,
+            "music": "m.wav",
+            "music_gain_db": render.MUSIC_UNDER_VOICE_DB,
+            "duck": True,
+            "sfx": [],
+        },
+    )
+    voice, *_ = media.decode_stereo(tmp_path / "voice.stem.wav")
+    music, _, sr = media.decode_stereo(tmp_path / "music.stem.wav")
+    return bar.voice_to_music_db(voice, music, sr)
+
+
+def test_a_score_with_big_swings_stays_audible_under_the_voice(tmp_path):
+    gap = _gap(tmp_path)
+    assert 12.0 <= gap <= 26.0
+    music, _, sr = media.decode_stereo(tmp_path / "music.stem.wav")
+    early = float(np.sqrt(np.mean(music[sr * 2 : sr * 6] ** 2)))
+    late = float(np.sqrt(np.mean(music[sr * 10 : sr * 14] ** 2)))
+    assert abs(20 * np.log10(early / late)) < 15.0  # it went in 30 dB apart
+
+
+def test_the_music_is_set_against_the_voice_it_will_sit_under(tmp_path):
+    (tmp_path / "loud").mkdir()
+    (tmp_path / "soft").mkdir()
+    assert abs(_gap(tmp_path / "loud", 1.0) - _gap(tmp_path / "soft", 0.4)) < 3.0
+
+
+def test_music_too_quiet_to_hear_misses_the_bar(tmp_path):
+    _tone(tmp_path / "voice.stem.wav", 2.0, volume=0.4)
+    _tone(tmp_path / "music.stem.wav", 2.0, freq=110.0, volume=0.002)
+    readings = {r.id: r for r in bar._stem_readings(tmp_path)}
+    assert not readings["audio.music_audible"].ok
+
+
 def test_a_mix_has_no_digital_silence_and_the_music_resolves(tmp_path):
     mix = _mix(tmp_path, voice_seconds=4.0, total=10.0)
     left, right, sr = media.decode_stereo(mix)

@@ -42,6 +42,7 @@ It reads any file, including one the engine did not make, so outside work is hel
 | Reading | What it catches |
 |---|---|
 | `audio.voice_to_music_db` | Music competing with the words |
+| `audio.music_audible` | Music too far under the words to hear |
 | `audio.hard_cuts_per_min` | Sound stopping dead instead of decaying |
 | `audio.digital_silence_sec` | Gaps that drop to digital zero |
 | `audio.ending_drop_db` | A hard stop at the end of a piece |
