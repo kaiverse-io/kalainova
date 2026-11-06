@@ -6,6 +6,7 @@ it, and the engine lays out the page, places every balloon where the art is calm
 
 from __future__ import annotations
 
+import json
 import math
 import zipfile
 from dataclasses import dataclass
@@ -113,7 +114,7 @@ def _greedy(words: list[str], size: int, width: float) -> list[str]:
 
 
 def letter_block(text: str, size: int, *, max_width: float) -> Block:
-    """Capitals, wrapped to the narrowest block that keeps the line count, so the shape stays even."""
+    """Capitals, wrapped to the narrowest block that keeps the line count, for an even shape."""
     words = text.upper().split()
     width = max(max_width, max(text_width(w, size) for w in words))
     lines = _greedy(words, size, width)
@@ -127,7 +128,7 @@ def letter_block(text: str, size: int, *, max_width: float) -> Block:
 
 
 def fit_lettering(text: str, panel: Rect) -> Block:
-    """The largest readable lettering that fits. Too many words is the script's fault, not the type's."""
+    """The largest readable lettering that fits. Too many words is the script's fault."""
     pt = LETTER_PT
     while pt >= MIN_LETTER_PT:
         size = round(pt * PX_PER_PT)
@@ -176,7 +177,7 @@ def _busy(table: Arr, spot: Rect, panel: Rect) -> float:
         total -= float(table[y0 - 1, x1])
     if x0 > 0 and y0 > 0:
         total += float(table[y0 - 1, x0 - 1])
-    return total / max((x1 - x0 + 1) * (y1 - y0 + 1), 1)
+    return float(total / max((x1 - x0 + 1) * (y1 - y0 + 1), 1))
 
 
 # ------------------------------------------------------------------ drawing
@@ -426,16 +427,13 @@ def run(job: Job) -> Path:
     render.stamp(job, final)
     smallest = min(s for _, s in built)
     job.set_status("rendered")
-    (job.work / "comic_report.json").write_text(
-        f'{{"pages": {len(pages)}, "panels": {len(records)}, "smallest_letter_pt": {smallest:.1f}}}\n'
-    )
+    report = {"pages": len(pages), "panels": len(records), "smallest_letter_pt": round(smallest, 1)}
+    (job.work / "comic_report.json").write_text(json.dumps(report) + "\n")
     return final
 
 
 def checks(job: Job) -> list[dict[str, str]]:
     """What can be proved about a lettered comic. A human still reads every page."""
-    import json
-
     report = json.loads((job.work / "comic_report.json").read_text())
     smallest = float(report["smallest_letter_pt"])
     return [

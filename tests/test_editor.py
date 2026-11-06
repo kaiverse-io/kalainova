@@ -216,6 +216,6 @@ def test_a_reel_cuts_in_a_phrase_and_warns_about_tiny_sources(tmp_path, monkeypa
     info = direct.run(job)
     em = job.read("edit_manifest")
     starts = [c["start_sec"] for c in em["cuts"]] + [em["duration_sec"]]
-    lengths = [round(b - a, 1) for a, b in zip(starts, starts[1:])]
+    lengths = [round(b - a, 1) for a, b in zip(starts, starts[1:], strict=False)]
     assert max(lengths) >= min(lengths) * 1.6, lengths
     assert "too small" in (info["note"] or "")

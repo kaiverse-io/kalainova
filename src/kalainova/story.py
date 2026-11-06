@@ -26,6 +26,7 @@ BODY_SIZE, LEADING = 46, 67  # 11 pt on 16 pt
 INDENT = 46
 OPENER_DROP = 620  # a chapter starts a third of the way down its page
 BODY_FACE = "Literata.ttf"
+FOOT_DARKNESS = 0.82
 INK = (22, 22, 24)
 PAPER = (255, 255, 255)
 
@@ -45,23 +46,74 @@ def _font(size: int, *, weight: int = 400, optical: int = 12) -> ImageFont.FreeT
 
 
 def break_lines(text: str, *, measure: float, size: int, indent: int) -> list[Line]:
-    """Fill each line to the measure. Every line is justified except a paragraph's last."""
+    """Choose every break at once, so the gaps spread across the paragraph instead of pooling.
+
+    Greedy filling looks fine until one long word leaves a line full of holes. This minimises the
+    summed squares of the slack, which is the core of how book typesetters set a paragraph.
+    """
     font = _font(size)
-    lines: list[Line] = []
-    current: list[str] = []
-    room = measure - indent
-    for word in text.split():
-        trial = " ".join([*current, word])
-        if current and font.getlength(trial) > room:
-            used = font.getlength(" ".join(current))
-            lines.append(Line(current, used, True, indent if not lines else 0))
-            current, room = [word], measure
-        else:
-            current.append(word)
-    if current:
-        used = font.getlength(" ".join(current))
-        lines.append(Line(current, used, False, indent if not lines else 0))
+    words = text.split()
+    widths = [font.getlength(w) for w in words]
+    space = font.getlength(" ")
+    count = len(words)
+    best = [float("inf")] * (count + 1)
+    came_from = [0] * (count + 1)
+    best[0] = 0.0
+    for start in range(count):
+        room = measure - (indent if start == 0 else 0)
+        used = -space
+        for end in range(start + 1, count + 1):
+            used += widths[end - 1] + space
+            if used > room and end > start + 1:
+                break
+            slack = max(room - used, 0.0)
+            cost = 0.0 if end == count else (slack / max(room, 1.0)) ** 2
+            if best[start] + cost < best[end]:
+                best[end] = best[start] + cost
+                came_from[end] = start
+    return _lines_from_breaks(words, came_from, font, indent)
+
+
+def _lines_from_breaks(
+    words: list[str], came_from: list[int], font: ImageFont.FreeTypeFont, indent: int
+) -> list[Line]:
+    stops = []
+    at = len(words)
+    while at > 0:
+        stops.append((came_from[at], at))
+        at = came_from[at]
+    stops.reverse()
+    lines = []
+    for n, (a, b) in enumerate(stops):
+        chunk = words[a:b]
+        lines.append(
+            Line(chunk, font.getlength(" ".join(chunk)), b != len(words), indent if n == 0 else 0)
+        )
     return lines
+
+
+def widest_gap_if_greedy(text: str, *, measure: float, size: int) -> float:
+    """The worst slack from filling line by line, as a yardstick for the real breaker."""
+    font = _font(size)
+    worst, current = 0.0, ""
+    for word in text.split():
+        trial = f"{current} {word}".strip()
+        if current and font.getlength(trial) > measure:
+            worst = max(worst, measure - font.getlength(current))
+            current = word
+        else:
+            current = trial
+    return worst
+
+
+def darken_foot(page: Image.Image, *, start: float) -> None:
+    """Fade the lower part of a page to near black, so type reads with no visible edge."""
+    width, height = page.size
+    top = int(height * start)
+    ramp = Image.linear_gradient("L").resize((width, height - top))
+    mask = Image.new("L", page.size, 0)
+    mask.paste(ramp.point(lambda v: int(v * FOOT_DARKNESS)), (0, top))
+    page.paste((8, 10, 14), (0, 0), mask)
 
 
 def paginate(
@@ -151,8 +203,8 @@ def _cover(job: Job, script: dict[str, Any]) -> tuple[Image.Image, dict[str, Any
             "prompt": prompt,
             "synthetic": True,
         }
+    darken_foot(page, start=0.5)
     draw = ImageDraw.Draw(page, "RGBA")
-    draw.rectangle([0, PAGE_H * 0.62, PAGE_W, PAGE_H], fill=(8, 10, 14, 150))
     title = _font(128, weight=500, optical=72)
     words = comic._greedy(script["title"].split(), 40, PAGE_W * 0.42)
     y = PAGE_H * 0.70

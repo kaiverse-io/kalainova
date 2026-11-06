@@ -21,6 +21,31 @@ def test_a_paragraph_breaks_into_lines_that_fit_and_lose_no_words():
     assert not lines[-1].justify and lines[0].justify
 
 
+def test_lines_are_broken_for_the_whole_paragraph_not_one_line_at_a_time():
+    text = (
+        "boat, bolted a grey box to the wall of the lamp room, shaken his hand, and told him he "
+        "could go ashore whenever he liked. That had been a Tuesday. On the Wednesday, at a "
+        "quarter to six, he climbed the stairs anyway, and the extraordinary quiet of the tower "
+        "met him."
+    )
+    measure = 900
+    lines = story.break_lines(text, measure=measure, size=46, indent=0)
+    worst = max(measure - line.width for line in lines if line.justify)
+    greedy_worst = story.widest_gap_if_greedy(text, measure=measure, size=46)
+    assert worst <= greedy_worst
+
+
+def test_the_cover_title_sits_on_a_gradient_with_no_hard_edge():
+    from PIL import Image as PILImage
+
+    page = PILImage.new("RGB", (100, 400), (120, 130, 140))
+    story.darken_foot(page, start=0.5)
+    column = [page.getpixel((50, y))[0] for y in range(400)]
+    steps = [abs(a - b) for a, b in zip(column, column[1:], strict=False)]
+    assert max(steps) <= 3
+    assert column[399] < column[100]
+
+
 def test_a_page_never_ends_or_starts_on_a_stranded_line():
     paragraph = [story.Line(["word"], 100, True, 0)] * 5
     paragraph[-1] = story.Line(["end"], 40, False, 0)
