@@ -328,7 +328,9 @@ These change only with a version bump. A new interface waits for a second real u
 | Files from outside tools carry no enforced references | A human compares them against the kit |
 | A kit cannot prove a face is not a real person's | A human attests at freeze and approves each piece; the vision judge is one more signal |
 | Rendered files and job records are on one machine | Only kit files can reach object storage today (ADR 0010) |
-| QA does not predict the operator's verdict | A file can pass QA and still be rejected on review |
+| QA does not predict the operator's verdict | A file can pass QA and the bar and still be rejected on review. The bar measures craft defects, not taste |
+| Stereo only | No 5.1 or 7.1 mix, and an upmix from stereo is not an honest substitute |
+| SDR only | No HDR master |
 
 ## Kits, streams, and jobs
 
@@ -391,8 +393,9 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ plan ──────▶ consistency, prompts, providers
     ├─▶ assets ────▶ consistency, kits, media, config, providers
     ├─▶ edit ──────▶ config
-    ├─▶ render ────▶ captions, media
-    ├─▶ qa ────────▶ consistency, prompts, media, config, providers, publish
+    ├─▶ render ────▶ captions, look, motion, media
+    ├─▶ qa ────────▶ bar, consistency, prompts, media, config, providers, publish
+    ├─▶ bar ───────▶ media, config
     ├─▶ publish ───▶ consistency, streams, stock
     ├─▶ editor ────▶ media, providers
     ├─▶ intake, stock ──▶ media
@@ -438,7 +441,16 @@ Assets to an edit manifest.
 Edit manifest to a closed op list, then to the file through ffmpeg.
 
 ### captions
-Word timings to captions.
+Word timings to captions, title and caption layout by frame shape and real font metrics, and timed-text files. Fonts are vendored in `fonts/`.
+
+### look
+The grade as data: one 3D LUT path for stills and footage, with skin protected and blacks never crushed. Pure.
+
+### motion
+The camera on a still: sub-pixel sampling at one steady rate. Frames go to ffmpeg as 16-bit RGB.
+
+### bar
+The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels and samples, plus the readers that apply them to a job, any file, or a delivery master. Limits live in `config/studio.yaml`. It informs the human gate, and only an objective defect blocks.
 
 ### qa
 Automated checks before the human gate, including whether the kit lock held.

@@ -51,7 +51,7 @@ If the pinned model can't accept reference images, the request stops before spen
 
 ## Quick start
 
-You need [uv](https://docs.astral.sh/uv/), [just](https://just.systems), and `ffmpeg` on your `PATH`.
+You need [uv](https://docs.astral.sh/uv/), [just](https://just.systems), and an `ffmpeg` with libass on your `PATH`. On macOS that is `brew install ffmpeg-full`, then put its `bin` on your `PATH`, because the plain formula has no libass.
 
 ```bash
 git clone https://github.com/kaiverse-io/kalainova && cd kalainova
@@ -81,8 +81,9 @@ Then follow **[How to run channels and characters](docs/how-to/run-a-stream.md)*
 |---|---|
 | **Generation** | Voice with word timings, images, video, music, and effects, through provider adapters with a per-job provider list |
 | **Continuity** | Character, style, and sound kits; a job lockfile; an append-only story canon; per-shot reference selection |
-| **Editing** | Kinetic captions, motion on stills, sidechain-ducked music, two-pass loudness normalization, and an editor for your own footage that takes revision notes |
-| **Quality gates** | Frame, duration, loudness, true peak, black frames, dead air, pacing, hook timing, caption coverage, claim sources, rights, disclosure, and a vision judge |
+| **Editing** | A lossless 10-bit picture path, a sub-pixel camera on stills, one grade path for stills and footage, type placed against the picture, sidechain-ducked music, true-peak mastering, and an editor for your own footage that takes revision notes |
+| **Delivery** | Web H.264, a ProRes 422 HQ master with LPCM stereo for film profiles, and captions as SRT, WebVTT, and iTunes Timed Text files |
+| **Quality gates** | Frame, duration, loudness, true peak, black frames, dead air, pacing, hook timing, caption coverage, claim sources, rights, disclosure, a vision judge, and [the studio bar](docs/studio-bar.md): banding, judder, repetition, source marks, detail, clicks, voice-to-music, and delivery checks |
 | **Publishing** | YouTube Data API and Upload-Post, with the synthetic-media label required |
 | **Operations** | Cost caps and ledger, saved paid results that a restart reuses, posting limits, dated schedules, and 48-hour measurement |
 
