@@ -6,7 +6,7 @@ generate() walks the job's provider list and, for each attempt, applies the same
   deadline  a call that outlives its deadline is abandoned, and its estimate is charged
   failure   a provider failure moves to the next listed provider and says so on stderr;
             a bug in an adapter (TypeError, AttributeError) is raised, not hidden
-  output    bytes reach their destination only after the call succeeds
+  output    a file must match the request, and reaches its destination only after that
   reuse     a paid file is recorded the moment it exists, so a restart does not pay twice
 
 Only providers named in the list are tried. Nothing is added to it here.
@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .. import config
+from .. import config, media
 from ..jobfs import ContractError, CostCapExceeded, Job
 from . import base
 
@@ -33,6 +33,8 @@ OUTPUT_ARG = {"voice": 1, "image": 1, "video": 1, "music": 1, "sfx": 1}
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = "generations.jsonl"
+ASPECT_TOLERANCE = 0.03
+MIN_SCALE = 0.5  # the editor can upscale a large image, not rescue a thumbnail
 
 
 class ProviderError(ContractError):
@@ -91,6 +93,23 @@ def _call(fn, args: tuple, kw: dict, deadline: float):
     if "error" in box:
         raise box["error"]
     return box["result"]
+
+
+def _check_output(capability: str, path: Path, kw: dict) -> None:
+    """Refuse a file that is unreadable or is not what was asked for. Raises ValueError or OSError."""
+    if capability == "image":
+        from PIL import Image
+        with Image.open(path) as im:
+            width, height = im.size
+            im.verify()
+        want_w, want_h = kw.get("width"), kw.get("height")
+        if want_w and want_h:
+            if abs(width / height - want_w / want_h) > ASPECT_TOLERANCE * (want_w / want_h):
+                raise ValueError(f"image is {width}x{height}, wrong shape for {want_w}x{want_h}")
+            if width < want_w * MIN_SCALE:
+                raise ValueError(f"image is {width}x{height}, too small for {want_w}x{want_h}")
+    elif media.duration(path) <= 0:
+        raise ValueError("file has no duration")
 
 
 def _sha256(path: Path) -> str:
@@ -179,6 +198,13 @@ def generate(job: Job, capability: str, fn_name: str, *args, est: dict | None = 
         if has_output:
             if not attempt.is_file():
                 errors.append(f"{p.name}: returned no file")
+                continue
+            try:
+                _check_output(capability, attempt, kw)
+            except PROVIDER_FAILURES as exc:
+                attempt.unlink(missing_ok=True)
+                job.charge(p.name, capability, res.cost, f"{note or fn_name}: output rejected")
+                errors.append(f"{p.name}: rejected output: {str(exc)[:200]}")
                 continue
             os.replace(attempt, dst)
             res.path = dst

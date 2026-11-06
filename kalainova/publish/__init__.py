@@ -64,6 +64,10 @@ def _not_placeholder(job: Job) -> None:
     local = placeholder_assets(job.read("asset_manifest"))
     if local:
         raise ContractError(f"{job.id}: placeholder; the local provider made {local}. Render again with the paid models")
+    made_from = job.read_stamp()
+    if not made_from or made_from.get("video_sha256") != sha256_file(job.work / "final.mp4") \
+            or made_from.get("asset_manifest_sha256") != sha256_file(job.path("asset_manifest")):
+        raise ContractError(f"{job.id}: final.mp4 was not rendered from this asset_manifest.json; render again")
 
 
 def approve(job: Job, reviewer: str, *, platforms: list[str], notes: str = "", privacy: str = "public") -> dict:
