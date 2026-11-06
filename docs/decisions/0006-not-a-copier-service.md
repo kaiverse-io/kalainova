@@ -1,6 +1,6 @@
 # 0006. Not a Copier Python service
 
-Status: accepted · 2026-11-05
+Status: superseded by 0008 · 2026-11-06
 
 ## Context
 

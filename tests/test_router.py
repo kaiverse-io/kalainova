@@ -66,8 +66,11 @@ class Hung(Flaky):
         return base.Result(path=dst, cost=self.cost, model="hung-1")
 
 
-PRICES = {"flaky": {"image": {"per_image": 1.0}, "llm": {"input_per_mtok": 1.0}},
-          "backup": {"image": {"per_image": 1.0}}, "hung": {"image": {"per_image": 1.0}}}
+PRICES = {
+    "flaky": {"image": {"per_image": 1.0}, "llm": {"input_per_mtok": 1.0}},
+    "backup": {"image": {"per_image": 1.0}},
+    "hung": {"image": {"per_image": 1.0}},
+}
 
 
 @pytest.fixture(autouse=True)
@@ -79,17 +82,30 @@ def providers(monkeypatch, tmp_path):
         cls.fails = None
         cls.wrong_size = cls.corrupt = False
         monkeypatch.setitem(base._REGISTRY, cls.name, cls)
-    monkeypatch.setattr(base.config, "price_for", lambda provider, key: dict(PRICES.get(provider, {}).get(key, {})))
+    monkeypatch.setattr(
+        base.config, "price_for", lambda provider, key: dict(PRICES.get(provider, {}).get(key, {}))
+    )
     yield
 
 
 def job_with(tmp_path, order, cap=None):
     folder = tmp_path / "jobs" / "r"
     folder.mkdir(parents=True)
-    (folder / "job.json").write_text(json.dumps({
-        "schema_version": "0.1", "job_id": "r", "strategy": "generated", "media": ["video"], "rights": "owned",
-        "distribution_identity": "t", "status": "draft", "cost_cap": cap,
-        "providers": {"image": order, "llm": order}}))
+    (folder / "job.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "r",
+                "strategy": "generated",
+                "media": ["video"],
+                "rights": "owned",
+                "distribution_identity": "t",
+                "status": "draft",
+                "cost_cap": cap,
+                "providers": {"image": order, "llm": order},
+            }
+        )
+    )
     return Job(folder)
 
 

@@ -1,0 +1,18 @@
+{
+  "schema_version": "0.1",
+  "stream_id": "chan",
+  "strategy": "generated",
+  "distribution_identity": "chan-id",
+  "rights": "owned",
+  "media": [
+    "video"
+  ],
+  "max_per_day": 1,
+  "cost_cap_per_job": 5,
+  "kits": {
+    "lead": "lead@1"
+  },
+  "accounts": {
+    "youtube": "h"
+  }
+}

@@ -11,7 +11,7 @@ The engine does not rank by topic. It ranks by whether a proof exists.
 
 Current operating defaults (override on the job if the brief says otherwise):
 
-- One strategy, one distribution identity.
+- One strategy and one distribution identity per stream.
 - One funded source for 14 days before a second.
 - One to two posts a day on that identity.
 - Score a funded source at 4 of 6 before committing.
@@ -70,7 +70,7 @@ A prompt or a script packet becomes a new piece: voice, picture, captions, or an
 
 1. Write the script packet. Three hooks. Claims have sources.
 2. Rent a generator. Render on a cap: three tests, and a money ceiling written on the job before the first render.
-3. Post on a third identity, not the funded one and not the owned-master one.
+3. Post on the stream's own identity, never a funded or owned-master one. Anything that must stay the same goes in a kit (`docs/how-to/run-a-stream.md`).
 4. Declare synthetic media where the platform asks.
 5. Kill the loop when cost per piece times a month of posts is higher than anything the measure log supports.
 
@@ -125,7 +125,6 @@ A physical or digital good that **extends** a piece that already shipped. It is 
 - Cutting a broadcast, a show, or a viral clip because it is getting views, with no funded brief and no license.
 - Mixing funded posts onto an identity you want to keep as owned work.
 - A comment-to-course funnel. File the pattern as intel. Do not build it here.
-- A compiler, a scheduler, or a multi-job factory before one accepted or measured unit.
 
 ## Kill rules
 

@@ -3,11 +3,11 @@
 The editing arm turns your clips and photos into a finished cut. Strategy is `owned-derivative` (your footage) or `client` (someone else's, with their license).
 
 ```bash
-python3 -m kalainova new trip --strategy owned-derivative --identity <your-owned-label> --subject "<what it is>" --media video,audio
-python3 -m kalainova ingest jobs/trip ~/Footage/trip/          # split into shots and score every one
-python3 -m kalainova shots jobs/trip                           # see the scores and shot ids
-python3 -m kalainova edit jobs/trip "30s reel, warm, cinematic, title: <title>. end card: <line>"
-python3 -m kalainova revise jobs/trip "faster cuts, cooler, drop <shot id or file name>, open with <name>"
+uv run kalainova new trip --strategy owned-derivative --identity <your-owned-label> --subject "<what it is>" --media video,audio
+uv run kalainova ingest jobs/trip ~/Footage/trip/          # split into shots and score every one
+uv run kalainova shots jobs/trip                           # see the scores and shot ids
+uv run kalainova edit jobs/trip "30s reel, warm, cinematic, title: <title>. end card: <line>"
+uv run kalainova revise jobs/trip "faster cuts, cooler, drop <shot id or file name>, open with <name>"
 ```
 
 Notes accumulate in `direction.json`; later notes win. The vocabulary:
@@ -34,7 +34,7 @@ Then the shared gate: `approve` (a human), `publish`, `measure`.
 ```bash
 export PEXELS_API_KEY=...    # free: https://www.pexels.com/api/
 export PIXABAY_API_KEY=...   # free: https://pixabay.com/api/docs/   (either one is enough)
-python3 -m kalainova reel <id> "<place or topic>" "20s reel, cinematic, warm, title: <title>"
+uv run kalainova reel <id> "<place or topic>" "20s reel, cinematic, warm, title: <title>"
 ```
 
 `reel` opens a job (`owned-derivative`, rights `licensed`) and builds a shot list from the subject (wide, aerial, skyline, sunset, coast, street…). It takes the best free-license clips, at least 720p and 4–40 s long, picking for coverage across the shot list, then downloads them and records author, page, and license in `stock.json`. After that it ingests and edits. Credits go into the publish description. Paid libraries are never touched.

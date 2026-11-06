@@ -1,0 +1,38 @@
+{
+  "schema_version": "0.1",
+  "kit_id": "lead",
+  "version": 1,
+  "frozen_by": "operator",
+  "frozen_at": "2026-11-06T00:00:00+00:00",
+  "origin": {
+    "invented": true,
+    "real_person": false
+  },
+  "person": {
+    "fictional": true,
+    "adult": true,
+    "age": 30
+  },
+  "identity": {
+    "refs": [
+      {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "suffix": ".png"
+      }
+    ]
+  },
+  "voice": {
+    "provider": "p",
+    "voice_id": "v",
+    "model": "m"
+  },
+  "persona": {
+    "traits": [
+      "dry"
+    ],
+    "never_say": [
+      "x"
+    ]
+  },
+  "content_sha256": "da1331e62462a596100d82de2c805e23301a0fa17e756ee8a65e86b4a6a103d0"
+}

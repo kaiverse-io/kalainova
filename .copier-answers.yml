@@ -1,0 +1,17 @@
+_commit: v0.14.1
+_src_path: https://github.com/kaiverse-io/chassis
+author_email: ''
+author_name: Kartik Mittal
+coverage_fail_under: 45
+description: Content generation engine for any subject
+enable_docker_outside_of_docker: false
+enable_release_automation: false
+github_owner: kaiverse-io
+include_ts: false
+include_ub_mode: false
+install_ai_coach: false
+license: Proprietary
+project_name: Kalainova
+python_package_name: kalainova
+python_version: '3.12'
+
