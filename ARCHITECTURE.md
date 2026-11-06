@@ -397,7 +397,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ plan ──────▶ consistency, prompts, providers
     ├─▶ assets ────▶ consistency, kits, media, config, providers
     ├─▶ edit ──────▶ config
-    ├─▶ render ────▶ captions, look, motion, media
+    ├─▶ render ────▶ bar, captions, look, motion, media
     ├─▶ qa ────────▶ bar, comic, story, consistency, prompts, media, config, providers, publish
     ├─▶ bar ───────▶ media, config
     ├─▶ comic ─────▶ assets, captions, consistency, render, providers
