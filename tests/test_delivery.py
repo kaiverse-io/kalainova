@@ -96,6 +96,32 @@ def test_a_film_opens_on_picture_and_music_and_holds_after_the_last_word(tmp_pat
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_master_with_no_sound_misses_the_audio_reading(tmp_path):
+    silent = tmp_path / "silent.mov"
+    media.run(["-f", "lavfi", "-i", "testsrc2=s=64x64:d=1:r=24", "-c:v", "prores_ks", str(silent)])
+    readings = {r["id"]: r for r in bar.measure_master(silent, target_fps=24.0)}
+    assert not readings["master.audio"]["ok"]
+    assert "master.lkfs" not in readings
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_the_bar_command_reads_a_job_and_a_loose_file(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from kalainova import __main__ as cli
+
+    job = _film_job(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "open_job", lambda name: job)
+    assert cli._bar(SimpleNamespace(target="film")) in (0, 2)
+    whole_job = capsys.readouterr().out
+    assert "master.codec" in whole_job and "studio bar" in whole_job
+
+    assert cli._bar(SimpleNamespace(target=str(job.work / "final.mp4"))) in (0, 2)
+    one_file = capsys.readouterr().out
+    assert "picture.banding" in one_file and "master.codec" not in one_file
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_film_keeps_captions_out_of_the_picture_and_in_files(tmp_path, monkeypatch):
     job = _film_job(tmp_path, monkeypatch)
     assert not (job.work / "picture.cap.mp4").exists()

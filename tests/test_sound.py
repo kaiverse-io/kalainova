@@ -151,6 +151,37 @@ def test_the_music_is_set_against_the_voice_it_will_sit_under(tmp_path):
     assert abs(_gap(tmp_path / "loud", 2.0) - _gap(tmp_path / "soft", 0.8)) < 3.0
 
 
+def test_music_alone_keeps_its_own_level_and_has_no_voice_stem(tmp_path):
+    _tone(tmp_path / "m.wav", 3.0, freq=110.0, volume=1.0)
+    render._op_mix_audio(
+        tmp_path,
+        {"out": "mix.wav", "duration_sec": 3.0, "music": "m.wav", "music_gain_db": -6.0, "sfx": []},
+    )
+    assert not (tmp_path / "voice.stem.wav").exists()
+    assert not (tmp_path / "music.even.wav").exists(), "the fader rides only under a voice"
+    want = media.loudness(tmp_path / "m.wav")["integrated_lufs"] - 6.0
+    assert media.loudness(tmp_path / "mix.wav")["integrated_lufs"] == pytest.approx(want, abs=1.5)
+
+
+def test_a_voice_alone_has_no_music_stem_and_an_effect_lands_on_its_mark(tmp_path):
+    _tone(tmp_path / "v.wav", 2.0, volume=1.0)
+    _tone(tmp_path / "hit.wav", 0.2, freq=1000.0, volume=1.0)
+    render._op_mix_audio(
+        tmp_path,
+        {
+            "out": "mix.wav",
+            "duration_sec": 4.0,
+            "voice": "v.wav",
+            "voice_chain": False,
+            "sfx": [{"path": "hit.wav", "start_sec": 3.0, "gain_db": 0.0}],
+        },
+    )
+    assert not (tmp_path / "music.stem.wav").exists()
+    left, _, sr = media.decode_stereo(tmp_path / "mix.wav")
+    assert abs(left[int(sr * 2.5) : int(sr * 2.9)]).max() < 0.02
+    assert abs(left[int(sr * 3.05) : int(sr * 3.15)]).max() > 0.05
+
+
 def test_music_too_quiet_to_hear_misses_the_bar(tmp_path):
     _tone(tmp_path / "voice.stem.wav", 2.0, volume=0.4)
     _tone(tmp_path / "music.stem.wav", 2.0, freq=110.0, volume=0.002)

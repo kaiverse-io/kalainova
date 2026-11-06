@@ -142,6 +142,19 @@ def test_a_second_render_leaves_no_page_from_a_longer_first_one(tmp_path, monkey
     assert not (job.work / "book" / "099.png").exists()
 
 
+def test_the_story_command_renders_and_reports_qa(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from kalainova import __main__ as cli
+
+    job = _job(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "open_job", lambda name: job)
+    assert cli._document(SimpleNamespace(job="s", cmd="story")) in (0, 2)
+    out = capsys.readouterr().out
+    assert "QA" in out and "final.pdf" in out
+    assert (job.work / "final.epub").exists()
+
+
 def test_a_story_delivers_a_valid_epub_with_the_whole_text(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     story.run(job)

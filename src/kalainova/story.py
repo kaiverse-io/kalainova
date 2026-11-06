@@ -121,6 +121,13 @@ def darken_foot(page: Image.Image, *, start: float) -> None:
     page.paste((8, 10, 14), (0, 0), mask)
 
 
+def _strands_a_line(i: int, remaining: int, room: int) -> bool:
+    """One line of room left would strand a paragraph's first or last line across the page."""
+    if room != 1:
+        return False
+    return remaining == 2 or (i == 0 and remaining > 1)
+
+
 def paginate(
     paragraphs: list[list[Line]], lines_per_page: int, first_page: int | None = None
 ) -> list[list[Line]]:
@@ -129,10 +136,7 @@ def paginate(
     room = first_page or lines_per_page
     for paragraph in paragraphs:
         for i, line in enumerate(paragraph):
-            remaining = len(paragraph) - i
-            orphan = i == 0 and remaining > 1 and room == 1
-            widow = remaining == 2 and room == 1
-            if room == 0 or orphan or widow:
+            if room == 0 or _strands_a_line(i, len(paragraph) - i, room):
                 pages.append([])
                 room = lines_per_page
             pages[-1].append(line)

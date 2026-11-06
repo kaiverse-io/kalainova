@@ -107,6 +107,72 @@ def test_footage_edit_rejects_bad_takes(tmp_path, monkeypatch):
     assert info["settings"]["grade"] == "warm"
 
 
+def _long_job(tmp_path, monkeypatch, note):
+    from footage_fixtures import talk
+
+    from kalainova.editor import analyze, direct
+    from kalainova.jobfs import Job
+
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    src = tmp_path / "src"
+    src.mkdir()
+    take = talk(
+        src / "a_talk.mp4",
+        [(3.0, True), (4.0, False), (3.0, True), (4.0, False), (3.0, True)],
+        size=(320, 180),
+    )
+    folder = tmp_path / "jobs" / "lf"
+    folder.mkdir(parents=True)
+    (folder / "job.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "lf",
+                "strategy": "owned-derivative",
+                "media": ["video", "audio"],
+                "rights": "owned",
+                "distribution_identity": "owned",
+                "status": "draft",
+            }
+        )
+    )
+    job = Job(folder)
+    analyze.ingest(job, [take])
+    direct.add_note(job, note)
+    direct.run(job)
+    return job
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_long_form_edit_keeps_the_words_and_takes_out_the_dead_air(tmp_path, monkeypatch):
+    from kalainova import media, render
+
+    job = _long_job(
+        tmp_path, monkeypatch, "long form talk, keep the original audio, no music, title: A Walk"
+    )
+    em = job.read("edit_manifest")
+    cuts = em["cuts"]
+    spans = [c["out_sec"] - c["in_sec"] for c in cuts]
+    assert len(cuts) == 3
+    assert sum(spans) < 17.0 - 6.0, "most of the 8 seconds of silence is gone"
+    assert sum(spans) >= 9.0, "every word stays"
+    assert cuts[0]["title"] == "A Walk" and cuts[0]["role"] == "hook"
+    # a jump cut inside one take is hidden by a punch-in on every other segment
+    assert [c.get("zoom") for c in cuts] == [None, 1.08, None]
+    render.compile_plan(job)
+    final = render.execute(job)
+    assert media.duration(final) == pytest.approx(sum(spans), abs=0.3)
+    assert media.summarize(final).get("sample_rate_hz")
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_long_form_edit_with_no_footage_left_is_refused(tmp_path, monkeypatch):
+    from kalainova.jobfs import ContractError
+
+    with pytest.raises(ContractError, match="no long-form footage"):
+        _long_job(tmp_path, monkeypatch, "long form, drop talk")
+
+
 def _moment(sig, source="s1"):
     return {"shot": {"source": source, "sig": sig}}
 

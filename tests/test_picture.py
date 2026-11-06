@@ -282,7 +282,23 @@ def test_a_render_crops_a_baked_in_letterbox_away(tmp_path):
     assert frame[:3].mean() > 30 and frame[-3:].mean() > 30
 
 
-def test_a_plan_refuses_a_picture_box_outside_the_frame():
+@pytest.mark.parametrize(
+    "box",
+    [
+        [0.0, 0.1, 2.0, 0.8],  # wider than the frame
+        [0.5, 0.0, 0.6, 1.0],  # runs off the right
+        [0.0, 0.5, 1.0, 0.6],  # runs off the bottom
+        [-0.1, 0.0, 0.5, 0.5],  # starts outside
+        [0.0, -0.1, 0.5, 0.5],
+        [0.0, 0.0, 0.0, 1.0],  # no picture left
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],  # not four numbers
+        [0.0, 0.0, 1.0, "1;rm"],  # never reaches a filter string
+        [0.0, 0.0, 1.0, True],
+        "0,0,1,1",
+    ],
+)
+def test_a_plan_refuses_a_picture_box_that_is_not_inside_the_frame(box):
     args = {
         "input": "a.mp4",
         "out": "b.mp4",
@@ -290,7 +306,20 @@ def test_a_plan_refuses_a_picture_box_outside_the_frame():
         "height": 64,
         "fps": 24,
         "duration_sec": 1.0,
-        "picture_box": [0.0, 0.1, 2.0, 0.8],
+        "picture_box": box,
     }
-    with pytest.raises(ContractError):
+    with pytest.raises(ContractError, match="picture_box"):
         render._coerce("scale", args, 0)
+
+
+def test_a_plan_accepts_a_box_at_the_edges_of_the_frame():
+    args = {
+        "input": "a.mp4",
+        "out": "b.mp4",
+        "width": 64,
+        "height": 64,
+        "fps": 24,
+        "duration_sec": 1.0,
+        "picture_box": [0, 0.1, 1, 0.8],
+    }
+    assert render._coerce("scale", args, 0)["picture_box"] == [0, 0.1, 1, 0.8]
