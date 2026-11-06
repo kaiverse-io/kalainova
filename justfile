@@ -159,7 +159,10 @@ ub-tools:
 
 # CRAP score per function; exits 2 when the worst is over 10 (default scope: src/)
 crap *args="src": ub-tools
-    {{ ub_tools }}/crapper/crapper --threshold 10 {{ args }}
+    # The tool's own coverage run reads empty here, because addopts already runs pytest-cov.
+    mkdir -p target/coverage/python
+    uv run pytest -q --cov-report=lcov:target/coverage/python/lcov.info
+    {{ ub_tools }}/crapper/crapper --threshold 10 --use-existing-coverage {{ args }}
 
 # Structural duplication; reports pairs scoring 0.8 or above (default scope: src/)
 dry *args="src": ub-tools

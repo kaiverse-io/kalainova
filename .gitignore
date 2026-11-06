@@ -57,4 +57,4 @@ streams/*
 # /ub-mode quality tools (just crap|dry|mutate): pinned tool checkouts and their reports
 .cache/ub-tools/
 .metrics/
-target/coverage/
+target/
