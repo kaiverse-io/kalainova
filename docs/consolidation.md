@@ -21,16 +21,16 @@ A job is one of these. It does not mix them.
 | Rule | Why it showed up everywhere |
 |---|---|
 | Rent the tool that makes the file. Own the job folder, the gate, and the log. | The tools change. The record of what shipped does not. |
-| One distribution identity per way. | A funded post on an identity you want to keep stains it. |
+| One identity per stream, one strategy per stream. | A funded post on an identity you want to keep stains it. |
 | A human publishes. An agent drafts, calls the tool, and logs. | Nobody in the playbooks got paid for an unreviewed dump. |
-| One unit accepted or public before a batch. | The first rejection teaches the brief. The twentieth does not. |
+| Check the first unit on a new character or format before scheduling more. A default, not a lock (ADR 0009). | The first rejection teaches the brief. The twentieth does not. |
 | One to two posts a day on that identity. | Faster reads as spam. |
 | Ten-minute hook veto. No timeline craft. | The time goes into the hook, not the cut. |
 | Rights on the job: `funded-brief`, `owned`, or `licensed`. | A popular file is not a right. |
 | Factual line in the script has a source on the job. | Unsourced claims are how a piece gets pulled. |
 | Measure at 48 hours. Keep or kill from that number. | Views on the dashboard are the only feedback that mattered. |
 | Loudness once on the final mix when there is audio. Default −14 LUFS, true peak at or under −1 dBTP. Short picture defaults to 9:16. | These are finish settings, not a brand. |
-| No compiler, scheduler, or second format until one job is `accepted` or `measured`. | Every early build pass ended with a schema and no file. |
+| No second procedural format or SKU until one job is `accepted` or `measured`. | Every early build pass ended with a schema and no file. |
 
 ## Funded cut, operating defaults
 
@@ -76,4 +76,4 @@ Not peers. They do not open a new identity and they do not count as the first pr
 
 ## Done
 
-A directory `jobs/<id>/` that is not the template, with the subject written only there, and a `measure.json` that records either an accepted funded submission or a public URL. Until that file exists, the engine is unproven and the tree does not grow.
+A directory `jobs/<id>/` in the private home, with a `measure.json` that records either an accepted funded submission or a public URL. Until that file exists, the engine is unproven, however many streams it can address.

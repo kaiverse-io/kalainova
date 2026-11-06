@@ -1,0 +1,129 @@
+[project]
+name = "kalainova"
+version = "0.1.0"
+description = "Content generation engine for any subject"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+authors = [{ name = "kaiverse.io" }]
+dependencies = [
+    "jsonschema>=4.20",
+    "requests>=2.31",
+    "PyYAML>=6.0",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+cloud = ["boto3>=1.34"]
+
+[project.scripts]
+kalainova = "kalainova.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kalainova"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "mypy>=1.11",
+    "ruff>=0.6",
+    "import-linter>=2.1",
+    "types-PyYAML",
+    "types-requests",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "S", "C901", "UP", "B", "N"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+# Debt from before the chassis stamp (ADR 0008). This list only shrinks, and new files never join it.
+"scripts/check.py" = ["C901", "E501", "E741", "S607"]
+"scripts/lint_docs.py" = ["C901", "E501"]
+"src/kalainova/__main__.py" = ["C901", "E501"]
+"src/kalainova/assets.py" = ["C901", "E501", "N806"]
+"src/kalainova/captions.py" = ["B007", "E501", "E741", "F841"]
+"src/kalainova/config.py" = ["E501"]
+"src/kalainova/edit.py" = ["B905", "C901", "E501"]
+"src/kalainova/editor/analyze.py" = ["B905", "C901", "E501", "S603"]
+"src/kalainova/editor/beats.py" = ["S603"]
+"src/kalainova/editor/direct.py" = ["C901", "E501"]
+"src/kalainova/editor/notes.py" = ["C901", "E501", "S110"]
+"src/kalainova/intake.py" = ["E501"]
+"src/kalainova/jobfs.py" = ["E501", "N818"]
+"src/kalainova/media.py" = ["B905", "S603"]
+"src/kalainova/plan.py" = ["B007", "E501"]
+"src/kalainova/providers/base.py" = ["E501"]
+"src/kalainova/providers/local.py" = ["B905", "C901", "E501", "S311", "S324"]
+"src/kalainova/providers/remote.py" = ["B905", "E501"]
+"src/kalainova/providers/router.py" = ["C901", "E501", "N818"]
+"src/kalainova/publish/__init__.py" = ["C901", "E501"]
+"src/kalainova/qa.py" = ["B905", "C901", "E501"]
+"src/kalainova/render.py" = ["C901", "E501", "F841", "N806"]
+"src/kalainova/stock.py" = ["E501"]
+"tests/footage_fixtures.py" = ["E501", "N806"]
+"tests/test_engine.py" = ["B905", "E501", "N814"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+mypy_path = "src"
+
+# Debt from before the chassis stamp (ADR 0008). This list only shrinks, and new modules never join it.
+[[tool.mypy.overrides]]
+module = [
+    "kalainova.__main__",
+    "kalainova.assets",
+    "kalainova.captions",
+    "kalainova.config",
+    "kalainova.edit",
+    "kalainova.editor.analyze",
+    "kalainova.editor.beats",
+    "kalainova.editor.direct",
+    "kalainova.editor.notes",
+    "kalainova.intake",
+    "kalainova.jobfs",
+    "kalainova.media",
+    "kalainova.plan",
+    "kalainova.providers.base",
+    "kalainova.providers.local",
+    "kalainova.providers.remote",
+    "kalainova.providers.router",
+    "kalainova.publish",
+    "kalainova.qa",
+    "kalainova.render",
+    "kalainova.stock",
+]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = [
+    "--cov=kalainova",
+    "--cov-report=term-missing",
+    # Keep in sync with [tool.coverage.report] fail_under (same Copier answer).
+    "--cov-fail-under=45",
+]
+
+[tool.coverage.run]
+source = ["kalainova"]
+branch = true
+
+[tool.coverage.report]
+# Ratchet (bucket B): only increase this value, never decrease it.
+# Initial value stamped from Copier answer coverage_fail_under; raise both this
+# and --cov-fail-under in-repo together (never lower; keep the Copier answer in sync).
+fail_under = 45

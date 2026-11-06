@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/kit-0.1.json",
+  "title": "Kit: what must stay the same",
+  "description": "Bytes stay in the store; this file records their hashes. Holds no credentials.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kit_id",
+    "version"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "file": {
+      "type": "object",
+      "required": [
+        "sha256",
+        "suffix"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    },
+    "refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file"
+          }
+        }
+      }
+    },
+    "named": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/refs"
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "kit_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "oneOf": [
+        {
+          "const": "draft"
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "frozen_at": {
+      "type": "string"
+    },
+    "frozen_by": {
+      "type": "string"
+    },
+    "content_sha256": {
+      "type": "string"
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the face and voice came to exist, attested by a human.",
+      "properties": {
+        "invented": {
+          "type": "boolean"
+        },
+        "real_person": {
+          "type": "boolean"
+        },
+        "attested_by": {
+          "type": "string"
+        },
+        "made_with": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fictional": {
+          "type": "boolean"
+        },
+        "adult": {
+          "type": "boolean"
+        },
+        "age": {
+          "type": "integer"
+        }
+      }
+    },
+    "identity": {
+      "$ref": "#/$defs/refs"
+    },
+    "looks": {
+      "$ref": "#/$defs/named"
+    },
+    "locations": {
+      "$ref": "#/$defs/named"
+    },
+    "props": {
+      "$ref": "#/$defs/named"
+    },
+    "voice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "voice_id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "settings": {
+          "type": "object"
+        },
+        "sample": {
+          "$ref": "#/$defs/file"
+        }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "traits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "speech": {
+          "type": "string"
+        },
+        "never_say": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "backstory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fiction",
+            "text"
+          ],
+          "properties": {
+            "fiction": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "style": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file"
+          }
+        }
+      }
+    },
+    "music": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "theme": {
+          "$ref": "#/$defs/file"
+        },
+        "whoosh": {
+          "$ref": "#/$defs/file"
+        }
+      }
+    },
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string"
+        },
+        "edit": {
+          "type": "object"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "topics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

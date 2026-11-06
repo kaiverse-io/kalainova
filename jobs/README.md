@@ -12,4 +12,4 @@ jobs/<id>/
   measure.json        after publish
 ```
 
-Do not put a sample subject in `_template`. Do not commit media.
+Real jobs live in the private `$KALAINOVA_HOME`, not in this repo. Do not put a sample subject in `_template`. Do not commit media.

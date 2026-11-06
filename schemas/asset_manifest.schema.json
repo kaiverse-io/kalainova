@@ -176,6 +176,10 @@
     "duration_sec": {
       "type": "number",
       "minimum": 0
+    },
+    "kit_lock_sha256": {
+      "type": "string",
+      "description": "The kit lock these assets were made under."
     }
   }
 }

@@ -21,15 +21,38 @@ def make_job(tmp_path, monkeypatch, media_kinds, cap=10):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     folder = tmp_path / "jobs" / "c"
     folder.mkdir(parents=True)
-    (folder / "job.json").write_text(json.dumps({
-        "schema_version": "0.1", "job_id": "c", "strategy": "generated", "media": media_kinds, "rights": "owned",
-        "distribution_identity": "t", "status": "draft", "cost_cap": cap}))
+    (folder / "job.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "c",
+                "strategy": "generated",
+                "media": media_kinds,
+                "rights": "owned",
+                "distribution_identity": "t",
+                "status": "draft",
+                "cost_cap": cap,
+            }
+        )
+    )
     return Job(folder)
 
 
 def record(provider="outside", model="m", cost=1.5):
-    return {"assets": [{"id": "x", "kind": "audio", "path": "final.wav", "provider": provider, "model": model,
-                        "rights": "owned", "cost": cost, "synthetic": True}]}
+    return {
+        "assets": [
+            {
+                "id": "x",
+                "kind": "audio",
+                "path": "final.wav",
+                "provider": provider,
+                "model": model,
+                "rights": "owned",
+                "cost": cost,
+                "synthetic": True,
+            }
+        ]
+    }
 
 
 def tone(path, seconds=2):
@@ -53,7 +76,9 @@ class G(Provider):
     capabilities = ("image",)
 print(names())
 """
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    ).stdout
     assert all(name in out for name in ("gpu", "local", "fal"))
 
 
@@ -72,8 +97,21 @@ def test_a_provider_can_need_several_keys(monkeypatch):
 
 def test_an_asset_can_record_how_it_was_made(tmp_path, monkeypatch):
     job = make_job(tmp_path, monkeypatch, ["audio"])
-    job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id, "assets": [
-        {"id": "x", "kind": "audio", "path": "a.wav", "provenance": {"node": "n3", "weights_sha256": "ab", "seed": 42}}]})
+    job.write(
+        "asset_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "assets": [
+                {
+                    "id": "x",
+                    "kind": "audio",
+                    "path": "a.wav",
+                    "provenance": {"node": "n3", "weights_sha256": "ab", "seed": 42},
+                }
+            ],
+        },
+    )
     assert job.read("asset_manifest")["assets"][0]["provenance"]["seed"] == 42
 
 

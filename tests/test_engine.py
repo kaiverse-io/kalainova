@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-from pathlib import Path
 
 import pytest
 
@@ -26,14 +25,19 @@ def test_estimate_words_monotonic_and_bounded():
 
 
 def test_chars_to_words_from_elevenlabs_alignment():
-    al = {"characters": list("Hi you"), "character_start_times_seconds": [0, .1, .2, .3, .4, .5],
-          "character_end_times_seconds": [.1, .2, .3, .4, .5, .6]}
+    al = {
+        "characters": list("Hi you"),
+        "character_start_times_seconds": [0, 0.1, 0.2, 0.3, 0.4, 0.5],
+        "character_end_times_seconds": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    }
     assert [w["text"] for w in chars_to_words(al)] == ["Hi", "you"]
 
 
 def test_caption_cards_break_on_punctuation_and_width():
-    words = [{"text": t, "start_sec": i * .3, "end_sec": i * .3 + .25} for i, t in
-             enumerate("The sky is blue. Sunsets are red because".split())]
+    words = [
+        {"text": t, "start_sec": i * 0.3, "end_sec": i * 0.3 + 0.25}
+        for i, t in enumerate("The sky is blue. Sunsets are red because".split())
+    ]
     cards = edit.caption_cards(words, {"blue"})
     assert cards[0]["text"].endswith("blue.") or "blue." in " ".join(c["text"] for c in cards)
     assert all(len(c["text"]) <= 20 for c in cards)
@@ -70,15 +74,46 @@ def test_end_to_end_local_render(tmp_path, monkeypatch):
         monkeypatch.delenv(k, raising=False)
     folder = tmp_path / "jobs" / "e2e"
     folder.mkdir(parents=True)
-    (folder / "job.json").write_text(json.dumps({
-        "schema_version": "0.1", "job_id": "e2e", "strategy": "generated", "media": ["video", "audio"],
-        "rights": "owned", "distribution_identity": "test", "status": "draft", "skip_funded": True, "cost_cap": 0,
-        "brief": {"subject": "test", "duration_sec": 6}}))
-    (folder / "script_packet.json").write_text(json.dumps({
-        "schema_version": "0.1", "job_id": "e2e",
-        "beats": [{"id": "b1", "role": "hook", "text": "Short test line one.", "on_screen": "Test"},
-                  {"id": "b2", "role": "payoff", "text": "And line two lands.", "on_screen": "Done"}]}))
+    (folder / "job.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "e2e",
+                "strategy": "generated",
+                "media": ["video", "audio"],
+                "rights": "owned",
+                "distribution_identity": "test",
+                "status": "draft",
+                "skip_funded": True,
+                "cost_cap": 0,
+                "brief": {"subject": "test", "duration_sec": 6},
+            }
+        )
+    )
+    (folder / "script_packet.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "e2e",
+                "beats": [
+                    {
+                        "id": "b1",
+                        "role": "hook",
+                        "text": "Short test line one.",
+                        "on_screen": "Test",
+                    },
+                    {
+                        "id": "b2",
+                        "role": "payoff",
+                        "text": "And line two lands.",
+                        "on_screen": "Done",
+                    },
+                ],
+            }
+        )
+    )
     from kalainova import assets, qa
+
     job = Job(folder)
     assets.run(job)
     edit.run(job)
@@ -91,6 +126,7 @@ def test_end_to_end_local_render(tmp_path, monkeypatch):
     assert abs(report["metrics"]["integrated_lufs"] + 14) <= 1.0
     # a technical pass for CI, and still not approvable
     from kalainova import publish
+
     with pytest.raises(ContractError, match="placeholder"):
         publish.approve(job, "human", platforms=["youtube"])
     assert not job.has("approval")
@@ -100,18 +136,43 @@ def test_end_to_end_local_render(tmp_path, monkeypatch):
 def _job(tmp_path, cap=None, **extra):
     folder = tmp_path / "jobs" / "r1"
     folder.mkdir(parents=True)
-    (folder / "job.json").write_text(json.dumps({
-        "schema_version": "0.1", "job_id": "r1", "strategy": "generated", "media": ["video", "audio"],
-        "rights": "owned", "distribution_identity": "test", "status": "draft", "skip_funded": True,
-        "cost_cap": cap, **extra}))
+    (folder / "job.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "r1",
+                "strategy": "generated",
+                "media": ["video", "audio"],
+                "rights": "owned",
+                "distribution_identity": "test",
+                "status": "draft",
+                "skip_funded": True,
+                "cost_cap": cap,
+                **extra,
+            }
+        )
+    )
     return Job(folder)
 
 
 def test_numeric_args_cannot_carry_filtergraph_text(tmp_path, monkeypatch):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path)
-    evil = {"steps": [{"op": "cut", "args": {"source": "a.png", "kind": "still", "in_sec": 0, "out_sec": 1,
-                                             "fps": "30[in0];movie=/etc/passwd[m];[in0][m]overlay", "out": "x.mp4"}}]}
+    evil = {
+        "steps": [
+            {
+                "op": "cut",
+                "args": {
+                    "source": "a.png",
+                    "kind": "still",
+                    "in_sec": 0,
+                    "out_sec": 1,
+                    "fps": "30[in0];movie=/etc/passwd[m];[in0][m]overlay",
+                    "out": "x.mp4",
+                },
+            }
+        ]
+    }
     with pytest.raises(ContractError, match="fps"):
         render.execute(job, evil)
 
@@ -119,14 +180,27 @@ def test_numeric_args_cannot_carry_filtergraph_text(tmp_path, monkeypatch):
 def test_unknown_op_args_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path)
-    plan = {"steps": [{"op": "loudnorm", "args": {"input": "a.wav", "out": "b.wav", "target_lufs": -14,
-                                                  "true_peak_dbtp_max": -1, "extra": "-f lavfi"}}]}
+    plan = {
+        "steps": [
+            {
+                "op": "loudnorm",
+                "args": {
+                    "input": "a.wav",
+                    "out": "b.wav",
+                    "target_lufs": -14,
+                    "true_peak_dbtp_max": -1,
+                    "extra": "-f lavfi",
+                },
+            }
+        ]
+    }
     with pytest.raises(ContractError, match="unknown args"):
         render.execute(job, plan)
 
 
 def test_cost_cap_refuses_before_the_call(tmp_path, monkeypatch):
     from kalainova.jobfs import CostCapExceeded
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=0.5)
     with pytest.raises(CostCapExceeded):
@@ -137,6 +211,7 @@ def test_cost_cap_refuses_before_the_call(tmp_path, monkeypatch):
 
 def test_charge_records_then_stops_over_cap(tmp_path, monkeypatch):
     from kalainova.jobfs import CostCapExceeded
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=0.5)
     with pytest.raises(CostCapExceeded):
@@ -146,6 +221,7 @@ def test_charge_records_then_stops_over_cap(tmp_path, monkeypatch):
 
 def test_ass_backslash_stays_literal():
     from kalainova.captions import esc
+
     out = esc("a\\Nb{\\b1}")
     assert "\\" not in out and "{" not in out
 
@@ -161,14 +237,30 @@ def test_render_plan_goes_stale_when_edit_changes(tmp_path, monkeypatch):
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_approve_and_publish_are_bound_to_qa_bytes(tmp_path, monkeypatch):
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1)
     final = job.work / "final.mp4"
     media.run(["-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.5", str(final)])
-    job.write("qa", {"schema_version": "0.1", "job_id": "r1", "passed": True, "checks": [],
-                     "artifacts_sha256": {"video": publish.sha256_file(final)}})
-    (job.folder / "script_packet.json").write_text(json.dumps({"schema_version": "0.1", "job_id": "r1",
-                                                               "beats": [{"id": "b", "role": "hook", "text": "x"}]}))
+    job.write(
+        "qa",
+        {
+            "schema_version": "0.1",
+            "job_id": "r1",
+            "passed": True,
+            "checks": [],
+            "artifacts_sha256": {"video": publish.sha256_file(final)},
+        },
+    )
+    (job.folder / "script_packet.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "r1",
+                "beats": [{"id": "b", "role": "hook", "text": "x"}],
+            }
+        )
+    )
     _manifest(job, {"id": "voice", "provider": "paid", "model": "m"})
     publish.approve(job, "human", platforms=["youtube"])
     assert publish.publish(job, "youtube", dry_run=True)["status"] == "dry_run"
@@ -180,32 +272,57 @@ def test_approve_and_publish_are_bound_to_qa_bytes(tmp_path, monkeypatch):
 
 # ---- the local provider makes placeholders, and the gate enforces that ------------------
 def _manifest(job, *assets):
-    job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id,
-                                 "assets": [{"kind": "audio", "path": "x.wav", **a} for a in assets]})
+    job.write(
+        "asset_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "assets": [{"kind": "audio", "path": "x.wav", **a} for a in assets],
+        },
+    )
     if (job.work / "final.mp4").exists():
         render.stamp(job, job.work / "final.mp4")
 
 
 def _qa_passed(job):
     from kalainova import publish
+
     final = job.work / "final.mp4"
     final.write_bytes(b"not a real video; the gate only reads the hash")
-    job.write("qa", {"schema_version": "0.1", "job_id": job.id, "passed": True, "checks": [],
-                     "artifacts_sha256": {"video": publish.sha256_file(final)}})
-    job.write("script_packet", {"schema_version": "0.1", "job_id": job.id,
-                                "beats": [{"id": "b", "role": "hook", "text": "x"}]})
+    job.write(
+        "qa",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "passed": True,
+            "checks": [],
+            "artifacts_sha256": {"video": publish.sha256_file(final)},
+        },
+    )
+    job.write(
+        "script_packet",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "beats": [{"id": "b", "role": "hook", "text": "x"}],
+        },
+    )
 
 
-@pytest.mark.parametrize("asset", [
-    {"id": "a", "provider": "local", "model": "anything"},
-    {"id": "a", "model": "local-studio-field"},
-    {"id": "a", "model": "local-typecard"},
-    {"id": "a", "model": "local-pad"},
-    {"id": "a", "model": "local-whoosh"},
-    {"id": "a", "model": "flite-slt"},
-])
+@pytest.mark.parametrize(
+    "asset",
+    [
+        {"id": "a", "provider": "local", "model": "anything"},
+        {"id": "a", "model": "local-studio-field"},
+        {"id": "a", "model": "local-typecard"},
+        {"id": "a", "model": "local-pad"},
+        {"id": "a", "model": "local-whoosh"},
+        {"id": "a", "model": "flite-slt"},
+    ],
+)
 def test_approve_refuses_a_placeholder(tmp_path, monkeypatch, asset):
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1)
     _qa_passed(job)
@@ -218,6 +335,7 @@ def test_approve_refuses_a_placeholder(tmp_path, monkeypatch, asset):
 
 def test_approve_refuses_when_the_manifest_is_missing(tmp_path, monkeypatch):
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1)
     _qa_passed(job)
@@ -228,22 +346,42 @@ def test_approve_refuses_when_the_manifest_is_missing(tmp_path, monkeypatch):
 
 def test_approve_accepts_paid_and_operator_assets(tmp_path, monkeypatch):
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1)
     _qa_passed(job)
-    _manifest(job, {"id": "voice", "provider": "paid", "model": "m"}, {"id": "clip", "provider": "operator"})
+    _manifest(
+        job,
+        {"id": "voice", "provider": "paid", "model": "m"},
+        {"id": "clip", "provider": "operator"},
+    )
     assert publish.approve(job, "human", platforms=["youtube"])["reviewer"] == "human"
     assert job.job["status"] == "approved"
 
 
 def test_approve_refuses_a_record_swapped_after_the_render(tmp_path, monkeypatch):
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1)
     _qa_passed(job)
     _manifest(job, {"id": "voice", "provider": "paid", "model": "m"})
-    job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id, "assets": [
-        {"kind": "audio", "path": "x.wav", "id": "voice", "provider": "paid", "model": "other"}]})
+    job.write(
+        "asset_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "assets": [
+                {
+                    "kind": "audio",
+                    "path": "x.wav",
+                    "id": "voice",
+                    "provider": "paid",
+                    "model": "other",
+                }
+            ],
+        },
+    )
     with pytest.raises(ContractError, match="not rendered from"):
         publish.approve(job, "human", platforms=["youtube"])
     assert not job.has("approval")
@@ -251,24 +389,45 @@ def test_approve_refuses_a_record_swapped_after_the_render(tmp_path, monkeypatch
 
 def test_approve_refuses_a_file_with_no_render_record(tmp_path, monkeypatch):
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1)
     _qa_passed(job)
-    job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id, "assets": [
-        {"kind": "audio", "path": "x.wav", "id": "voice", "provider": "paid", "model": "m"}]})
+    job.write(
+        "asset_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "assets": [
+                {"kind": "audio", "path": "x.wav", "id": "voice", "provider": "paid", "model": "m"}
+            ],
+        },
+    )
     with pytest.raises(ContractError, match="not rendered from"):
         publish.approve(job, "human", platforms=["youtube"])
 
 
 def test_publish_refuses_an_approval_written_for_a_placeholder(tmp_path, monkeypatch):
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1)
     _qa_passed(job)
     _manifest(job, {"id": "voice", "provider": "local", "model": "flite-slt"})
-    job.write("approval", {"schema_version": "0.1", "job_id": job.id, "reviewer": "human", "approved_at": "t",
-                           "platforms": ["youtube"], "title": "t", "description": "", "hashtags": [],
-                           "artifact_sha256": publish.sha256_file(job.work / "final.mp4")})
+    job.write(
+        "approval",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "reviewer": "human",
+            "approved_at": "t",
+            "platforms": ["youtube"],
+            "title": "t",
+            "description": "",
+            "hashtags": [],
+            "artifact_sha256": publish.sha256_file(job.work / "final.mp4"),
+        },
+    )
     with pytest.raises(ContractError, match="placeholder"):
         publish.publish(job, "youtube", dry_run=True)
 
@@ -276,16 +435,27 @@ def test_publish_refuses_an_approval_written_for_a_placeholder(tmp_path, monkeyp
 def test_one_local_beat_marks_the_whole_voice_track(tmp_path, monkeypatch):
     """A fallback on the first beat must not vanish because a later beat reached the paid provider."""
     from types import SimpleNamespace as NS
+
     from kalainova import assets, publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     job = _job(tmp_path, cap=1, media=["audio"])
-    job.write("script_packet", {"schema_version": "0.1", "job_id": job.id,
-                                "beats": [{"id": f"b{i}", "role": "body", "text": "x"} for i in range(3)]})
-    makers = iter([("local", "flite-slt"), ("paid", "m"), ("paid", "m"), ("paid", "m"), ("paid", "m")])
+    job.write(
+        "script_packet",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "beats": [{"id": f"b{i}", "role": "body", "text": "x"} for i in range(3)],
+        },
+    )
+    makers = iter(
+        [("local", "flite-slt"), ("paid", "m"), ("paid", "m"), ("paid", "m"), ("paid", "m")]
+    )
 
     def fake_gen(*a, **k):
         name, model = next(makers)
         return NS(name=name), NS(model=model, words=[], meta={})
+
     monkeypatch.setattr(assets.router, "generate", fake_gen)
     monkeypatch.setattr(assets.media, "run", lambda *a, **k: None)
     monkeypatch.setattr(assets.media, "duration", lambda *a, **k: 1.0)
@@ -298,18 +468,31 @@ def test_one_local_beat_marks_the_whole_voice_track(tmp_path, monkeypatch):
 
 def test_measure_refuses_before_48h(tmp_path, monkeypatch):
     import datetime as dt
+
     from kalainova import publish
+
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     monkeypatch.setenv("YOUTUBE_ACCESS_TOKEN", "t")
     job = _job(tmp_path)
-    now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
-    job.write("publish_log", {"schema_version": "0.1", "job_id": "r1",
-                              "posts": [{"platform": "youtube", "at": now, "status": "posted", "post_id": "v"}]})
+    now = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    job.write(
+        "publish_log",
+        {
+            "schema_version": "0.1",
+            "job_id": "r1",
+            "posts": [{"platform": "youtube", "at": now, "status": "posted", "post_id": "v"}],
+        },
+    )
 
     class R:
         ok = True
-        def raise_for_status(self): pass
-        def json(self): return {"items": [{"statistics": {"viewCount": "10"}}]}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"items": [{"statistics": {"viewCount": "10"}}]}
+
     monkeypatch.setattr(publish.requests, "get", lambda *a, **k: R())
     with pytest.raises(ContractError, match="48h"):
         publish.measure(job)

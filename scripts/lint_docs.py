@@ -8,7 +8,7 @@ Fails when an engine doc grows a worked example:
   4. it contains a term from the operator's local denylist (.denylist.local, one term per line,
      gitignored, or $KALAINOVA_DENYLIST). The terms never enter the repo; the lint keeps them out.
 
-CLAUDE_HANDOVER.md, real job folders, and evals/contract fixtures are not engine docs.
+Real job folders, kits, streams, and evals/contract fixtures are not engine docs.
 """
 
 from __future__ import annotations
@@ -20,8 +20,24 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGINE = ["README.md", "AGENTS.md", "ARCHITECTURE.md", "NOTICE.md", "jobs/README.md", "evals/README.md"]
-ENGINE_GLOBS = ["docs/**/*.md", "schemas/*.json", "jobs/_template/*", ".claude/skills/**/*.md"]
+ENGINE = [
+    "README.md",
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "NOTICE.md",
+    "jobs/README.md",
+    "kits/README.md",
+    "streams/README.md",
+    "evals/README.md",
+]
+ENGINE_GLOBS = [
+    "prompts/*.md",
+    "config/*.yaml",
+    "docs/**/*.md",
+    "schemas/*.json",
+    "jobs/_template/*",
+    ".agents/skills/**/*.md",
+]
 JOB_REF = re.compile(r"jobs/([A-Za-z0-9_.\-]+)/")
 PLACEHOLDER = {"_template"}
 FILLED_SUBJECT = re.compile(r'"subject"\s*:\s*"([^"]+)"')
@@ -50,10 +66,14 @@ def main() -> int:
         for m in JOB_REF.finditer(text):
             name = m.group(1)
             if name not in PLACEHOLDER and not name.startswith("<"):
-                problems.append(f"{rel}: points at a job folder 'jobs/{name}/'; a worked example belongs in that job, not the engine docs")
+                problems.append(
+                    f"{rel}: points at a job folder 'jobs/{name}/'; a worked example belongs in that job, not the engine docs"
+                )
         for m in FILLED_SUBJECT.finditer(text):
             if not m.group(1).startswith("<"):
-                problems.append(f"{rel}: fills in a subject ({m.group(1)[:40]!r}); subjects live only in a job folder")
+                problems.append(
+                    f"{rel}: fills in a subject ({m.group(1)[:40]!r}); subjects live only in a job folder"
+                )
         low = text.lower()
         for term in terms:
             if term.lower() in low:

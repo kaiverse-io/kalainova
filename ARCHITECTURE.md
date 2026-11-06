@@ -1,8 +1,16 @@
-# Architecture
+# Kalainova Architecture
 
 Kalainova is one engine and many jobs. A job declares a **strategy** and one or more **media** kinds. It does not declare a segment. The engine owns the job record, the gates, and the measure of acceptance. It rents the models, and it can run outside production tools behind one contract.
 
 In the diagrams, green is built, amber is partly built, and grey is planned. A planned part is a decision, not a claim that it exists.
+
+## Executive Summary
+
+One public engine and many private jobs. Rented models make the bytes; the engine owns the record, the gates, and the compile path. Two decisions shape the rest: a human approves every piece against its exact bytes (ADR 0007), and anything that must stay the same lives in a frozen kit that every model call must carry (ADR 0009).
+
+## System Overview
+
+The system context below is the runtime view.
 
 ## System context
 
@@ -87,7 +95,7 @@ flowchart TB
 
 ## Component view: the engine today
 
-The modules in `kalainova/`, and the two paths that make a piece. Every model call goes through `providers/router.py`.
+The modules in `src/kalainova/`, and the two paths that make a piece. Every model call goes through `providers/router.py`.
 
 ```mermaid
 flowchart TB
@@ -316,16 +324,157 @@ These change only with a version bump. A new interface waits for a second real u
 | No publisher takes audio-only files | A song can be approved but not posted |
 | No content review on files from outside tools | A human is the only check on their content |
 | No song adapter or container runner | The contracts exist, and nothing uses them in production yet |
-| Cap checks run one call at a time | Parallel calls could overshoot the cap together |
+| Cap checks run one call at a time | Parallel calls could overshoot the cap together, until Postgres holds the ledger (ADR 0010) |
+| Files from outside tools carry no enforced references | A human compares them against the kit |
+| A kit cannot prove a face is not a real person's | A human attests at freeze and approves each piece; the vision judge is one more signal |
+| Rendered files and job records are on one machine | Only kit files can reach object storage today (ADR 0010) |
 | QA does not predict the operator's verdict | A file can pass QA and still be rejected on review |
+
+## Kits, streams, and jobs
+
+Three objects carry continuity. The kit says what is fixed, and the stream says where it goes. The job locks exact versions, so a later kit change never moves a piece already made.
+
+```mermaid
+flowchart LR
+    operator["Operator"] -->|"stream + brief"| request["request"]
+    kit["Kit, frozen version<br/>face, voice, persona, style"]:::built --> stream
+    stream["Stream<br/>identity, generators, limits"]:::built --> request
+    canon["Canon, append-only"]:::built --> stream
+    request --> preflight{"Can the pinned tools<br/>hold the kits?"}
+    preflight -->|"no"| stop["Stop before spending"]
+    preflight -->|"yes"| lock["Job + kit.lock.json"]:::built
+    lock --> plan["plan: persona and canon"]
+    lock --> assets["assets: references, voice, music"]
+    assets --> qa["QA: the record, then the frames"]
+    plan --> assets
+    qa --> gate["Human gate"]
+    store[("Blob store<br/>content-addressed")]:::built --> assets
+
+    classDef built fill:#d3f0d8,stroke:#2e7d32,color:#10321a
+```
+
+## Cloud path
+
+Today one machine runs the engine, with kit files optionally in private object storage. Phases 2 and 3 are proposed in ADR 0010, and none of it is built.
+
+```mermaid
+flowchart TB
+    subgraph data["Private data plane"]
+        pg[("Postgres<br/>queue, ledger, index")]:::planned
+        s3[("Object storage, SSE-KMS<br/>kit files, renders")]:::partial
+        secrets["Secret manager"]:::planned
+    end
+    subgraph compute["Stateless compute"]
+        api["Review API<br/>authenticated"]:::planned
+        worker["Worker: one job, one container<br/>ffmpeg, CPU only"]:::planned
+    end
+    models["Rented models over HTTPS"]
+    api --> pg
+    worker -->|"claim with SKIP LOCKED"| pg
+    worker <-->|"bundles, bytes"| s3
+    worker --> secrets
+    worker --> models
+
+    classDef partial fill:#fdeec8,stroke:#b7791f,color:#3d2a07
+    classDef planned fill:#e8e8e8,stroke:#777777,color:#333333,stroke-dasharray: 4 3
+```
+
+## Component Diagram
+
+Static view of top-level modules, an arrow wherever one imports another. `just ci-arch` checks that every component has a box here.
+
+```
+ __main__ ──▶ studio_cli ──▶ streams ──▶ consistency ──▶ kits ──▶ blobstore
+    │                                       │  │          │
+    │                                       │  └─▶ kitrules ◀── scripts/check.py
+    │                                       └─▶ providers
+    ├─▶ plan ──────▶ consistency, prompts, providers
+    ├─▶ assets ────▶ consistency, kits, media, config, providers
+    ├─▶ edit ──────▶ config
+    ├─▶ render ────▶ captions, media
+    ├─▶ qa ────────▶ consistency, prompts, media, config, providers, publish
+    ├─▶ publish ───▶ consistency, streams, stock
+    ├─▶ editor ────▶ media, providers
+    ├─▶ intake, stock ──▶ media
+    └─▶ jobfs, config: the foundation, imported throughout
+```
+
+## Components
+
+### __main__
+The command line. Parses arguments and calls a stage. Holds no rules.
+
+### studio_cli
+Commands for kits, streams, canon, schedules, and requests.
+
+### kitrules
+What makes a kit legal. Stdlib only, shared by the engine and `scripts/check.py`.
+
+### kits
+Kit lifecycle: draft, add a file, freeze, bump, load, and verify stored bytes.
+
+### blobstore
+Local cache plus optional S3-compatible durable copy, addressed by hash.
+
+### streams
+Stream records, canon, the schedule packet, and `request`, which turns a stream and a brief into a locked job.
+
+### consistency
+Resolves a stream's kits, builds and verifies the lock, applies the fixed things to each shot and script, and holds `RULES`, the table of how each is enforced.
+
+### prompts
+Loads versioned prompts from `prompts/`.
+
+### plan
+Intent to script. Loads the kits' persona and canon for a stream job.
+
+### assets
+Script to files. Every shot of a stream job carries its references and pinned model.
+
+### edit
+Assets to an edit manifest.
+
+### render
+Edit manifest to a closed op list, then to the file through ffmpeg.
+
+### captions
+Word timings to captions.
+
+### qa
+Automated checks before the human gate, including whether the kit lock held.
+
+### publish
+Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account.
+
+### providers
+The router and vendor adapters. Every model call goes through the router.
+
+### editor
+The footage path: shots, scores, direction, and notes.
+
+### stock
+Free-license footage with credits.
+
+### intake
+Takes a finished file from an outside tool.
+
+### media
+ffmpeg and ffprobe helpers. Commands are argument lists, never shell strings.
+
+### jobfs
+The job folder, schema validation, the ledger, and the private home.
+
+### config
+The model and price table.
 
 ## Cockpit
 
 ```
-just ci ──► check   scripts/check.py           no media blobs in git; every job folder matches the contract
-        ──► eval    check.py --fixtures        evals/contract: pass/ must pass, fail/ must fail
-        ──► lint    scripts/lint_docs.py       engine docs grow no worked example
-        ──► test    pytest                     engine tests, including one full render
+just ci ──► ci-contract  check.py, --fixtures   no media blobs; jobs, kits, streams match the contract
+        ──► ci-lint      ruff, mypy, import rules, gitleaks, opengrep
+        ──► ci-test      pytest with a coverage floor, including one full render
+        ──► ci-docs      lint_docs.py            engine docs grow no worked example
+        ──► ci-arch      every component has a section and a box
 ```
 
 | Plane | Where | Role |
@@ -333,8 +482,8 @@ just ci ──► check   scripts/check.py           no media blobs in git; ever
 | Strategies | `docs/strategies.md` | How a piece gets made and how it can get paid. Subject-agnostic. |
 | Pipeline | `docs/pipeline.md` | Stages from intent to measure. Same spine for every medium. |
 | Contract | `schemas/` | Job, script, assets, edit, render plan, QA, approval, publish log, measure. |
-| Jobs | `jobs/<id>/` | One piece. Copy `jobs/_template`. Subject text stays in that folder only. |
-| Gates | `scripts/check.py`, `scripts/lint_docs.py`, pre-commit, `.github/workflows/ci.yml` | Media stays out of git. Jobs that violate the contract fail. Engine docs stay subject-free. |
+| Jobs, kits, streams | `$KALAINOVA_HOME` | Operator data, in a private directory. This repo is public (ADR 0010). |
+| Gates | `scripts/check.py`, `scripts/lint_docs.py`, pre-commit, `.github/workflows/ci.yaml` | Media stays out of git. Jobs that violate the contract fail. Engine docs stay subject-free. |
 | Decisions | `docs/decisions/` | One ADR per standing rule. |
 | Evals | `evals/contract/` | Contract fixtures run now. The content eval waits for an accepted or measured job. |
 

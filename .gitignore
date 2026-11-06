@@ -23,3 +23,34 @@ __pycache__/
 
 # per-job write lock
 .lock
+
+# chassis stamp (v0.14.1)
+*.py[cod]
+*.egg-info/
+build/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.venv
+.uv/
+.devcontainer/devcontainer-lock.json
+graphify-out/
+.claude/settings.local.json
+.devcontainer/claude-user-settings.json
+
+# kit reference bytes live in a content-addressed store, not in git (ADR 0009)
+store/
+
+!.env.example
+
+# This repo is public. Real work lives in a private $KALAINOVA_HOME (ADR 0010), and these keep a
+# stray local copy out of git if someone runs without it.
+jobs/*
+!jobs/README.md
+!jobs/_template/
+kits/*
+!kits/README.md
+streams/*
+!streams/README.md

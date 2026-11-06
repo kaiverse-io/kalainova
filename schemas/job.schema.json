@@ -170,6 +170,17 @@
     "synthetic_disclosure": {
       "type": "boolean",
       "description": "Publish sets the platform AI label. Default true."
+    },
+    "stream": {
+      "type": "string",
+      "description": "The stream this job belongs to. It then needs kit.lock.json."
+    },
+    "cast": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Character roles from the stream that appear in this job."
     }
   }
 }
