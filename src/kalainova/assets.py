@@ -127,7 +127,10 @@ def run(job: Job, *, force: bool = False) -> dict:
         return a
 
     # --- voice, per beat, then joined ------------------------------------
-    t = 0.0
+    # a film opens on picture and music, and holds after its last word; a reel starts on the words
+    t = float(prof.get("open_sec", 0.0))
+    closing = float(prof.get("close_sec", 0.0))
+    opening_ms = int(t * 1000)
     voice_parts: list[Path] = []
     voice_makers: list[tuple] = []
     pauses: list[float] = []
@@ -174,16 +177,22 @@ def run(job: Job, *, force: bool = False) -> dict:
             t += dur + pauses[-1]
         else:
             t += max(2.0, len(beat["text"].split()) / 2.6)
-        timeline.append({"beat_id": bid, "start_sec": round(start, 3), "end_sec": round(t, 3)})
-    total = round(t, 3)
+        timeline.append(
+            {"beat_id": bid, "start_sec": round(start if n else 0.0, 3), "end_sec": round(t, 3)}
+        )
+    total = round(t + closing, 3)
+    if timeline:
+        timeline[-1]["end_sec"] = total
 
     if voice_parts:
+        pauses[-1] += closing
         # pad each clip with its pause, then concat via the concat filter (no list files, no shell)
         args: list[str] = []
         for part in voice_parts:
             args += ["-i", str(part)]
         filt = "".join(
-            f"[{i}:a]aresample=48000,apad=pad_dur={pauses[i]}[a{i}];"
+            f"[{i}:a]aresample=48000,{f'adelay={opening_ms}:all=1,' if opening_ms and not i else ''}"
+            f"apad=pad_dur={pauses[i]}[a{i}];"
             for i in range(len(voice_parts))
         )
         filt += (

@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
-from kalainova import assets, bar, captions, edit, media, render
+from kalainova import assets, bar, captions, config, edit, media, render
 from kalainova.jobfs import Job
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
@@ -79,6 +79,20 @@ def test_film_master_begins_and_ends_on_black(tmp_path, monkeypatch):
     frames = media.decode_gray(master, width=192)
     assert frames[0].mean() < 20 and frames[-1].mean() < 20
     assert frames[len(frames) // 2].mean() > frames[0].mean()
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_film_opens_on_picture_and_music_and_holds_after_the_last_word(tmp_path, monkeypatch):
+    job = _film_job(tmp_path, monkeypatch)
+    prof = config.profile("film-hd")
+    em = json.loads(job.path("edit_manifest").read_text())
+    cues = em["closed_captions"]
+    assert em["cuts"][0]["start_sec"] == 0  # the picture is there from the first frame
+    assert cues[0]["start_sec"] >= prof["open_sec"]
+    assert media.duration(job.work / "final.master.mov") - cues[-1]["end_sec"] >= prof["close_sec"]
+    voice, _, sr = media.decode_stereo(job.work / "voice.wav")
+    assert abs(voice[: int(sr * (prof["open_sec"] - 0.2))]).max() < 0.001
+    assert abs(voice[int(sr * prof["open_sec"]) : int(sr * (prof["open_sec"] + 2))]).max() > 0.01
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")

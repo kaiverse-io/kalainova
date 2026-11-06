@@ -132,5 +132,5 @@ profiles:
   podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
   story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
-  film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine}
-  film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine}
+  film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
+  film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
