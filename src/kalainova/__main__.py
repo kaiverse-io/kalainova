@@ -8,6 +8,8 @@
   uv run kalainova measure <job>
   uv run kalainova status <job>
   uv run kalainova bar <job or file>   hold it to the studio bar
+  uv run kalainova comic <job>         lay out and letter a comic from comic_script.json
+  uv run kalainova story <job>         typeset a book and an EPUB from story.json
   uv run kalainova providers
   uv run kalainova intake <job> <file> --record <record.json>   a finished file from an outside tool
 
@@ -136,6 +138,19 @@ def _print_bar(report: dict) -> None:
         print(f"studio bar {report['bar']['met']}/{report['bar']['total']}")
 
 
+def _document(a) -> int:
+    from . import comic, story
+
+    job = open_job(a.job)
+    final = (comic if a.cmd == "comic" else story).run(job)
+    report = qa.run(job)
+    for c in report["checks"]:
+        if c["status"] != "pass":
+            print(f"  [{c['status']}] {c['id']}: {c['detail']}")
+    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {final}")
+    return 0 if report["passed"] else 2
+
+
 def _bar(a) -> int:
     """The studio bar for any file or job, so a piece from anywhere can be held to the same numbers."""
     from pathlib import Path
@@ -193,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true", help="snapshot before 48h; does not set views_48h"
     )
     sub.add_parser("status").add_argument("job")
+    sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
+        "job"
+    )
+    sub.add_parser("story", help="typeset a book and an EPUB from story.json").add_argument("job")
     sub.add_parser("bar", help="hold a job or any file to the studio bar").add_argument("target")
     sub.add_parser("providers")
     ig = sub.add_parser("ingest")
@@ -230,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
             return _make(a)
         if a.cmd == "bar":
             return _bar(a)
+        if a.cmd in ("comic", "story"):
+            return _document(a)
         if a.cmd == "stage":
             out = STAGES[a.stage](open_job(a.job), a.force)
             print(out if not isinstance(out, dict) else "ok")

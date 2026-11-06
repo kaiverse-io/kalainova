@@ -43,7 +43,7 @@ def _qa_bound(job: Job, final: Path) -> dict:
         failing = [c["id"] for c in qa["checks"] if c["status"] == "fail"]
         raise ContractError(f"{job.id}: QA failed ({failing}); fix and re-render before approval")
     hashes = qa.get("artifacts_sha256") or {}
-    checked = hashes.get("video") or hashes.get("audio")
+    checked = hashes.get("video") or hashes.get("audio") or hashes.get("document")
     if not checked or checked != sha256_file(final):
         raise ContractError(f"{job.id}: {final.name} is not the file QA checked; run qa again")
     return qa

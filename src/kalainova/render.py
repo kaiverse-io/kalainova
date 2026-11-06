@@ -28,6 +28,7 @@ OPS = (
     "loudnorm",
     "burn_captions",
     "caption_files",
+    "export_audio",
     "export",
 )
 MOTIONS = ("none", "push_in", "push_out", "pan_left", "pan_right", "drift_up")
@@ -119,6 +120,7 @@ SPEC = {
         "captions": "list",
     },
     "caption_files": {"cues": "list", "fps": "num"},
+    "export_audio": {"audio": "path", "master": "path", "delivery": "path", "synthetic": "bool?"},
     "mix_audio": {
         "out": "path",
         "duration_sec": "num",
@@ -220,9 +222,68 @@ def _coerce(op: str, args: dict, n: int) -> dict:
 
 
 # ------------------------------------------------------------------ compile
+def _audio_steps(em: dict, assets: dict, *, original: bool) -> list[dict]:
+    """The mix and its master, shared by a piece with a picture and a piece without one."""
+    prof = em["profile"]
+    a = em.get("audio") or {}
+    mix: dict = {"out": "mix.wav", "duration_sec": em["duration_sec"]}
+    if a.get("voice_asset_id"):
+        mix["voice"] = assets[a["voice_asset_id"]]["path"]
+        mix["voice_chain"] = True
+    elif original:
+        mix["voice"] = "orig.wav"  # the footage's own sound leads; music ducks under it
+        mix["voice_chain"] = bool(em.get("speech"))
+    if a.get("music_asset_id"):
+        mix["music"] = assets[a["music_asset_id"]]["path"]
+        mix["music_gain_db"] = a.get("music_gain_db", -19)
+        mix["duck"] = a.get("duck", True)
+    mix["sfx"] = [
+        {
+            "path": assets[x["asset_id"]]["path"],
+            "start_sec": x["start_sec"],
+            "gain_db": x.get("gain_db", -12),
+        }
+        for x in a.get("sfx", [])
+    ]
+    master = {
+        "input": "mix.wav",
+        "out": "mix.norm.wav",
+        "target_lufs": prof.get("target_lufs", -14),
+        "true_peak_dbtp_max": prof.get("true_peak_dbtp_max", -1),
+    }
+    return [{"op": "mix_audio", "args": mix}, {"op": "loudnorm", "args": master}]
+
+
+def _sound_only_steps(em: dict, assets: dict, synthetic: bool) -> list[dict]:
+    steps = _audio_steps(em, assets, original=False)
+    cues = em.get("closed_captions") or em.get("captions")
+    if cues:  # a transcript at a nominal rate, so a listener who cannot hear still gets the words
+        steps.append({"op": "caption_files", "args": {"cues": cues, "fps": 24.0}})
+    export = {
+        "audio": "mix.norm.wav",
+        "master": "final.wav",
+        "delivery": "final.m4a",
+        "synthetic": synthetic,
+    }
+    return [*steps, {"op": "export_audio", "args": export}]
+
+
 def compile_plan(job: Job) -> dict:
     em = job.read("edit_manifest")
     am = job.read("asset_manifest")
+    if not em.get("cuts"):
+        assets_by_id = {a["id"]: a for a in am["assets"]}
+        synthetic = any(x.get("synthetic") for x in am["assets"])
+        plan = {
+            "schema_version": "0.1",
+            "job_id": em["job_id"],
+            "edit_manifest_sha256": hashlib.sha256(
+                job.path("edit_manifest").read_bytes()
+            ).hexdigest(),
+            "steps": _sound_only_steps(em, assets_by_id, synthetic),
+        }
+        job.write("render_plan", plan)
+        return plan
     assets = {a["id"]: a for a in am["assets"]}
     prof = em["profile"]
     W, H, FPS = prof["width"], prof["height"], prof["fps"]
@@ -367,39 +428,8 @@ def compile_plan(job: Job) -> dict:
         video = "picture.cap.mp4"
 
     audio = None
-    a = em.get("audio") or {}
-    if a or orig:
-        mix = {"out": "mix.wav", "duration_sec": em["duration_sec"]}
-        if a.get("voice_asset_id"):
-            mix["voice"] = assets[a["voice_asset_id"]]["path"]
-            mix["voice_chain"] = True
-        elif orig:
-            mix["voice"] = "orig.wav"  # the footage's own sound leads; music ducks under it
-            mix["voice_chain"] = bool(em.get("speech"))
-        if a.get("music_asset_id"):
-            mix["music"] = assets[a["music_asset_id"]]["path"]
-            mix["music_gain_db"] = a.get("music_gain_db", -19)
-            mix["duck"] = a.get("duck", True)
-        mix["sfx"] = [
-            {
-                "path": assets[x["asset_id"]]["path"],
-                "start_sec": x["start_sec"],
-                "gain_db": x.get("gain_db", -12),
-            }
-            for x in a.get("sfx", [])
-        ]
-        steps.append({"op": "mix_audio", "args": mix})
-        steps.append(
-            {
-                "op": "loudnorm",
-                "args": {
-                    "input": "mix.wav",
-                    "out": "mix.norm.wav",
-                    "target_lufs": prof.get("target_lufs", -14),
-                    "true_peak_dbtp_max": prof.get("true_peak_dbtp_max", -1),
-                },
-            }
-        )
+    if em.get("audio") or orig:
+        steps += _audio_steps(em, assets, original=orig)
         audio = "mix.norm.wav"
 
     steps.append(
@@ -478,7 +508,7 @@ def execute(job: Job, plan: dict | None = None) -> Path:
         if op not in OPS:
             raise ContractError(f"step {n}: op {op!r} not allowed")
         globals()[f"_op_{op}"](work, _coerce(op, a if isinstance(a, dict) else {}, n))
-    out = work / "final.mp4"
+    out = work / "final.mp4" if "video" in job.job.get("media", []) else job.artifact()
     (work / "render.done.json").write_text(
         json.dumps(
             {"plan_sha256": hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()}
@@ -888,6 +918,14 @@ def _write_master(work: Path, a: dict, vf: list[str], af: list[str], note: str) 
             str(_safe(work, a["master"])),
         ]
     )
+
+
+def _op_export_audio(work: Path, a: dict) -> None:
+    source = str(_safe(work, a["audio"]))
+    note = "Made with Kalainova; contains AI-generated media" if a.get("synthetic", True) else ""
+    tag = ["-metadata", f"comment={note}"] if note else []
+    media.run(["-i", source, "-c:a", "pcm_s24le", *tag, str(_safe(work, a["master"]))])
+    media.run(["-i", source, "-c:a", "aac", "-b:a", "256k", *tag, str(_safe(work, a["delivery"]))])
 
 
 def _op_export(work: Path, a: dict) -> None:

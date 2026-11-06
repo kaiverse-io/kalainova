@@ -32,6 +32,7 @@
               "loudnorm",
               "burn_captions",
               "caption_files",
+              "export_audio",
               "export"
             ]
           },

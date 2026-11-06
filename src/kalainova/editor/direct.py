@@ -29,6 +29,7 @@ BEAT_PHRASE = {
     "cinematic": [8, 8, 4, 12, 8],
 }
 MIN_QUALITY = 0.45
+MAX_ENLARGE = 2.0  # past this, a source reads as soft on any good screen
 SIMILAR_MIN_CORR = 0.9  # shots this alike read as the same shot twice
 # Pauses in speech: leave short ones, shorten long ones, and never leave a sliver between two cuts.
 MIN_PAUSE_TO_CUT_SEC = 0.9
@@ -130,12 +131,30 @@ def _looks_like(a: list[float], b: list[float]) -> bool:
     return float(np.corrcoef(x, y)[0, 1]) >= SIMILAR_MIN_CORR
 
 
-def next_moment(pool: list[dict], used: list[list[float]], last_source: str | None) -> dict | None:
-    """The next moment unlike anything used. None means the footage has run out of new shots."""
+def next_moment(
+    pool: list[dict],
+    used: list[list[float]],
+    last_source: str | None,
+    *,
+    usage: dict[str, int] | None = None,
+    need: float = 0.0,
+) -> dict | None:
+    """The next moment unlike anything used. None means the footage has run out of new shots.
+
+    It leans to the source used least, so two clips never just trade turns, and to a shot long enough
+    for the length the rhythm wants, so the rhythm survives contact with the footage.
+    """
     fresh = [m for m in pool if not any(_looks_like(m["shot"].get("sig", []), sig) for sig in used)]
     if not fresh:
         return None
-    return next((m for m in fresh if m["shot"]["source"] != last_source), fresh[0])
+    counts = usage or {}
+
+    def rank(m: dict) -> tuple[bool, bool, int]:
+        shot = m["shot"]
+        span = shot.get("out_sec", 0) - shot.get("in_sec", 0)
+        return (span < need, shot["source"] == last_source, counts.get(shot["source"], 0))
+
+    return min(fresh, key=rank)
 
 
 def speech_keeps(silences: list[tuple[float, float]], duration: float) -> list[tuple[float, float]]:
@@ -227,41 +246,26 @@ def _reel(job: Job, footage: dict, s: dict) -> tuple[list, list, dict, list, flo
     period = 60 / grid["bpm"] if grid else 0.5
     # at a fast tempo every beat is too quick to read a picture, so count in twos
     tempo_factor = 2 if s["pace"] == "fast" and period < 0.42 else 1
-    shot_len = min(max(beats_for(s["pace"], 0) * tempo_factor * period, 0.8), 6.0)
     beat_times = grid["beats"] if grid else [i * period for i in range(int(target / period) + 2)]
 
-    # a pool of distinct moments: every usable shot offers non-overlapping windows of one shot length
-    pool: list[dict] = []
-    for rank, shot in enumerate(ordered):
-        if shot["kind"] == "still":
-            pool.append({"shot": shot, "rank": rank, "take": 0, "a": 0.0})
-            continue
-        span = shot["out_sec"] - shot["in_sec"]
-        n_win = max(1, int(span // max(shot_len, 0.8)))
-        for w in range(n_win):
-            pool.append(
-                {
-                    "shot": shot,
-                    "rank": rank,
-                    "take": w,
-                    "a": shot["in_sec"] + w * span / n_win,
-                    "b": shot["in_sec"] + (w + 1) * span / n_win,
-                }
-            )
-    # story order first: each shot's best moment in shot order, then second moments, and so on
-    pool.sort(key=lambda m: (m["take"], m["rank"]))
+    # one moment per shot, in story order: the window inside it is chosen once its length is known
+    pool: list[dict] = [
+        {"shot": shot, "a": shot["in_sec"], "b": shot["out_sec"]} for shot in ordered
+    ]
 
     cuts, t, i, last_src = [], 0.0, 0, None
     used_looks: list[list[float]] = []
+    usage: dict[str, int] = {}
     first_beat = next((b for b in beat_times if b > 0.05), 0.0) if beat_times else 0.0
     while t < target - 0.4 and pool:
-        pick = next_moment(pool, used_looks, last_src)
+        shot_len = min(max(beats_for(s["pace"], i) * tempo_factor * period, 0.8), 8.0)
+        pick = next_moment(pool, used_looks, last_src, usage=usage, need=shot_len)
         if pick is None:  # no new picture left, and the note below tells the operator
             break
         pool.remove(pick)
         shot = pick["shot"]
         used_looks.append(shot.get("sig", []))
-        shot_len = min(max(beats_for(s["pace"], i) * tempo_factor * period, 0.8), 8.0)
+        usage[shot["source"]] = usage.get(shot["source"], 0) + 1
         want = t + shot_len if i else max(first_beat + shot_len, shot_len)
         end = min(
             (b for b in beat_times if b >= want - period * 0.5),
@@ -370,6 +374,20 @@ def _long(job: Job, footage: dict, s: dict) -> tuple[list, list, dict, list, flo
         music, _ = _gen_music(job, s["music"], min(t + 1, 600))
         extra.append(music)
     return cuts, extra, {}, [], round(t, 3)
+
+
+def _too_small(cuts: list[dict], sources: dict, prof: dict) -> list[str]:
+    """Sources this edit has to enlarge past what still looks sharp, named for the operator."""
+    found = set()
+    for cut in cuts:
+        src = sources[cut["source"]]
+        fit = max(
+            prof["width"] / max(src.get("width", 1), 1),
+            prof["height"] / max(src.get("height", 1), 1),
+        )
+        if fit > MAX_ENLARGE:
+            found.add(src["name"])
+    return sorted(found)
 
 
 def _credits(job: Job) -> str:
@@ -486,16 +504,21 @@ def run(job: Job) -> dict:
     if grid:
         em["beat_grid"] = {"bpm": grid["bpm"], "confidence": grid["confidence"]}
     job.write("edit_manifest", em)
-    note = None
+    notes = []
     if total < s["duration_sec"] - 1:
-        note = (
+        notes.append(
             f"footage supports {total:.1f}s of distinct moments at this pace (asked {s['duration_sec']:.0f}s); "
-            "add clips, choose a slower pace, or allow repeats"
+            "add clips or choose a slower pace"
+        )
+    tiny = _too_small(cuts, sources, prof)
+    if tiny:
+        notes.append(
+            f"sources too small for {prof['width']}x{prof['height']}: {tiny}. No edit can hide that"
         )
     return {
         "settings": s,
         "cuts": len(cuts),
         "duration_sec": total,
         "bpm": grid.get("bpm") if grid else None,
-        "note": note,
+        "note": "; ".join(notes) or None,
     }

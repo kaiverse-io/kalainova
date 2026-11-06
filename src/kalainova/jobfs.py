@@ -33,11 +33,14 @@ CONTRACT_FILES = {
     "publish_log": "publish_log.json",
     "measure": "measure.json",
     "kit_lock": "kit.lock.json",
+    "comic_script": "comic_script.json",
+    "story": "story.json",
 }
 
 
 RENDER_STAMP = "render_stamp.json"
 AUDIO_SUFFIXES = (".wav", ".m4a", ".mp3", ".flac")
+DOCUMENT_MEDIA = ("comic", "story")
 
 
 class ContractError(RuntimeError):
@@ -110,8 +113,11 @@ class Job:
     def artifact(self) -> Path:
         """The file this job delivers. A job with video always delivers final.mp4, so a stray audio file
         cannot stand in for it."""
-        if "video" in self.job.get("media", []):
+        kinds = self.job.get("media", [])
+        if "video" in kinds:
             return self.work / "final.mp4"
+        if any(kind in kinds for kind in DOCUMENT_MEDIA):
+            return self.work / "final.pdf"
         for suffix in AUDIO_SUFFIXES:
             path = self.work / f"final{suffix}"
             if path.exists():

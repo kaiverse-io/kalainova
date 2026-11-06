@@ -41,7 +41,9 @@
           "video",
           "audio",
           "still",
-          "text"
+          "text",
+          "comic",
+          "story"
         ]
       }
     },

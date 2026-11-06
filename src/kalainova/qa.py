@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from . import bar, config, consistency, media, prompts
-from .jobfs import ContractError, CostCapExceeded, Job
+from .jobfs import DOCUMENT_MEDIA, ContractError, CostCapExceeded, Job
 from .providers import router
 
 
@@ -178,8 +178,38 @@ def run_file(job: Job) -> dict:
     return report
 
 
+def run_document(job: Job) -> dict:
+    """A comic or a book: its own checks, bound to the exact file like any other piece."""
+    from . import comic, story
+    from .publish import sha256_file
+
+    data, final = job.job, job.artifact()
+    made_for = comic if "comic" in data.get("media", []) else story
+    checks = made_for.checks(job) if final.exists() else []
+    _check(checks, "render.exists", final.exists(), final.name)
+    manifest = job.read("asset_manifest")
+    _check(
+        checks,
+        "rights.assets",
+        all(a.get("rights") in ("owned", "licensed", "funded-brief") for a in manifest["assets"]),
+        "every asset carries rights",
+    )
+    report = {
+        "schema_version": "0.1",
+        "job_id": data["job_id"],
+        "passed": all(c["status"] != "fail" for c in checks),
+        "checks": checks,
+        "artifacts": {"document": final.name},
+        "artifacts_sha256": {"document": sha256_file(final)} if final.exists() else {},
+    }
+    job.write("qa", report)
+    return report
+
+
 def run(job: Job) -> dict:
-    if not job.has("edit_manifest"):
+    if any(kind in job.job.get("media", []) for kind in DOCUMENT_MEDIA):
+        return run_document(job)
+    if not job.has("edit_manifest") or not job.read("edit_manifest").get("cuts"):
         return run_file(job)
     data = job.job
     em = job.read("edit_manifest")

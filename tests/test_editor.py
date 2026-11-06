@@ -151,3 +151,71 @@ def test_a_sliver_of_speech_between_two_pauses_is_not_left_on_its_own():
     keep = direct.speech_keeps([(4.0, 6.0), (6.4, 9.0)], 15.0)
     assert all(b - a >= 1.5 for a, b in keep)
     assert keep[0][0] == 0.0 and keep[-1][1] == 15.0
+
+
+def _shot(sig, source="s1", span=20.0):
+    return {
+        "shot": {"source": source, "sig": sig, "in_sec": 0.0, "out_sec": span},
+        "a": 0.0,
+        "b": span,
+    }
+
+
+def test_a_shot_long_enough_for_the_beat_is_preferred():
+    from kalainova.editor import direct
+
+    short = _shot([1.0, 2.0, 3.0, 4.0], "s1", span=1.0)
+    long = _shot([4.0, 1.0, 3.0, 2.0], "s2", span=9.0)
+    assert direct.next_moment([short, long], used=[], last_source=None, need=4.0) is long
+    assert direct.next_moment([short], used=[], last_source=None, need=4.0) is short
+
+
+def test_the_least_used_source_goes_next_so_two_clips_do_not_trade_turns():
+    from kalainova.editor import direct
+
+    a, b, c = (
+        _shot([1.0, 2.0, 3.0, 4.0], "a"),
+        _shot([4.0, 1.0, 3.0, 2.0], "b"),
+        _shot([2.0, 4.0, 1.0, 3.0], "c"),
+    )
+    picked = direct.next_moment([a, b, c], used=[], last_source="z", usage={"a": 3, "b": 3, "c": 1})
+    assert picked is c
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_reel_cuts_in_a_phrase_and_warns_about_tiny_sources(tmp_path, monkeypatch):
+    from footage_fixtures import clip
+
+    from kalainova.editor import analyze, direct
+    from kalainova.jobfs import Job
+
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    for k in ("ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "FAL_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    src = tmp_path / "in"
+    src.mkdir()
+    files = [clip(src / f"{i}.mp4", i + 10, dur=8, size=(320, 180)) for i in range(8)]
+    folder = tmp_path / "jobs" / "ph"
+    folder.mkdir(parents=True)
+    (folder / "job.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "job_id": "ph",
+                "strategy": "owned-derivative",
+                "media": ["video", "audio"],
+                "rights": "owned",
+                "distribution_identity": "owned",
+                "status": "draft",
+            }
+        )
+    )
+    job = Job(folder)
+    analyze.ingest(job, files)
+    direct.add_note(job, "12s reel, fast cuts")
+    info = direct.run(job)
+    em = job.read("edit_manifest")
+    starts = [c["start_sec"] for c in em["cuts"]] + [em["duration_sec"]]
+    lengths = [round(b - a, 1) for a, b in zip(starts, starts[1:])]
+    assert max(lengths) >= min(lengths) * 1.6, lengths
+    assert "too small" in (info["note"] or "")
