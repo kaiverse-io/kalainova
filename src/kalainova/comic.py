@@ -40,6 +40,8 @@ BALLOON_RULE = 5
 INSET = 18
 OVERSAMPLE = 2
 EXPONENT = 2.6  # between an ellipse and a rectangle, which holds lettered text well
+TAIL_REACH = 0.7  # past the balloon's edge, as a share of its height
+TAIL_SHARE = 0.6  # of the way to a speaker who is close
 
 
 @dataclass(frozen=True)
@@ -195,6 +197,20 @@ def _superellipse(cx: float, cy: float, a: float, b: float) -> list[tuple[float,
     return points
 
 
+def tail_tip(spot: Rect, speaker: tuple[float, float]) -> tuple[float, float] | None:
+    """Where a tail ends: toward the speaker and well short, so it never lands on their face."""
+    cx, cy = spot.x + spot.w / 2, spot.y + spot.h / 2
+    dx, dy = speaker[0] - cx, speaker[1] - cy
+    if abs(dx) <= spot.w / 2 and abs(dy) <= spot.h / 2:
+        return None
+    distance = math.hypot(dx, dy)
+    to_edge = distance * min(
+        spot.w / 2 / abs(dx) if dx else math.inf, spot.h / 2 / abs(dy) if dy else math.inf
+    )
+    length = to_edge + min(spot.h * TAIL_REACH, (distance - to_edge) * TAIL_SHARE)
+    return cx + dx / distance * length, cy + dy / distance * length
+
+
 def _balloon_shapes(spot: Rect, tip: tuple[float, float] | None) -> list[list[tuple[float, float]]]:
     cx, cy = spot.x + spot.w / 2, spot.y + spot.h / 2
     shapes = [_superellipse(cx, cy, spot.w / 2, spot.h / 2)]
@@ -283,7 +299,7 @@ def _letter_panel(page: Image.Image, panel: Rect, lines: list[dict[str, Any]]) -
         spot = place(art, panel, w, h, taken=taken)
         at = line.get("speaker_at")
         tip = (
-            (panel.x + at[0] * panel.w, panel.y + at[1] * panel.h)
+            tail_tip(spot, (panel.x + at[0] * panel.w, panel.y + at[1] * panel.h))
             if at and kind == "speech"
             else None
         )

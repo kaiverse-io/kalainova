@@ -54,6 +54,24 @@ def test_a_balloon_goes_where_the_art_is_calm_and_avoids_other_balloons():
     assert not comic.overlaps(spot, second)
 
 
+def test_a_balloon_tail_points_at_the_speaker_and_stops_well_short_of_their_face():
+    balloon = comic.Rect(100, 0, 200, 80)
+    tip = comic.tail_tip(balloon, (200, 600))
+    assert tip[0] == 200  # straight toward the speaker
+    assert balloon.y + balloon.h < tip[1] <= balloon.y + balloon.h * 1.75
+
+
+def test_a_balloon_tail_never_reaches_a_speaker_close_to_the_balloon():
+    balloon = comic.Rect(100, 0, 200, 80)
+    tip = comic.tail_tip(balloon, (200, 100))
+    assert balloon.y + balloon.h < tip[1] < 100
+
+
+def test_a_balloon_over_its_speaker_has_no_tail():
+    balloon = comic.Rect(100, 0, 200, 80)
+    assert comic.tail_tip(balloon, (200, 40)) is None
+
+
 def test_too_many_words_for_a_panel_is_refused_rather_than_shrunk_past_reading():
     words = "word " * 400
     with pytest.raises(ContractError, match="too much text"):
