@@ -182,6 +182,8 @@ def test_approve_and_publish_are_bound_to_qa_bytes(tmp_path, monkeypatch):
 def _manifest(job, *assets):
     job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id,
                                  "assets": [{"kind": "audio", "path": "x.wav", **a} for a in assets]})
+    if (job.work / "final.mp4").exists():
+        render.stamp(job, job.work / "final.mp4")
 
 
 def _qa_passed(job):
@@ -232,6 +234,30 @@ def test_approve_accepts_paid_and_operator_assets(tmp_path, monkeypatch):
     _manifest(job, {"id": "voice", "provider": "paid", "model": "m"}, {"id": "clip", "provider": "operator"})
     assert publish.approve(job, "human", platforms=["youtube"])["reviewer"] == "human"
     assert job.job["status"] == "approved"
+
+
+def test_approve_refuses_a_record_swapped_after_the_render(tmp_path, monkeypatch):
+    from kalainova import publish
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = _job(tmp_path, cap=1)
+    _qa_passed(job)
+    _manifest(job, {"id": "voice", "provider": "paid", "model": "m"})
+    job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id, "assets": [
+        {"kind": "audio", "path": "x.wav", "id": "voice", "provider": "paid", "model": "other"}]})
+    with pytest.raises(ContractError, match="not rendered from"):
+        publish.approve(job, "human", platforms=["youtube"])
+    assert not job.has("approval")
+
+
+def test_approve_refuses_a_file_with_no_render_record(tmp_path, monkeypatch):
+    from kalainova import publish
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = _job(tmp_path, cap=1)
+    _qa_passed(job)
+    job.write("asset_manifest", {"schema_version": "0.1", "job_id": job.id, "assets": [
+        {"kind": "audio", "path": "x.wav", "id": "voice", "provider": "paid", "model": "m"}]})
+    with pytest.raises(ContractError, match="not rendered from"):
+        publish.approve(job, "human", platforms=["youtube"])
 
 
 def test_publish_refuses_an_approval_written_for_a_placeholder(tmp_path, monkeypatch):

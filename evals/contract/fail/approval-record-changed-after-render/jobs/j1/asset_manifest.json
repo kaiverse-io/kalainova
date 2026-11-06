@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1",
+  "job_id": "j1",
+  "assets": [
+    {
+      "id": "a1",
+      "kind": "audio",
+      "role": "voice",
+      "path": "voice.wav",
+      "provider": "p",
+      "model": "swapped"
+    }
+  ],
+  "duration_sec": 1
+}

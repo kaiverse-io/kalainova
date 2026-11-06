@@ -27,6 +27,9 @@ CONTRACT_FILES = {
 }
 
 
+RENDER_STAMP = "render_stamp.json"
+
+
 class ContractError(RuntimeError):
     pass
 
@@ -90,6 +93,13 @@ class Job:
         path = self.path(name)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
         return path
+
+    def write_stamp(self, data: dict) -> None:
+        (self.folder / RENDER_STAMP).write_text(json.dumps(data, indent=2) + "\n")
+
+    def read_stamp(self) -> dict | None:
+        path = self.folder / RENDER_STAMP
+        return json.loads(path.read_text()) if path.exists() else None
 
     @property
     def job(self) -> dict:

@@ -11,6 +11,7 @@ The gate cannot tell you a piece is good, true, paid, or published. It rejects m
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -273,6 +274,11 @@ def check_approval(path: Path, data: dict) -> None:
         a.get("provider") == "local" or a.get("model") in LOCAL_MODELS or str(a.get("model", "")).startswith("flite-"))]
     if local:
         fail(f"{rel(path)}: approval of a placeholder; the local provider made {local}")
+    stamp_path = path.parent / "render_stamp.json"
+    stamp = load(stamp_path) if stamp_path.exists() else {}
+    manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    if stamp.get("asset_manifest_sha256") != manifest_sha or stamp.get("video_sha256") != checked:
+        fail(f"{rel(path)}: approved file was not rendered from this asset_manifest.json")
 
 
 # ------------------------------------------------------------------ a jobs tree
