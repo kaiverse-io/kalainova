@@ -66,6 +66,15 @@ Web profiles deliver H.264 with BT.709 tags. The `film-hd` and `film-uhd` profil
 
 Captions leave the picture on film profiles and ship as SRT, WebVTT, and iTunes Timed Text files.
 
+## Comics and books
+
+| Reading | What it catches |
+|---|---|
+| `comic.lettering_size` | Lettering below 7.5 pt, which is hard to read in print |
+| `story.epub` | An EPUB container a reader would reject |
+
+Art for a comic or a cover is requested with no words in it, because models garble text. A human reads every page.
+
 ## Known gaps
 
 - Stereo only. An honest 5.1 needs a real multichannel mix, and an upmix from stereo does not count.

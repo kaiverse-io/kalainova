@@ -329,6 +329,9 @@ These change only with a version bump. A new interface waits for a second real u
 | A kit cannot prove a face is not a real person's | A human attests at freeze and approves each piece; the vision judge is one more signal |
 | Rendered files and job records are on one machine | Only kit files can reach object storage today (ADR 0010) |
 | QA does not predict the operator's verdict | A file can pass QA and the bar and still be rejected on review. The bar measures craft defects, not taste |
+| A book PDF is page images | The EPUB holds live text; the PDF's text cannot be selected |
+| No publisher takes a comic or a book | They can be approved but not posted |
+| Comic and story scripts have no LLM planner yet | An agent or a person writes the script |
 | Stereo only | No 5.1 or 7.1 mix, and an upmix from stereo is not an honest substitute |
 | SDR only | No HDR master |
 
@@ -394,8 +397,10 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ assets ────▶ consistency, kits, media, config, providers
     ├─▶ edit ──────▶ config
     ├─▶ render ────▶ captions, look, motion, media
-    ├─▶ qa ────────▶ bar, consistency, prompts, media, config, providers, publish
+    ├─▶ qa ────────▶ bar, comic, story, consistency, prompts, media, config, providers, publish
     ├─▶ bar ───────▶ media, config
+    ├─▶ comic ─────▶ assets, captions, consistency, render, providers
+    ├─▶ story ─────▶ comic, captions, render, providers
     ├─▶ publish ───▶ consistency, streams, stock
     ├─▶ editor ────▶ media, providers
     ├─▶ intake, stock ──▶ media
@@ -448,6 +453,12 @@ The grade as data: one 3D LUT path for stills and footage, with skin protected a
 
 ### motion
 The camera on a still: sub-pixel sampling at one steady rate. Frames go to ffmpeg as 16-bit RGB.
+
+### comic
+A comic script to pages, a print PDF, a CBZ, and a phone scroll. Models never letter: art is generated with no words, and the engine lays out each page, places balloons where the art is calm, and letters them. Kit references travel with every panel.
+
+### story
+A story to a typeset book and a real EPUB with live text.
 
 ### bar
 The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels and samples, plus the readers that apply them to a job, any file, or a delivery master. Limits live in `config/studio.yaml`. It informs the human gate, and only an objective defect blocks.
