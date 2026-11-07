@@ -148,3 +148,83 @@ def test_a_prompt_past_what_the_model_reads_is_flagged():
 def test_the_limit_is_the_tightest_among_the_providers_a_call_could_reach():
     assert shots.word_limit(["mac"]) == 80
     assert shots.word_limit(["fal"]) is None
+
+
+def test_a_still_with_no_cue_falls_back_to_the_line():
+    assert shots.still_prompt(_packet(), _beat(), STYLE).startswith("A line.")
+
+
+def test_a_prompt_of_exactly_the_limit_is_left_alone():
+    text = "one two three four five"
+    assert shots._fit(text, 5) == text
+
+
+def test_a_long_prompt_ends_on_its_last_whole_sentence():
+    text = "One two three four. Five six seven eight nine ten"
+    assert shots._fit(text, 6) == "One two three four."
+
+
+def test_a_sentence_ending_too_early_is_not_where_a_long_prompt_stops():
+    text = "One. Two three four five six seven"
+    assert shots._fit(text, 5) == "One. Two three four five."
+
+
+def test_little_words_do_not_make_two_cues_alike():
+    first = _beat(visual_cue="the and for but not sea")
+    second = _beat(visual_cue="the and for but not sky")
+    assert not shots._alike(first, second)
+
+
+def test_shots_with_no_cue_are_not_alike():
+    assert not shots._alike(_beat(), _beat())
+
+
+def _cue(words):
+    return _beat(visual_cue=" ".join(words))
+
+
+SHARED = ["alpha", "bravo", "charlie", "delta", "foxtrot", "golf", "hotel"]
+
+
+def test_cues_sharing_just_enough_of_their_words_are_alike():
+    first = _cue([*SHARED, "india", "juliet"])
+    second = _cue([*SHARED, "kilo"])
+    assert shots._alike(first, second), "seven words of ten is exactly the limit"
+
+
+def test_cues_sharing_some_of_their_words_are_two_pictures():
+    assert not shots._alike(
+        _cue(["alpha", "bravo", "charlie", "delta"]), _cue(["alpha", "bravo", "charlie", "echo"])
+    )
+
+
+def test_a_name_the_block_describes_is_not_flagged():
+    packet = _packet(_beat(cast=["walker"]), continuity={"people": {"walker": COAT}})
+    assert "plan.continuity" not in _found(packet)
+
+
+def test_sizes_that_alternate_are_not_a_run():
+    sizes = ["wide", "close", "wide", "close"]
+    beats = [_beat(id=f"b{n}", shot={"size": s}) for n, s in enumerate(sizes)]
+    assert "plan.shot_sizes" not in _found(_packet(*beats))
+
+
+def test_exactly_enough_shots_of_one_size_make_a_run():
+    beats = [_beat(id=f"b{n}", shot={"size": "wide"}) for n in range(shots.SAME_SIZE_RUN)]
+    assert "plan.shot_sizes" in _found(_packet(*beats))
+
+
+def test_a_shot_is_not_compared_with_itself():
+    assert "plan.repetition" not in _found(_packet(_beat(visual_cue="Waves rolling at dusk")))
+
+
+def test_a_first_shot_that_does_not_continue_anything_is_fine():
+    assert "plan.continues" not in _found(_packet(_beat()))
+    assert "plan.continues" in _found(_packet(_beat(continues=True)))
+
+
+def test_a_long_first_frame_does_not_count_against_the_motion_a_clip_reads():
+    long_picture = " ".join(["word"] * 50)
+    beat = _beat(visual_kind="video", shot={"action": "She runs.", "first_frame": long_picture})
+    found = {p["id"] for p in shots.review(_packet(beat), budget=9, limit=20, style=STYLE)}
+    assert "plan.prompt_length" not in found
