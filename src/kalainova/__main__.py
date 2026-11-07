@@ -95,7 +95,7 @@ def _make(a) -> int:
     for c in report["checks"]:
         if c["status"] != "pass":
             print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.work / 'final.mp4'}")
+    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.artifact()}")
     _print_bar(report)
     print(f"spent {job.spent():.4f} of cap {job.job.get('cost_cap')}")
     return 0 if report["passed"] else 2
@@ -128,7 +128,7 @@ def _render_edit(job) -> int:
     for c in report["checks"]:
         if c["status"] != "pass":
             print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.work / 'final.mp4'}")
+    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.artifact()}")
     _print_bar(report)
     return 0 if report["passed"] else 2
 

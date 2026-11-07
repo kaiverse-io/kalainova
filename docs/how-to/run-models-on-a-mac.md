@@ -25,12 +25,14 @@ Model ids are under `models.mac` in `config/studio.yaml`. A job asks for moving 
 
 ## What to expect
 
-| Work | Measured | Peak memory |
-|---|---|---|
-| A still, about 1080p | 1.5 min | Small |
-| A voice line, with timing | Under 30 s | Small |
-| Music | About 4 min | About 14 GB |
-| A 6.4 s moving shot at 1472x832 | 14 min | 48 GB |
+| Work | Measured |
+|---|---|
+| A still, about 1080p | 1.5 min |
+| A voice line, with timing | 6 s |
+| Music | About 2 min, for about 25 s of music |
+| A moving shot at 1472x832 | About 6 s per frame, so 14 min for 6.4 s of picture, with a 48 GB memory peak |
+
+The music model can stop before the length it was asked for, usually after 20 to 30 seconds. The engine loops a short bed with crossfades, so listen for the repeat on anything longer.
 
 - **One model at a time.** Each call takes a lock on the GPU, so jobs queue instead of fighting for memory. Keep other large programs closed during motion.
 - **The machine stays awake** for each call. Run it on mains power.
