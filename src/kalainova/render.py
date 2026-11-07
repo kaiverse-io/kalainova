@@ -9,34 +9,74 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
+import numpy as np
+
+from . import bar, look, media, motion
 from . import captions as ass
-from . import media
 from .jobfs import ContractError, Job
 
-OPS = ("cut", "scale", "concat", "overlay_text", "mix_audio", "loudnorm", "burn_captions", "export")
+OPS = (
+    "still",
+    "cut",
+    "scale",
+    "concat",
+    "overlay_text",
+    "mix_audio",
+    "loudnorm",
+    "burn_captions",
+    "caption_files",
+    "export_audio",
+    "export",
+)
 MOTIONS = ("none", "push_in", "push_out", "pan_left", "pan_right", "drift_up")
 PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")
-GRADES = ("natural", "warm", "cool", "teal_orange", "film", "bw", "vivid")
-# Grade looks: gentle, filmic, never crushed. Each is a fixed filter string; no value from a plan enters it.
-GRADE_FILTERS = {
-    "natural": "eq=contrast=1.04:saturation=1.06",
-    "warm": "colorbalance=rs=0.04:gs=0.01:bs=-0.05:rm=0.03:bm=-0.03:rh=0.02:bh=-0.03,eq=contrast=1.05:saturation=1.08",
-    "cool": "colorbalance=rs=-0.03:bs=0.05:rm=-0.02:bm=0.03,eq=contrast=1.05:saturation=0.98",
-    "teal_orange": "colorbalance=rs=-0.06:gs=0.0:bs=0.08:rh=0.07:gh=0.02:bh=-0.06,eq=contrast=1.08:saturation=1.1",
-    "film": "curves=m='0/0.035 0.25/0.22 0.5/0.5 0.75/0.78 1/0.96',eq=saturation=0.92,noise=alls=5:allf=t",
-    "bw": "hue=s=0,eq=contrast=1.12,curves=m='0/0.02 0.5/0.5 1/0.97'",
-    "vivid": "eq=contrast=1.08:saturation=1.22,unsharp=5:5:0.4",
-}
+GRADES = tuple(look.LOOKS)
+
+# The sound of a finished voice: rumble out, sibilance tamed, mud eased, presence and air lifted, level
+# held. Fixed strings, so no value from a plan enters them.
+VOICE_CHAIN = (
+    "highpass=f=75,deesser=i=0.4:m=0.5:f=0.5,equalizer=f=220:t=q:w=1.2:g=-1.5,"
+    "equalizer=f=3000:t=q:w=1.5:g=1.5,equalizer=f=9500:t=h:w=2000:g=1,"
+    "acompressor=threshold=-22dB:ratio=2.5:attack=6:release=120:makeup=3dB,"
+    "alimiter=limit=0.9:attack=2:release=50:level=disabled"
+)
+MUSIC_POCKET = "equalizer=f=2800:t=q:w=1.4:g=-3"  # a space in the music for the words to sit in
+DUCK = "sidechaincompress=threshold=0.05:ratio=3:attack=25:release=450:makeup=1"  # gently: 5 dB
+# A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
+ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
+MUSIC_FADE_SEC = 2.5
+MUSIC_CLEAN = "highpass=f=25"  # generated music can carry DC and rumble nobody can hear
+# Video usually arrives in 8 bits, which leaves contours in skies. This smooths them at high precision.
+DEBAND_VIDEO = "format=yuv444p16le,deband=1thr=0.012:2thr=0.012:3thr=0.012:range=20:blur=1"
+SHARPEN_ENLARGED = "cas=strength=0.3"
+# Against the voice where it speaks, before ducking. On real speech it lands 15 dB under the words.
+MUSIC_UNDER_VOICE_DB = -10.0
+DUCK_KEY_LUFS = -27.0  # where the ducker hears the voice, so it ducks the same for any voice
+SAMPLE_WIDTH, SAMPLE_FPS = 270, 2.0
+TITLE_HOLD_SEC = 3.0
 
 # Closed arg spec per op. Every value is coerced to its type before it reaches ffmpeg, so a
 # model-written plan cannot smuggle filtergraph text through a number. Text (titles, captions)
 # only ever goes into .ass files, never into a filtergraph.
 SPEC = {
+    "still": {
+        "source": "path",
+        "out": "path",
+        "width": "int",
+        "height": "int",
+        "fps": "num",
+        "duration_sec": "num",
+        "motion": MOTIONS,
+        "crop_x": "num?",
+        "grade": GRADES + (None,),
+        "gamma": "num?",
+    },
     "cut": {
         "source": "path",
-        "kind": ("still", "video"),
+        "kind": ("video",),
         "in_sec": "num",
         "out_sec": "num",
         "fps": "num",
@@ -52,10 +92,9 @@ SPEC = {
         "width": "int",
         "height": "int",
         "fps": "num",
-        "motion": MOTIONS,
         "duration_sec": "num",
-        "intensity": "num?",
         "crop_x": "num?",
+        "picture_box": "box?",
         "zoom": "num?",
         "grade": GRADES + (None,),
         "gamma": "num?",
@@ -88,10 +127,13 @@ SPEC = {
         "style": ("studio", "kinetic", "plain"),
         "captions": "list",
     },
+    "caption_files": {"cues": "list", "fps": "num"},
+    "export_audio": {"audio": "path", "master": "path", "delivery": "path", "synthetic": "bool?"},
     "mix_audio": {
         "out": "path",
         "duration_sec": "num",
         "voice": "path?",
+        "voice_chain": "bool?",
         "music": "path?",
         "music_gain_db": "num?",
         "duck": "bool?",
@@ -106,8 +148,11 @@ SPEC = {
         "preset": PRESETS,
         "thumbnail": "path?",
         "audio_only": "path?",
+        "fade_in_sec": "num?",
         "fade_out_sec": "num?",
         "duration_sec": "num?",
+        "fps": "num?",
+        "master": "path?",
         "synthetic": "bool?",
     },
 }
@@ -155,6 +200,9 @@ def _coerce(op: str, args: dict, n: int) -> dict:
             elif kind == "list":
                 if not isinstance(v, list):
                     raise ValueError("expected a list")
+            elif kind == "box":
+                if not _is_box(v):
+                    raise ValueError(f"{v!r} is not x, y, w, h inside the frame")
         except ValueError as exc:
             raise ContractError(f"step {n} ({op}): {key}: {exc}") from exc
         out[key] = v
@@ -185,9 +233,78 @@ def _coerce(op: str, args: dict, n: int) -> dict:
 
 
 # ------------------------------------------------------------------ compile
+def _audio_steps(em: dict, assets: dict, *, original: bool) -> list[dict]:
+    """The mix and its master, shared by a piece with a picture and a piece without one."""
+    prof = em["profile"]
+    a = em.get("audio") or {}
+    mix: dict = {"out": "mix.wav", "duration_sec": em["duration_sec"]}
+    if a.get("voice_asset_id"):
+        mix["voice"] = assets[a["voice_asset_id"]]["path"]
+        mix["voice_chain"] = True
+    elif original:
+        mix["voice"] = "orig.wav"  # the footage's own sound leads; music ducks under it
+        mix["voice_chain"] = bool(em.get("speech"))
+    if a.get("music_asset_id"):
+        mix["music"] = assets[a["music_asset_id"]]["path"]
+        mix["music_gain_db"] = a.get("music_gain_db", MUSIC_UNDER_VOICE_DB)
+        mix["duck"] = a.get("duck", True)
+    mix["sfx"] = [
+        {
+            "path": assets[x["asset_id"]]["path"],
+            "start_sec": x["start_sec"],
+            "gain_db": x.get("gain_db", -12),
+        }
+        for x in a.get("sfx", [])
+    ]
+    master = {
+        "input": "mix.wav",
+        "out": "mix.norm.wav",
+        "target_lufs": prof.get("target_lufs", -14),
+        "true_peak_dbtp_max": prof.get("true_peak_dbtp_max", -1),
+    }
+    return [{"op": "mix_audio", "args": mix}, {"op": "loudnorm", "args": master}]
+
+
+def _sound_only_steps(em: dict, assets: dict, synthetic: bool) -> list[dict]:
+    steps = _audio_steps(em, assets, original=False)
+    cues = em.get("closed_captions") or em.get("captions")
+    if cues:  # a transcript at a nominal rate, so a listener who cannot hear still gets the words
+        steps.append({"op": "caption_files", "args": {"cues": cues, "fps": 24.0}})
+    export = {
+        "audio": "mix.norm.wav",
+        "master": "final.wav",
+        "delivery": "final.m4a",
+        "synthetic": synthetic,
+    }
+    return [*steps, {"op": "export_audio", "args": export}]
+
+
+def _is_box(v: object) -> bool:
+    """Four finite shares of the frame, x, y, w, h, with a picture left inside it."""
+    if not isinstance(v, list) or len(v) != 4:
+        return False
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+        return False
+    x, y, w, h = v
+    return 0 <= x and 0 <= y and 0 < w and 0 < h and x + w <= 1 and y + h <= 1
+
+
 def compile_plan(job: Job) -> dict:
     em = job.read("edit_manifest")
     am = job.read("asset_manifest")
+    if not em.get("cuts"):
+        assets_by_id = {a["id"]: a for a in am["assets"]}
+        synthetic = any(x.get("synthetic") for x in am["assets"])
+        plan = {
+            "schema_version": "0.1",
+            "job_id": em["job_id"],
+            "edit_manifest_sha256": hashlib.sha256(
+                job.path("edit_manifest").read_bytes()
+            ).hexdigest(),
+            "steps": _sound_only_steps(em, assets_by_id, synthetic),
+        }
+        job.write("render_plan", plan)
+        return plan
     assets = {a["id"]: a for a in am["assets"]}
     prof = em["profile"]
     W, H, FPS = prof["width"], prof["height"], prof["fps"]
@@ -199,6 +316,7 @@ def compile_plan(job: Job) -> dict:
     n_cuts = len(em.get("cuts", []))
     seg_durs: list[float] = []
     seg_audio: list[str] = []
+    boxes: dict[str, tuple[float, float, float, float]] = {}
     orig = bool(em.get("original_audio"))
 
     for i, cut in enumerate(em.get("cuts", [])):
@@ -219,6 +337,22 @@ def compile_plan(job: Job) -> dict:
                 cut["out_sec"] + tail * speed,
                 src.get("duration_sec", cut["out_sec"] + tail * speed),
             )
+        if src["kind"] == "still":
+            still_args = {
+                "source": src["path"],
+                "out": out,
+                "width": W,
+                "height": H,
+                "fps": FPS,
+                "duration_sec": seg,
+                "motion": cut.get("motion", "none"),
+            }
+            for key in ("crop_x", "grade", "gamma"):
+                if cut.get(key) is not None:
+                    still_args[key] = cut[key]
+            steps.append({"op": "still", "args": still_args})
+            segs.append(out)
+            continue
         cut_args = {
             "source": src["path"],
             "kind": src["kind"],
@@ -242,13 +376,15 @@ def compile_plan(job: Job) -> dict:
             "width": W,
             "height": H,
             "fps": FPS,
-            "motion": cut.get("motion", "none"),
             "duration_sec": seg,
-            "intensity": 0.45 if studio else 1.0,
         }
         for key in ("crop_x", "zoom", "grade", "gamma"):
             if cut.get(key) is not None:
                 scale_args[key] = cut[key]
+        if src["kind"] == "video":
+            box = boxes.setdefault(src["path"], media.picture_box(job.work / src["path"]))
+            if box != media.FULL_FRAME:
+                scale_args["picture_box"] = list(box)
         steps.append({"op": "scale", "args": scale_args})
         segs.append(out)
 
@@ -273,16 +409,12 @@ def compile_plan(job: Job) -> dict:
         if cut.get("title"):
             s = cut.get("start_sec", 0)
             span = _span(em, i)
-            hold = (
-                span - 0.15 if studio else min(2.2, span)
-            )  # studio headlines live for the whole beat
+            hold = min(TITLE_HOLD_SEC, span) - 0.15 if studio else min(2.2, span)
             item = {
                 "text": cut["title"],
                 "start_sec": s + (0.15 if studio else 0.1),
                 "end_sec": s + max(hold, 0.6),
             }
-            if assets[cut["source"]].get("provider") == "operator":
-                item["scrim"] = True
             titles.append(item)
     steps.append(
         {
@@ -300,6 +432,9 @@ def compile_plan(job: Job) -> dict:
         }
     )
     video = "picture.ov.mp4"
+    cues = em.get("closed_captions") or em.get("captions")
+    if cues:
+        steps.append({"op": "caption_files", "args": {"cues": cues, "fps": FPS}})
     if em.get("captions"):
         steps.append(
             {
@@ -319,37 +454,8 @@ def compile_plan(job: Job) -> dict:
         video = "picture.cap.mp4"
 
     audio = None
-    a = em.get("audio") or {}
-    if a or orig:
-        mix = {"out": "mix.wav", "duration_sec": em["duration_sec"]}
-        if a.get("voice_asset_id"):
-            mix["voice"] = assets[a["voice_asset_id"]]["path"]
-        elif orig:
-            mix["voice"] = "orig.wav"  # the footage's own sound leads; music ducks under it
-        if a.get("music_asset_id"):
-            mix["music"] = assets[a["music_asset_id"]]["path"]
-            mix["music_gain_db"] = a.get("music_gain_db", -19)
-            mix["duck"] = a.get("duck", True)
-        mix["sfx"] = [
-            {
-                "path": assets[x["asset_id"]]["path"],
-                "start_sec": x["start_sec"],
-                "gain_db": x.get("gain_db", -12),
-            }
-            for x in a.get("sfx", [])
-        ]
-        steps.append({"op": "mix_audio", "args": mix})
-        steps.append(
-            {
-                "op": "loudnorm",
-                "args": {
-                    "input": "mix.wav",
-                    "out": "mix.norm.wav",
-                    "target_lufs": prof.get("target_lufs", -14),
-                    "true_peak_dbtp_max": prof.get("true_peak_dbtp_max", -1),
-                },
-            }
-        )
+    if em.get("audio") or orig:
+        steps += _audio_steps(em, assets, original=orig)
         audio = "mix.norm.wav"
 
     steps.append(
@@ -359,12 +465,15 @@ def compile_plan(job: Job) -> dict:
                 "video": video,
                 "audio": audio,
                 "out": "final.mp4",
-                "crf": 18,
-                "preset": "veryfast",
+                "crf": 16,
+                "preset": "slow",
                 "thumbnail": "thumb.jpg",
                 "audio_only": "final.m4a" if audio else None,
+                "fade_in_sec": em.get("fade_in_sec"),
                 "fade_out_sec": em.get("fade_out_sec"),
                 "duration_sec": em["duration_sec"],
+                "fps": FPS,
+                "master": "final.master.mov" if prof.get("delivery") == "mezzanine" else None,
                 "synthetic": any(x.get("synthetic") for x in am["assets"]),
             },
         }
@@ -397,26 +506,6 @@ def _safe(work: Path, rel: str) -> Path:
     return p
 
 
-def _motion_filter(motion: str, w: int, h: int, fps: float, dur: float, k: float = 1.0) -> str:
-    frames = max(int(dur * fps), 1)
-    # upscale first so zoompan has pixels to move through without shimmer
-    pre = f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2}"
-    zi, zp, zd = 0.12 * k, 1 + 0.10 * k, 1 + 0.08 * k
-    # ease in-out (smoothstep) on the progress term: motion starts and lands softly
-    e = "(3*pow(on/{n},2)-2*pow(on/{n},3))"
-    z = {
-        "push_in": (f"1.0+{zi:.4f}*{e}", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
-        "push_out": (f"{1 + zi:.4f}-{zi:.4f}*{e}", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
-        "pan_left": (f"{zp:.4f}", f"(iw-iw/zoom)*(1-{e})", "ih/2-(ih/zoom/2)"),
-        "pan_right": (f"{zp:.4f}", f"(iw-iw/zoom)*{e}", "ih/2-(ih/zoom/2)"),
-        "drift_up": (f"{zd:.4f}", "iw/2-(iw/zoom/2)", f"(ih-ih/zoom)*(1-{e})"),
-    }.get(motion)
-    if not z:
-        return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps}"
-    zz, xx, yy = (s.format(n=frames) for s in z)
-    return f"{pre},zoompan=z='{zz}':x='{xx}':y='{yy}':d={frames}:s={w}x{h}:fps={fps},setsar=1"
-
-
 def stamp(job: Job, video: Path) -> None:
     """Tie the rendered file to the asset record it was made from."""
     if job.has("asset_manifest"):
@@ -445,7 +534,7 @@ def execute(job: Job, plan: dict | None = None) -> Path:
         if op not in OPS:
             raise ContractError(f"step {n}: op {op!r} not allowed")
         globals()[f"_op_{op}"](work, _coerce(op, a if isinstance(a, dict) else {}, n))
-    out = work / "final.mp4"
+    out = work / "final.mp4" if "video" in job.job.get("media", []) else job.artifact()
     (work / "render.done.json").write_text(
         json.dumps(
             {"plan_sha256": hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()}
@@ -457,36 +546,58 @@ def execute(job: Job, plan: dict | None = None) -> Path:
     return out
 
 
+def refuse_fallback_fonts(log: str) -> None:
+    """libass names a system path when it could not find the font asked for. That is not our type."""
+    for wanted, used in re.findall(r"fontselect: \(([^,]+),[^)]*\) -> ([^,]+),", log):
+        if "/" in used:
+            raise ContractError(
+                f"font {wanted!r} is not in {ass.FONTS}; libass fell back to {used}"
+            )
+
+
+def _look_filter(work: Path, a: dict) -> list[str]:
+    """The grade as one LUT, for stills and footage alike. Its name holds no text from a plan."""
+    gamma = a.get("gamma") or 1.0
+    if not a.get("grade") and abs(gamma - 1) <= 0.02:
+        return []
+    name = a.get("grade") or "natural"
+    (work / "looks").mkdir(exist_ok=True)
+    cube = work / "looks" / f"{name}-{gamma:.3f}.cube"
+    if not cube.exists():
+        cube.write_text(look.cube_text(name, gamma))
+    return [f"lut3d=file=looks/{cube.name}"]
+
+
+def _to_master(look_chain: list[str]) -> str:
+    return ",".join([*look_chain, media.TO_BT709, f"format={media.MASTER_PIX_FMT}"])
+
+
+def _op_still(work: Path, a: dict) -> None:
+    frames = motion.frames_16bit(
+        _safe(work, a["source"]),
+        a["motion"],
+        width=a["width"],
+        height=a["height"],
+        fps=a["fps"],
+        duration=a["duration_sec"],
+        crop_x=0.5 if a.get("crop_x") is None else a["crop_x"],
+    )
+    media.encode_rgb48(
+        frames,
+        size=(a["width"], a["height"]),
+        fps=a["fps"],
+        vf=_to_master(_look_filter(work, a)),
+        out=_safe(work, a["out"]),
+        cwd=work,
+    )
+
+
 def _op_cut(work: Path, a: dict) -> None:
     src, out = _safe(work, a["source"]), _safe(work, a["out"])
     dur = a["out_sec"] - a["in_sec"]
-    if a["kind"] == "still":
-        media.run(
-            [
-                "-loop",
-                "1",
-                "-framerate",
-                str(a["fps"]),
-                "-t",
-                f"{dur:.3f}",
-                "-i",
-                str(src),
-                "-vf",
-                "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # camera photos often have odd dimensions
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-crf",
-                "12",
-                "-pix_fmt",
-                "yuv420p",
-                str(out),
-            ]
-        )
-        return
     speed = a.get("speed") or 1.0
     vf = [
+        *media.from_source_color(src),
         f"setpts=PTS/{speed:.4f}" if speed != 1.0 else "setpts=PTS-STARTPTS",
         f"fps={a['fps']:g}",
         "scale=trunc(iw/2)*2:trunc(ih/2)*2",
@@ -504,15 +615,8 @@ def _op_cut(work: Path, a: dict) -> None:
             str(src),
             "-an",
             "-vf",
-            ",".join(vf),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "12",
-            "-pix_fmt",
-            "yuv420p",
+            ",".join([*vf, media.TO_BT709, f"format={media.MASTER_PIX_FMT}"]),
+            *media.MASTER_ARGS,
             str(out),
         ]
     )
@@ -546,43 +650,39 @@ def _op_cut(work: Path, a: dict) -> None:
             )
 
 
+def _finish_after_scale(source: tuple[int, int], width: int, height: int) -> str:
+    """An enlarged source comes back soft, and gets a light sharpen. One at full size is left alone."""
+    enlarged = max(width / source[0], height / source[1]) > 1.0
+    return f"{SHARPEN_ENLARGED}," if enlarged else ""
+
+
 def _op_scale(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
     W, H = a["width"], a["height"]
-    if a.get("motion", "none") == "none":
-        z = a.get("zoom") or 1.0
-        cx = 0.5 if a.get("crop_x") is None else a["crop_x"]
-        # fill the frame, punch in if asked, then crop around the subject (clamped inside the frame)
-        vf = (
-            f"scale={int(W * z)}:{int(H * z)}:force_original_aspect_ratio=increase:flags=lanczos,"
-            f"crop={W}:{H}:x='(iw-{W})*{min(max(cx, 0.0), 1.0):.4f}':y='(ih-{H})/2',fps={a['fps']:g},setsar=1"
-        )
-    else:
-        vf = _motion_filter(
-            a["motion"], W, H, a["fps"], a["duration_sec"], a.get("intensity") or 1.0
-        )
-    looks = []
-    if a.get("gamma") and abs(a["gamma"] - 1) > 0.02:
-        looks.append(f"eq=gamma={a['gamma']:.3f}")
-    if a.get("grade"):
-        looks.append(GRADE_FILTERS[a["grade"]])
-    if looks:
-        vf += "," + ",".join(looks)
+    z = a.get("zoom") or 1.0
+    info = media.summarize(src)
+    sharpen = _finish_after_scale((info["width"], info["height"]), W, H)
+    cx = 0.5 if a.get("crop_x") is None else a["crop_x"]
+    box = a.get("picture_box")
+    bars = f"crop=iw*{box[2]:.5f}:ih*{box[3]:.5f}:iw*{box[0]:.5f}:ih*{box[1]:.5f}," if box else ""
+    # fill the frame, punch in if asked, then crop around the subject (clamped inside the frame)
+    fit = (
+        f"{bars}{DEBAND_VIDEO},"
+        f"scale={int(W * z)}:{int(H * z)}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"{sharpen}crop={W}:{H}:x='(iw-{W})*{min(max(cx, 0.0), 1.0):.4f}':y='(ih-{H})/2',fps={a['fps']:g},setsar=1"
+    )
+    trim = f"trim=duration={a['duration_sec']:.3f}"
     media.run(
         [
             "-i",
             str(src),
             "-vf",
-            vf + f",trim=duration={a['duration_sec']:.3f},format=yuv420p",
+            f"{fit},{trim},{_to_master(_look_filter(work, a))}",
             "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "14",
+            *media.MASTER_ARGS,
             str(out),
-        ]
+        ],
+        cwd=work,
     )
 
 
@@ -592,7 +692,8 @@ def _op_concat(work: Path, a: dict) -> None:
     for p in ins:
         args += ["-i", str(p)]
     filt = "".join(
-        f"[{i}:v]settb=AVTB,fps={a['fps']:g},format=yuv420p[v{i}];" for i in range(len(ins))
+        f"[{i}:v]settb=AVTB,fps={a['fps']:g},format={media.MASTER_PIX_FMT}[v{i}];"
+        for i in range(len(ins))
     )
     durs = [float(d) for d in a.get("durations") or []]
     xf = a.get("xfade_sec") or 0.0
@@ -612,12 +713,7 @@ def _op_concat(work: Path, a: dict) -> None:
             filt,
             "-map",
             "[out]",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "14",
+            *media.MASTER_ARGS,
             str(_safe(work, a["out"])),
         ]
     )
@@ -660,122 +756,149 @@ def _op_overlay_text(work: Path, a: dict) -> None:
     ass_path = work / "overlay.ass"
     studio = a.get("theme") == "studio"
     ass_path.write_text(
-        ass.studio_titles(a.get("titles", []), W, H)
+        ass.studio_titles(_placed_titles(src, a.get("titles", []), W, H), W, H)
         if studio
         else ass.overlay_events(a.get("overlays", []), a.get("titles", []), W, H)
     )
+    burn = f"subtitles=overlay.ass:fontsdir={media.filter_path(ass.FONTS)}"
     bar = any(o["kind"] == "progress_bar" for o in a.get("overlays", []))
-    fonts = ass.STUDIO_FONTS if studio else "/usr/share/fonts/truetype/google-fonts"
     if bar:
         bh = max(8, H // 240)
         filt = (
-            f"[0:v]subtitles=overlay.ass:fontsdir={fonts}[t];"
+            f"[0:v]{burn}[t];"
             f"color=c=0xFFD700:s={W}x{bh}:r=30:d={D:.3f}[bar];"
             f"[t][bar]overlay=x='-W+W*t/{D:.3f}':y=H-h-{H // 9}:shortest=1[out]"
         )
-        media.run(
-            [
-                "-i",
-                src.name,
-                "-filter_complex",
-                filt,
-                "-map",
-                "[out]",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-crf",
-                "14",
-                out.name,
-            ],
-            cwd=work,
-        )
+        _burn(work, src, out, ["-filter_complex", filt, "-map", "[out]"])
     else:
-        media.run(
-            [
-                "-i",
-                src.name,
-                "-vf",
-                f"subtitles=overlay.ass:fontsdir={fonts}",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-crf",
-                "14",
-                out.name,
-            ],
-            cwd=work,
+        _burn(work, src, out, ["-vf", burn])
+
+
+def _picture_samples(src: Path) -> tuple[np.ndarray, float]:
+    """A small copy of the picture at a few frames a second, for placing type against it."""
+    return media.decode_gray(src, width=SAMPLE_WIDTH, fps=SAMPLE_FPS), SAMPLE_FPS
+
+
+def _frame_at(samples: np.ndarray, rate: float, t: float) -> np.ndarray:
+    return samples[min(int(t * rate), len(samples) - 1)]
+
+
+def _band_level(gray: np.ndarray, center: float, half: float) -> float:
+    """The bright end of a horizontal band, 0..1, which is what type has to read against."""
+    h = gray.shape[0]
+    rows = gray[max(int((center - half) * h), 0) : int((center + half) * h) + 1]
+    return float(np.percentile(rows, 90)) / 255 if rows.size else 0.0
+
+
+def _placed_titles(src: Path, titles: list[dict], w: int, h: int) -> list[dict]:
+    """Put each title where the picture is calm, and darken behind it only if it needs that."""
+    if not titles:
+        return []
+    samples, rate = _picture_samples(src)
+    placed = []
+    for title in titles:
+        frame = _frame_at(samples, rate, (title["start_sec"] + title["end_sec"]) / 2)
+        y = ass.calmest_band(frame, ass.title_centers(w, h))
+        alpha = ass.scrim_alpha(_band_level(frame, y, 0.1))
+        placed.append({**title, "y_frac": y, "scrim_alpha": alpha})
+    return placed
+
+
+def _caption_levels(src: Path, captions: list[dict], w: int, h: int) -> list[float]:
+    samples, rate = _picture_samples(src)
+    line = ass.safe_area(w, h)["bottom"]
+    return [
+        max(
+            _band_level(_frame_at(samples, rate, t), 1 - line - 0.04, 0.05)
+            for t in (card["start_sec"], (card["start_sec"] + card["end_sec"]) / 2)
         )
+        for card in captions
+    ]
+
+
+def _burn(work: Path, src: Path, out: Path, graph: list[str]) -> None:
+    proc = media.run(
+        ["-i", src.name, *graph, *media.MASTER_ARGS, out.name], cwd=work, loglevel="verbose"
+    )
+    refuse_fallback_fonts(proc.stderr)
 
 
 def _op_burn_captions(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
-    studio = a.get("style") == "studio"
-    (work / "captions.ass").write_text(
-        ass.studio_captions(a["captions"], a["width"], a["height"])
-        if studio
-        else ass.kinetic(a["captions"], a["width"], a["height"])
-    )
-    fonts = ass.STUDIO_FONTS if studio else "/usr/share/fonts/truetype/google-fonts"
-    media.run(
-        [
-            "-i",
-            src.name,
-            "-vf",
-            f"subtitles=captions.ass:fontsdir={fonts}",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "14",
-            out.name,
-        ],
-        cwd=work,
-    )
-    (work / "captions.srt").write_text(_srt(a["captions"]))
+    caps, W, H = a["captions"], a["width"], a["height"]
+    if a.get("style") == "studio":
+        text, report = ass.studio_captions(caps, W, H, _caption_levels(src, caps, W, H))
+        (work / "type_report.json").write_text(json.dumps(report) + "\n")
+    else:
+        text = ass.kinetic(caps, W, H)
+    (work / "captions.ass").write_text(text)
+    burn = f"subtitles=captions.ass:fontsdir={media.filter_path(ass.FONTS)}"
+    _burn(work, src, out, ["-vf", burn])
 
 
-def _srt(caps: list[dict]) -> str:
-    def t(s: float) -> str:
-        ms = int(round(s * 1000))
-        return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+def _op_caption_files(work: Path, a: dict) -> None:
+    for name, text in ass.sidecars(a["cues"], a["fps"]).items():
+        (work / name).write_text(text)
 
-    return "\n".join(
-        f"{i}\n{t(c['start_sec'])} --> {t(c['end_sec'])}\n{c['text']}\n"
-        for i, c in enumerate(caps, 1)
+
+def _music_under_voice(work: Path, a: dict, bed: Path) -> tuple[Path, float, float]:
+    """The bed to mix, its gain, and the ducking key's gain, all set against the measured voice."""
+    level = media.even_out(bed, work / "music.even.wav")
+    voice_path = _safe(work, a["voice"])
+    voice, _, sr = media.decode_stereo(voice_path)
+    music, _, _ = media.decode_stereo(level)
+    gain = bar.voice_to_music_db(voice, music, sr) + a.get("music_gain_db", MUSIC_UNDER_VOICE_DB)
+    lufs = media.loudness(voice_path).get("integrated_lufs")
+    return level, gain, DUCK_KEY_LUFS - lufs if lufs is not None else 0.0
+
+
+def _music_chain(index: int, gain: float, duration: float, under_voice: bool) -> str:
+    fade = min(MUSIC_FADE_SEC, duration * 0.25)
+    pocket = f"{MUSIC_POCKET}," if under_voice else ""
+    return (
+        f"[{index}:a]aresample=48000,aformat=channel_layouts=stereo,{MUSIC_CLEAN},{pocket}"
+        f"volume={gain:.2f}dB,"
+        f"afade=t=in:d=0.2,afade=t=out:st={duration - fade:.3f}:d={fade:.3f}"
     )
 
 
 def _op_mix_audio(work: Path, a: dict) -> None:
     D = a["duration_sec"]
-    ins, chains, labels = [], [], []
+    ins: list[str] = []
+    chains: list[str] = []
+    labels: list[str] = []
+    maps: list[str] = []
     idx = 0
-    voice_label = None
-    if a.get("voice"):
+    has_voice = bool(a.get("voice"))
+    if has_voice:
         ins += ["-i", str(_safe(work, a["voice"]))]
+        polish = f"{VOICE_CHAIN}," if a.get("voice_chain") else ""
         chains.append(
-            f"[{idx}:a]aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={D:.3f}[voice]"
+            f"[0:a]aresample=48000,aformat=channel_layouts=stereo,{polish}"
+            f"apad=whole_dur={D:.3f},atrim=0:{D:.3f},asplit=3[voice][vkey][vstem]"
         )
-        voice_label, idx = "voice", idx + 1
+        chains.append(ROOM_TONE.format(duration=D))
+        labels += ["[voice]", "[room]"]
+        maps += ["-map", "[vstem]", str(work / "voice.stem.wav")]
+        idx = 1
     if a.get("music"):
-        ins += ["-i", str(_safe(work, a["music"]))]
-        g = a.get("music_gain_db", -19)
-        chains.append(
-            f"[{idx}:a]aresample=48000,aformat=channel_layouts=stereo,aloop=loop=-1:size=2147483647,"
-            f"volume={g:.2f}dB,atrim=0:{D:.3f}[mus]"
-        )
+        bed = media.loop_audio(_safe(work, a["music"]), work / "music.bed.wav", D)
+        gain, key_gain = a.get("music_gain_db", MUSIC_UNDER_VOICE_DB), 0.0
+        if has_voice:
+            bed, gain, key_gain = _music_under_voice(work, a, bed)
+        ins += ["-i", str(bed)]
+        music = _music_chain(idx, gain, D, has_voice)
         idx += 1
-        if voice_label and a.get("duck"):
-            chains.append("[voice]asplit=2[voice][vkey]")
-            chains.append(
-                "[mus][vkey]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=350:makeup=1[musd]"
-            )
-            labels.append("[musd]")
+        if has_voice and a.get("duck"):
+            chains.append(f"{music}[mus]")
+            chains.append(f"[vkey]volume={key_gain:.2f}dB[key]")
+            chains.append(f"[mus][key]{DUCK},asplit=2[musd][mstem]")
         else:
-            labels.append("[mus]")
+            chains.append(f"{music},asplit=2[musd][mstem]")
+        labels.append("[musd]")
+        maps += ["-map", "[mstem]", str(work / "music.stem.wav")]
+    if has_voice and not a.get("music"):
+        chains.append("[vkey]anullsink")
     for k, s in enumerate(a.get("sfx", [])):
         ins += ["-i", str(_safe(work, s["path"]))]
         ms = max(int(float(s["start_sec"]) * 1000), 0)
@@ -785,31 +908,87 @@ def _op_mix_audio(work: Path, a: dict) -> None:
         )
         labels.append(f"[sfx{k}]")
         idx += 1
-    if voice_label:
-        labels.insert(0, "[voice]")
     if not labels:
         return
     filt = (
         ";".join(chains)
         + ";"
         + "".join(labels)
-        + f"amix=inputs={len(labels)}:normalize=0:duration=first,atrim=0:{D:.3f}[out]"
+        + f"amix=inputs={len(labels)}:normalize=0:duration=longest,atrim=0:{D:.3f}[out]"
     )
     media.run(
-        [*ins, "-filter_complex", filt, "-map", "[out]", "-ar", "48000", str(_safe(work, a["out"]))]
+        [
+            *ins,
+            "-filter_complex",
+            filt,
+            "-map",
+            "[out]",
+            "-ar",
+            "48000",
+            str(_safe(work, a["out"])),
+            *maps,
+        ]
     )
 
 
 def _op_loudnorm(work: Path, a: dict) -> None:
-    media.loudnorm_two_pass(
+    media.master_loudness(
         _safe(work, a["input"]), _safe(work, a["out"]), a["target_lufs"], a["true_peak_dbtp_max"]
     )
 
 
+def _fades(a: dict) -> tuple[list[str], list[str]]:
+    """Video and audio fades. The picture is fully black before its last frame, so a master can end on one."""
+    vf, af = [], []
+    D, fps = a.get("duration_sec") or 0, a.get("fps") or 30
+    fin, fout = a.get("fade_in_sec") or 0, a.get("fade_out_sec") or 0
+    if fin:
+        vf.append(f"fade=t=in:st=0:d={fin:.3f}")
+        af.append(f"afade=t=in:d={fin:.3f}")
+    if fout and D > fout:
+        vf.append(f"fade=t=out:st={D - fout:.3f}:d={fout - 1.5 / fps:.3f}")
+        af.append(f"afade=t=out:st={D - fout:.3f}:d={fout:.3f}")
+    return vf, af
+
+
+def _write_master(work: Path, a: dict, vf: list[str], af: list[str], note: str) -> None:
+    """A ProRes 422 HQ master with LPCM stereo: the file a premium platform ingests."""
+    args = ["-i", str(_safe(work, a["video"]))]
+    if a.get("audio"):
+        args += ["-i", str(_safe(work, a["audio"])), "-map", "0:v", "-map", "1:a"]
+        args += ["-c:a", "pcm_s24le", "-ar", "48000", "-ac", "2", "-channel_layout", "stereo"]
+        if af:
+            args += ["-af", ",".join(af)]
+    media.run(
+        [
+            *args,
+            "-vf",
+            ",".join([*vf, media.TO_PRORES]),
+            *media.PRORES_ARGS,
+            "-metadata",
+            f"comment={note}",
+            str(_safe(work, a["master"])),
+        ]
+    )
+
+
+def _op_export_audio(work: Path, a: dict) -> None:
+    source = str(_safe(work, a["audio"]))
+    note = "Made with Kalainova; contains AI-generated media" if a.get("synthetic", True) else ""
+    tag = ["-metadata", f"comment={note}"] if note else []
+    media.run(["-i", source, "-c:a", "pcm_s24le", *tag, str(_safe(work, a["master"]))])
+    media.run(["-i", source, "-c:a", "aac", "-b:a", "256k", *tag, str(_safe(work, a["delivery"]))])
+
+
 def _op_export(work: Path, a: dict) -> None:
     out = _safe(work, a["out"])
+    vf, af = _fades(a)
+    note = (
+        "Made with Kalainova; contains AI-generated media"
+        if a.get("synthetic", True)
+        else "Edited with Kalainova"
+    )
     args = ["-i", str(_safe(work, a["video"]))]
-    f, D = a.get("fade_out_sec") or 0, a.get("duration_sec") or 0
     if a.get("audio"):
         args += [
             "-i",
@@ -821,19 +1000,16 @@ def _op_export(work: Path, a: dict) -> None:
             "-c:a",
             "aac",
             "-b:a",
-            "192k",
+            "256k",
+            "-ar",
+            "48000",
             "-shortest",
         ]
-        if f and D > f:
-            args += ["-af", f"afade=t=out:st={D - f:.3f}:d={f:.3f}"]
-    if f and D > f:  # output options go after every input
-        args += ["-vf", f"fade=t=out:st={D - f:.3f}:d={f:.3f}"]
-    note = (
-        "Made with Kalainova; contains AI-generated media"
-        if a.get("synthetic", True)
-        else "Edited with Kalainova"
-    )
+        if af:
+            args += ["-af", ",".join(af)]
     args += [
+        "-vf",
+        ",".join([*vf, media.TO_DELIVERY]),
         "-c:v",
         "libx264",
         "-preset",
@@ -844,6 +1020,9 @@ def _op_export(work: Path, a: dict) -> None:
         "high",
         "-pix_fmt",
         "yuv420p",
+        "-x264-params",
+        media.X264_FINISH,
+        *media.COLOR_TAGS,
         "-movflags",
         "+faststart",
         "-metadata",
@@ -851,8 +1030,22 @@ def _op_export(work: Path, a: dict) -> None:
         str(out),
     ]
     media.run(args)
+    if a.get("master"):
+        _write_master(work, a, vf, af, note)
     if a.get("thumbnail"):
-        media.frame_at(out, 0.9, _safe(work, a["thumbnail"]))
+        media.run(
+            [
+                "-ss",
+                "0.9",
+                "-i",
+                str(out),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                str(_safe(work, a["thumbnail"])),
+            ]
+        )
     if a.get("audio_only") and a.get("audio"):
         media.run(
             [
@@ -861,7 +1054,7 @@ def _op_export(work: Path, a: dict) -> None:
                 "-c:a",
                 "aac",
                 "-b:a",
-                "192k",
+                "256k",
                 str(_safe(work, a["audio_only"])),
             ]
         )

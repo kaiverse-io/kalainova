@@ -10,6 +10,10 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "asset_manifest_sha256": {
+      "type": "string",
+      "description": "The asset manifest this edit was cut from. When it differs, the edit is rebuilt."
+    },
     "schema_version": {
       "const": "0.1"
     },
@@ -34,6 +38,7 @@
             "16:9",
             "9:16",
             "1:1",
+            "4:5",
             "audio-only"
           ]
         },
@@ -51,6 +56,12 @@
         },
         "true_peak_dbtp_max": {
           "type": "number"
+        },
+        "delivery": {
+          "enum": [
+            "web",
+            "mezzanine"
+          ]
         }
       }
     },
@@ -145,6 +156,31 @@
           },
           "keep_audio": {
             "type": "boolean"
+          }
+        }
+      }
+    },
+    "closed_captions": {
+      "type": "array",
+      "description": "Sentence cues for the timed-text files. Never burned in.",
+      "items": {
+        "type": "object",
+        "required": [
+          "start_sec",
+          "end_sec",
+          "text"
+        ],
+        "properties": {
+          "start_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
           }
         }
       }
@@ -303,6 +339,15 @@
     },
     "original_audio": {
       "type": "boolean"
+    },
+    "speech": {
+      "type": "boolean",
+      "description": "The footage's own sound is mostly someone talking, so it gets the voice chain."
+    },
+    "fade_in_sec": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 5
     },
     "fade_out_sec": {
       "type": "number",

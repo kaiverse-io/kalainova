@@ -331,6 +331,7 @@ def fake_media(monkeypatch):
     """The asset stage without ffmpeg: file operations only, so this runs anywhere."""
     monkeypatch.setattr(media, "duration", lambda path: 2.0)
     monkeypatch.setattr(media, "summarize", lambda path: {})
+    monkeypatch.setattr(media, "has_picture", lambda path: True)
 
     def run(args):
         open(args[-1], "wb").close()
@@ -465,7 +466,7 @@ def test_fal_sends_references_in_each_model_shape(root, monkeypatch):
     )
     assert len(sent["reference_image_urls"]) == 2
     assert sent["audio"] is False
-    assert sent["duration"] == 5
+    assert sent["duration"] == 4  # the model takes any whole second, so a shot pays only for itself
 
     sent.clear()
     provider.video(
@@ -473,7 +474,7 @@ def test_fal_sends_references_in_each_model_shape(root, monkeypatch):
         root / "o.mp4",
         duration=4,
         aspect="9:16",
-        model="fal-ai/kling-video/o1/reference-to-video",
+        model="fal-ai/kling-video/o3/pro/reference-to-video",
         references=[frame, face, side],
     )
     assert len(sent["elements"]) == 1

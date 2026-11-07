@@ -10,7 +10,6 @@ Reference images stay out of git but are the character: losing them loses the fa
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 import os
 import shutil
@@ -18,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from . import blobstore, kitrules
+from .blobstore import sha256_file
 from .jobfs import ContractError, validate
 
 MAX_REFERENCE_BYTES = 8 * 1024 * 1024  # references travel inline to the provider
@@ -35,14 +35,6 @@ def blob_path(root: Path, entry: dict[str, Any]) -> Path:
     if not path.exists():
         blobstore.fetch(path)
     return path
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def put(root: Path, src: Path, *, label: str = "") -> dict[str, Any]:

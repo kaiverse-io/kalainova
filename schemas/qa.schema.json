@@ -50,6 +50,10 @@
     "metrics": {
       "type": "object"
     },
+    "bar": {
+      "type": "object",
+      "description": "The studio bar's readings. It informs the human gate and never replaces it."
+    },
     "artifacts": {
       "type": "object",
       "additionalProperties": {

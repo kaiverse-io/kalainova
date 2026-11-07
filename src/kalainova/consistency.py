@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import kitrules, kits
+from . import blobstore, kitrules, kits
 from .jobfs import ContractError, Job
 from .providers import base
 
@@ -206,7 +206,7 @@ def for_job(job: Job) -> tuple[Resolved, dict[str, Any]] | None:
 
 
 def lock_sha256(job: Job) -> str:
-    return kits.sha256_file(job.path("kit_lock"))
+    return blobstore.sha256_file(job.path("kit_lock"))
 
 
 # ------------------------------------------------------------------ the script

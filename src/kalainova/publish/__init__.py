@@ -12,7 +12,6 @@ approval is the gate; the posting itself can be automatic.
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 import os
 import re
@@ -21,15 +20,8 @@ from pathlib import Path
 import requests
 
 from .. import consistency, streams
+from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _now() -> str:
@@ -43,7 +35,7 @@ def _qa_bound(job: Job, final: Path) -> dict:
         failing = [c["id"] for c in qa["checks"] if c["status"] == "fail"]
         raise ContractError(f"{job.id}: QA failed ({failing}); fix and re-render before approval")
     hashes = qa.get("artifacts_sha256") or {}
-    checked = hashes.get("video") or hashes.get("audio")
+    checked = hashes.get("video") or hashes.get("audio") or hashes.get("document")
     if not checked or checked != sha256_file(final):
         raise ContractError(f"{job.id}: {final.name} is not the file QA checked; run qa again")
     return qa

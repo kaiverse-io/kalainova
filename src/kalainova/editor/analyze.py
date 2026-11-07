@@ -32,31 +32,7 @@ AW, AH, AFPS = 160, 90, 4  # analysis frame size and rate
 
 def scenes(path: Path, threshold: float = 0.32) -> list[float]:
     """Cut points (seconds) where the picture changes."""
-    proc = subprocess.run(
-        [
-            media.FFMPEG,
-            "-hide_banner",
-            "-nostats",
-            "-i",
-            str(path),
-            "-an",
-            "-vf",
-            f"scale=320:-2,select='gt(scene,{threshold})',showinfo",
-            "-f",
-            "null",
-            "-",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    cuts = []
-    for line in proc.stderr.splitlines():
-        if "pts_time:" in line and "showinfo" in line:
-            try:
-                cuts.append(float(line.split("pts_time:")[1].split()[0]))
-            except (IndexError, ValueError):
-                pass
-    return cuts
+    return media.scene_changes(path, threshold)
 
 
 def frames(
@@ -165,6 +141,17 @@ def _subject_x(fs: np.ndarray) -> float:
     return float((xs * weight).sum() / (weight.sum() + 1e-9))
 
 
+def look_signature(fs: np.ndarray) -> list[float]:
+    """A tiny picture of what a shot looks like, so two shots that look alike can be told apart."""
+    if len(fs) == 0:
+        return []
+    gray = _gray(fs).mean(axis=0)
+    rows, cols = 9, 16
+    h, w = gray.shape[0] // rows, gray.shape[1] // cols
+    grid = gray[: h * rows, : w * cols].reshape(rows, h, cols, w).mean(axis=(1, 3))
+    return [round(float(v), 3) for v in grid.ravel()]
+
+
 def score_series(fs: np.ndarray) -> dict:
     """Per-frame series for one shot."""
     if len(fs) == 0:
@@ -231,6 +218,7 @@ def ingest(job, inputs: list[Path], *, min_shot: float = 1.2, max_shot: float = 
                     "series": score_series(fs[:1]),
                     "colorfulness": _colorfulness(fs[0]) if len(fs) else 0,
                     "subject_x": _subject_x(fs[:1]) if len(fs) else 0.5,
+                    "sig": look_signature(fs[:1]),
                     "speech": 0.0,
                     "aspect": (info.get("width", 1) / max(info.get("height", 1), 1)),
                 }
@@ -286,6 +274,7 @@ def ingest(job, inputs: list[Path], *, min_shot: float = 1.2, max_shot: float = 
                     if len(fs)
                     else 0,
                     "subject_x": _subject_x(fs) if len(fs) else 0.5,
+                    "sig": look_signature(fs),
                     "speech": round(speech, 3),
                     "jitter_px": round(jitter(series["shift"]), 3),
                     "aspect": info.get("width", 16) / max(info.get("height", 9), 1),

@@ -14,3 +14,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0008](0008-adopt-the-chassis-stamp.md) | Adopt the chassis stamp |
 | [0009](0009-kits-and-streams.md) | Kits hold what stays the same; streams hold where it goes |
 | [0010](0010-private-home-and-cloud-path.md) | A public engine, a private home, and the path to the cloud |
+| [0011](0011-the-studio-bar.md) | The quality bar is numbers a tool computes, and it informs the human gate |

@@ -163,8 +163,8 @@ def test_numeric_args_cannot_carry_filtergraph_text(tmp_path, monkeypatch):
             {
                 "op": "cut",
                 "args": {
-                    "source": "a.png",
-                    "kind": "still",
+                    "source": "a.mp4",
+                    "kind": "video",
                     "in_sec": 0,
                     "out_sec": 1,
                     "fps": "30[in0];movie=/etc/passwd[m];[in0][m]overlay",

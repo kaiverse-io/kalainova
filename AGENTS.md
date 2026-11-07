@@ -24,13 +24,16 @@ A piece belongs to a stream. Read `docs/how-to/run-a-stream.md`. `docs/consolida
 
 The operator names a stream and a brief with `kalainova request`. The engine works out the rest and refuses before spending if it cannot hold what the kits promise.
 
+The quality target is `docs/studio-bar.md`. `kalainova bar <job or file>` measures any piece against it.
+
 ## Project structure
 
 ```
 src/kalainova/      engine; ARCHITECTURE.md covers every top-level module
 schemas/            the job, kit, stream, and lock contracts
 prompts/            versioned prompts, loaded at runtime
-config/studio.yaml  model and price table; which models take references
+config/studio.yaml  model and price table; which models take references; the studio bar's limits
+fonts/              vendored open fonts, so every machine sets the same type
 scripts/            the contract and docs gates (stdlib)
 evals/contract/     fixtures that must pass or fail
 tests/              pytest

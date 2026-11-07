@@ -17,11 +17,7 @@ from pathlib import Path
 from .. import media
 from .base import Provider, Result, register
 
-FONT_DIRS = [
-    Path("/usr/share/fonts/truetype/google-fonts"),
-    Path("/usr/share/fonts/opentype/inter"),
-    Path("/usr/share/fonts/truetype/dejavu"),
-]
+FONT_DIRS = [Path(__file__).resolve().parents[3] / "fonts"]
 
 
 def find_font(*names: str) -> str | None:
@@ -77,6 +73,8 @@ class LocalProvider(Provider):
     VOICES = ("slt", "awb", "rms", "kal16", "kal")
 
     def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw) -> Result:
+        if not media.has_filter("flite"):  # many ffmpeg builds ship without it
+            return self._murmur(text, dst)
         v = voice if voice in self.VOICES else "slt"
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
             fh.write(text)
@@ -100,6 +98,27 @@ class LocalProvider(Provider):
         return Result(
             path=dst,
             model=f"flite-{v}",
+            words=estimate_words(text, dur),
+            meta={"duration_sec": dur},
+        )
+
+    def _murmur(self, text: str, dst: Path) -> Result:
+        """Syllable-paced tone at speech length, for an ffmpeg with no flite. Timing stays testable."""
+        dur = max(len(re.findall(r"\S+", text)) / 2.6, 0.5)
+        media.run(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"aevalsrc='0.25*sin(2*PI*180*t)*(0.55+0.45*sin(2*PI*4.5*t))':s=48000:d={dur:.3f}",
+                "-ac",
+                "1",
+                str(dst),
+            ]
+        )
+        return Result(
+            path=dst,
+            model="flite-absent",
             words=estimate_words(text, dur),
             meta={"duration_sec": dur},
         )
@@ -247,7 +266,7 @@ class LocalProvider(Provider):
         img = img.filter(ImageFilter.GaussianBlur(radius=2))
         draw = ImageDraw.Draw(img, "RGBA")
         headline = (title or prompt).strip()
-        font_path = find_font("Poppins-Bold.ttf", "InterDisplay-Black.otf", "DejaVuSans-Bold.ttf")
+        font_path = find_font("InterDisplay-SemiBold.ttf")
         size = int(width * 0.11)
         lines: list[str] = []
         while size > 24:

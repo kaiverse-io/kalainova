@@ -6,7 +6,7 @@ generate() walks the job's provider list and, for each attempt, applies the same
   deadline  a call that outlives its deadline is abandoned, and its estimate is charged
   failure   a provider failure moves to the next listed provider and says so on stderr;
             a bug in an adapter (TypeError, AttributeError) is raised, not hidden
-  output    a file must match the request, and reaches its destination only after that
+  output    a file must match the request and hold a picture, and only then reaches its destination
   reuse     a paid file is recorded the moment it exists, so a restart does not pay twice
 
 Only providers named in the list are tried. Nothing is added to it here.
@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config, media
+from ..blobstore import sha256_file
 from ..jobfs import ContractError, CostCapExceeded, Job
 from . import base
 
@@ -33,6 +34,7 @@ OUTPUT_ARG = {"voice": 1, "image": 1, "video": 1, "music": 1, "song": 1, "sfx": 
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = "generations.jsonl"
+PICTURE_OUTPUTS = ("image", "video")
 ASPECT_TOLERANCE = 0.03
 MIN_SCALE = 0.5  # the editor can upscale a large image, not rescue a thumbnail
 
@@ -111,20 +113,14 @@ def _check_output(capability: str, path: Path, kw: dict) -> None:
                 raise ValueError(f"image is {width}x{height}, too small for {want_w}x{want_h}")
     elif media.duration(path) <= 0:
         raise ValueError("file has no duration")
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    if capability in PICTURE_OUTPUTS and not media.has_picture(path):
+        raise ValueError("no picture: one flat tone throughout, the model's decode failed")
 
 
 def _request_key(capability: str, fn_name: str, args: tuple, kw: dict) -> str:
     def plain(value):
         if isinstance(value, Path):
-            return _sha256(value) if value.is_file() else str(value)
+            return sha256_file(value) if value.is_file() else str(value)
         if isinstance(value, dict):
             return {k: plain(v) for k, v in value.items()}
         if isinstance(value, list | tuple):
@@ -151,7 +147,7 @@ def _saved(
         return None
     entries = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     entry = next((e for e in reversed(entries) if e["key"] == key), None)
-    if not entry or entry["provider"] not in names or entry["sha256"] != _sha256(dst):
+    if not entry or entry["provider"] not in names or entry["sha256"] != sha256_file(dst):
         return None
     provider = base.get(entry["provider"])
     return provider, base.Result(
@@ -165,7 +161,7 @@ def _record(job: Job, key: str, provider: base.Provider, res: base.Result, dst: 
         "provider": provider.name,
         "model": res.model,
         "file": dst.name,
-        "sha256": _sha256(dst),
+        "sha256": sha256_file(dst),
         "cost": round(res.cost, 6),
         "words": res.words,
         "meta": res.meta,

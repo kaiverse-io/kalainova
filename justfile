@@ -129,3 +129,45 @@ monitor:
 # Run the dev-coach skill's analysis (also invokable as /dev-coach in Claude Code)
 coach:
     @echo "Run '/dev-coach' in Claude Code, or see .agents/skills/dev-coach/SKILL.md"
+
+# ── Code-quality gates for /ub-mode (bucket C, on-demand) ────────────────────
+# unclebob/crapper, /dryer, /mutator — CRAP score, structural duplication, mutation testing.
+# Pinned to a commit, not a release: upstream publishes none, so (like AEC_COMMIT) bumping a pin
+# is a deliberate manual act — read what changed first. Fetched into .cache/ub-tools/ on first
+# use; each tool builds its own .venv there. mutator reads crapper from ../crapper, which this
+# layout satisfies. See .agents/skills/ub-mode/SKILL.md and chassis ADR-008.
+ub_tools := ".cache/ub-tools"
+crapper_commit := "6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d"
+dryer_commit := "66ff6d21a42c04afcad89c78a80066176d1294b0"
+mutator_commit := "a5a0cb803b66e0cdb8bf471b3b08af701d424a41"
+
+# Fetch the pinned quality tools (idempotent; re-fetches only a tool whose pin moved)
+ub-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fetch() {
+        local name="$1" sha="$2" dir="{{ ub_tools }}/$1"
+        [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)" = "$sha" ] && return 0
+        rm -rf "$dir"
+        git init -q "$dir"
+        git -C "$dir" fetch -q --depth 1 "https://github.com/unclebob/$name" "$sha"
+        git -C "$dir" checkout -q --detach FETCH_HEAD
+    }
+    fetch crapper {{ crapper_commit }}
+    fetch dryer {{ dryer_commit }}
+    fetch mutator {{ mutator_commit }}
+
+# CRAP score per function; exits 2 when the worst is over 10 (default scope: src/)
+crap *args="src": ub-tools
+    # The tool's own coverage run reads empty here, because addopts already runs pytest-cov.
+    mkdir -p target/coverage/python
+    uv run pytest -q --cov-report=lcov:target/coverage/python/lcov.info
+    {{ ub_tools }}/crapper/crapper --threshold 10 --use-existing-coverage {{ args }}
+
+# Structural duplication; reports pairs scoring 0.8 or above (default scope: src/)
+dry *args="src": ub-tools
+    {{ ub_tools }}/dryer/dryer --threshold 0.8 {{ args }}
+
+# Mutation testing — slow: pass the file you changed. Exits 3 when a mutant survives.
+mutate +paths: ub-tools
+    {{ ub_tools }}/mutator/mutator {{ paths }}

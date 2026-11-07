@@ -23,6 +23,7 @@
         "properties": {
           "op": {
             "enum": [
+              "still",
               "cut",
               "concat",
               "scale",
@@ -30,6 +31,8 @@
               "mix_audio",
               "loudnorm",
               "burn_captions",
+              "caption_files",
+              "export_audio",
               "export"
             ]
           },

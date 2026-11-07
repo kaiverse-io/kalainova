@@ -14,7 +14,13 @@ from . import config, consistency, kits, media
 from .jobfs import Job
 from .providers import base, router
 
-GAP = 0.12  # seconds of air between beats
+# Air after a line follows how it ends: a full stop takes a breath, a clause runs on.
+PAUSE_AFTER = {".": 0.34, "?": 0.38, "!": 0.34, "…": 0.45, ",": 0.14, ":": 0.2, ";": 0.2}
+PAUSE_DEFAULT = 0.18
+
+
+def _pause(text: str) -> float:
+    return PAUSE_AFTER.get(text.rstrip()[-1:], PAUSE_DEFAULT)
 
 
 def _rights(job: dict) -> str:
@@ -121,10 +127,15 @@ def run(job: Job, *, force: bool = False) -> dict:
         return a
 
     # --- voice, per beat, then joined ------------------------------------
-    t = 0.0
+    # a film opens on picture and music, and holds after its last word; a reel starts on the words
+    t = float(prof.get("open_sec", 0.0))
+    closing = float(prof.get("close_sec", 0.0))
+    opening_ms = int(t * 1000)
     voice_parts: list[Path] = []
     voice_makers: list[tuple] = []
-    for beat in packet["beats"]:
+    pauses: list[float] = []
+    all_beats = packet["beats"]
+    for n, beat in enumerate(all_beats):
         bid = beat["id"]
         start = t
         if "audio" in media_kinds or "video" in media_kinds:
@@ -140,6 +151,9 @@ def run(job: Job, *, force: bool = False) -> dict:
                 }
                 if fixed.get("settings"):
                     voice_kw["settings"] = fixed["settings"]
+            # neighbouring lines let a model keep one read across the cuts
+            voice_kw["previous_text"] = all_beats[n - 1]["text"] if n else None
+            voice_kw["next_text"] = all_beats[n + 1]["text"] if n + 1 < len(all_beats) else None
             p, res = _gen(
                 "voice",
                 "voice",
@@ -159,19 +173,27 @@ def run(job: Job, *, force: bool = False) -> dict:
                 )
             voice_parts.append(dst)
             voice_makers.append((p, res))
-            t += dur + GAP
+            pauses.append(_pause(beat["text"]))
+            t += dur + pauses[-1]
         else:
             t += max(2.0, len(beat["text"].split()) / 2.6)
-        timeline.append({"beat_id": bid, "start_sec": round(start, 3), "end_sec": round(t, 3)})
-    total = round(t, 3)
+        timeline.append(
+            {"beat_id": bid, "start_sec": round(start if n else 0.0, 3), "end_sec": round(t, 3)}
+        )
+    total = round(t + closing, 3)
+    if timeline:
+        timeline[-1]["end_sec"] = total
 
     if voice_parts:
-        # pad each clip with GAP of silence, then concat via the concat filter (no list files, no shell)
+        pauses[-1] += closing
+        # pad each clip with its pause, then concat via the concat filter (no list files, no shell)
         args: list[str] = []
         for part in voice_parts:
             args += ["-i", str(part)]
         filt = "".join(
-            f"[{i}:a]aresample=48000,apad=pad_dur={GAP}[a{i}];" for i in range(len(voice_parts))
+            f"[{i}:a]aresample=48000,{f'adelay={opening_ms}:all=1,' if opening_ms and not i else ''}"
+            f"apad=pad_dur={pauses[i]}[a{i}];"
+            for i in range(len(voice_parts))
         )
         filt += (
             "".join(f"[a{i}]" for i in range(len(voice_parts)))
@@ -279,7 +301,9 @@ def run(job: Job, *, force: bool = False) -> dict:
     # --- music bed and transition sfx ---------------------------------------
     if "audio" in media_kinds or "video" in media_kinds:
         _sound(job, "music", "music", fixed_sound.get("theme"), total + 1.0, add, _gen, data)
-        _sound(job, "whoosh", "sfx", fixed_sound.get("whoosh"), 0.6, add, _gen, data)
+        edit_opts = data.get("edit") or {}
+        if edit_opts.get("whoosh", edit_opts.get("theme", "studio") != "studio"):
+            _sound(job, "whoosh", "sfx", fixed_sound.get("whoosh"), 0.6, add, _gen, data)
 
     manifest = {
         "schema_version": "0.1",

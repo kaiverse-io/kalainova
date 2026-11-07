@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 from .jobfs import ContractError
 
 
-def _sha256(path: Path) -> str:
+def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -75,7 +75,7 @@ def fetch(path: Path, *, client: Any = None) -> bool:
     temp = path.with_name(f".{uuid.uuid4().hex[:8]}.{path.name}")
     try:
         (client or _client()).download_file(bucket, key, str(temp))
-        if _sha256(temp) != path.stem:
+        if sha256_file(temp) != path.stem:
             raise ContractError(f"{key}: stored bytes do not match their hash")
         os.replace(temp, path)
     finally:

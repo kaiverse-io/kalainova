@@ -96,8 +96,9 @@ def parse(text: str, settings: dict | None = None) -> dict:
         s["captions"] = False
     elif re.search(r"\b(captions|subtitles)\b", low):
         s["captions"] = True
-    if m := re.search(r"title\s*[:=]\s*[\"“]?([^\"”\n]+?)[\"”]?\s*(?:$|[.;\n])", text, re.I):
-        s["title"] = m.group(1).strip()
+    # a comma ends an unquoted title, because the next instruction follows it; quote one to keep it
+    if m := re.search(r"title\s*[:=]\s*(?:[\"“]([^\"”\n]+)[\"”]|([^,.;\n]+))", text, re.I):
+        s["title"] = (m.group(1) or m.group(2)).strip()
     if re.search(r"\bno title\b", low):
         s["title"] = ""
     if m := re.search(

@@ -9,6 +9,7 @@ Retention defaults (override on job.edit):
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from . import config
@@ -17,6 +18,7 @@ from .jobfs import Job
 MOTIONS = ["push_in", "pan_left", "push_out", "pan_right", "drift_up"]
 STUDIO_MOTIONS = ["push_in", "drift_up", "push_in", "pan_right", "push_out"]  # slow, mostly forward
 THEMES = ("studio", "bold")
+PICTURE_LEAD_SEC = 0.08
 
 
 def caption_cards(
@@ -75,9 +77,20 @@ def caption_cards(
     return cards
 
 
+def frame_rate_for(profile_fps: float, sources: list[float]) -> float:
+    """The rate a piece runs at. Going above a source's own rate can only repeat frames: judder."""
+    rates = set(sources)
+    if len(rates) == 1 and min(rates) < profile_fps:
+        return min(rates)
+    return profile_fps
+
+
 def run(job: Job, *, force: bool = False) -> dict:
+    cut_from = hashlib.sha256(job.path("asset_manifest").read_bytes()).hexdigest()
     if job.has("edit_manifest") and not force:
-        return job.read("edit_manifest")
+        kept = job.read("edit_manifest")
+        if kept.get("asset_manifest_sha256") == cut_from:
+            return kept  # new assets must never be cut with the old edit, and a hand edit stays
     data = job.job
     packet = job.read("script_packet")
     am = job.read("asset_manifest")
@@ -87,6 +100,8 @@ def run(job: Job, *, force: bool = False) -> dict:
     beats = {b["id"]: b for b in packet["beats"]}
     theme = opts.get("theme", "studio")
     studio = theme == "studio"
+    mezzanine = prof.get("delivery") == "mezzanine"
+    wants_captions = opts.get("captions", True) and not mezzanine
 
     cuts = []
     for i, span in enumerate(am["timeline"]):
@@ -102,15 +117,33 @@ def run(job: Job, *, force: bool = False) -> dict:
             "in_sec": 0,
             "out_sec": dur,
             "role": beat["role"],
-            "start_sec": span["start_sec"],
+            # the picture changes just before the words do, the way a line is cut in a film
+            "start_sec": max(span["start_sec"] - (PICTURE_LEAD_SEC if i else 0.0), 0.0),
+            "grade": opts.get("grade", "natural"),
         }
         if src["kind"] == "still":
             cut["motion"] = (STUDIO_MOTIONS if studio else MOTIONS)[i % len(MOTIONS)]
-        if src["kind"] == "video" and src.get("duration_sec", dur) < dur:
-            cut["out_sec"] = round(src["duration_sec"], 3)
-            cut["hold_last_frame"] = True
+        # A shot runs to where the next one starts, which is earlier than the next line's first word.
+        next_start = (
+            am["timeline"][i + 1]["start_sec"] - PICTURE_LEAD_SEC
+            if i + 1 < len(am["timeline"])
+            else span["end_sec"]
+        )
+        needed = round(next_start - cut["start_sec"], 3)
+        if src["kind"] == "video":
+            have = src.get("duration_sec", needed)
+            cut["out_sec"] = round(min(have, needed), 3)
+            if have < needed:
+                cut["hold_last_frame"] = True
         # bold typecards bake their headline; everything else gets an animated title (studio: every beat)
-        if beat.get("on_screen") and src.get("model") != "local-typecard" and (studio or i > 0):
+        # Two lines of text at once is noise. With captions up, only the opening and closing keep a title.
+        key_beat = i == 0 or i == len(am["timeline"]) - 1 or not wants_captions
+        if (
+            beat.get("on_screen")
+            and src.get("model") != "local-typecard"
+            and (studio or i > 0)
+            and (key_beat or opts.get("titles") == "all")
+        ):
             cut["title"] = beat["on_screen"]
         cuts.append(cut)
 
@@ -118,9 +151,11 @@ def run(job: Job, *, force: bool = False) -> dict:
         re.sub(r"\W", "", w).lower() for b in packet["beats"] for w in b.get("emphasis", [])
     }
     cw, cc = (4, 22) if studio else (3, 14)
-    captions = (
-        caption_cards(am.get("words", []), emphasis, cw, cc) if opts.get("captions", True) else []
-    )
+    captions = caption_cards(am.get("words", []), emphasis, cw, cc) if wants_captions else []
+    closed = [
+        {k: card[k] for k in ("start_sec", "end_sec", "text")}
+        for card in caption_cards(am.get("words", []), set(), 14, 74)
+    ]
 
     overlays = []
     hook = packet["beats"][0]
@@ -144,7 +179,8 @@ def run(job: Job, *, force: bool = False) -> dict:
         audio["voice_asset_id"] = "voice"
     if "music" in by_id:
         audio["music_asset_id"] = "music"
-        audio["music_gain_db"] = float(opts.get("music_gain_db", -21 if studio else -19))
+        if "music_gain_db" in opts:
+            audio["music_gain_db"] = float(opts["music_gain_db"])
         audio["duck"] = True
     if "whoosh" in by_id and opts.get("whoosh", not studio):
         audio["sfx"] = [
@@ -152,6 +188,11 @@ def run(job: Job, *, force: bool = False) -> dict:
             for c in cuts[1:]
         ]
 
+    moving_rates = [
+        float(a["probe"]["fps"])
+        for a in (by_id[c["source"]] for c in cuts)
+        if a["kind"] == "video" and a.get("probe", {}).get("fps")
+    ]
     manifest = {
         "schema_version": "0.1",
         "job_id": data["job_id"],
@@ -161,17 +202,24 @@ def run(job: Job, *, force: bool = False) -> dict:
             "aspect": prof.get("aspect", "9:16"),
             "width": int(prof.get("width", 1080)),
             "height": int(prof.get("height", 1920)),
-            "fps": float(prof.get("fps", 30)),
+            "fps": frame_rate_for(float(prof.get("fps", 30)), moving_rates),
             "target_lufs": float(prof.get("target_lufs", -14)),
             "true_peak_dbtp_max": float(prof.get("true_peak_dbtp_max", -1)),
+            "delivery": prof.get("delivery", "web"),
         },
         "theme": theme,
-        "transition": opts.get("transition", "dissolve" if studio else "cut"),
-        "caption_style": opts.get("caption_style", "studio" if studio else "kinetic"),
+        "transition": opts.get("transition", "cut"),
+        "caption_style": "none"
+        if mezzanine
+        else opts.get("caption_style", "studio" if studio else "kinetic"),
         "cuts": cuts,
         "captions": captions,
+        "closed_captions": closed,
+        "fade_in_sec": float(opts.get("fade_in_sec", 0.5 if mezzanine else 0.0)),
+        "fade_out_sec": float(opts.get("fade_out_sec", 1.0 if mezzanine else 0.5)),
         "overlays": overlays,
         "audio": audio,
+        "asset_manifest_sha256": cut_from,
     }
     job.write("edit_manifest", manifest)
     return manifest

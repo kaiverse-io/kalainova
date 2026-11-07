@@ -6,26 +6,142 @@ import json
 import re
 import shutil
 import subprocess
+from functools import cache
 from pathlib import Path
+
+import numpy as np
 
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
+MASTER_PASSES = 3
+# Luma levels of 255: an encoder keeps a flat field this tight, and a dark shot is never this flat.
+FLAT_TONE_LEVELS = 3
+RIDE_WINDOW = 9  # half-second frames: the level it follows, about four seconds wide
+RIDE_SHARE = 0.85  # how much of each swing it takes out, so a score keeps some of its shape
+RIDE_MOST_DB = 30.0
+RIDE_SILENCE_DB = -70.0
+FULL_FRAME = (0.0, 0.0, 1.0, 1.0)
+BAR_LEVEL = 24  # 8-bit luma: video black is 16, and compression lifts it a little
+BAR_MISMATCH = 0.01  # a letterbox is centred, to within this share of the frame
+
+# Every stage between source and delivery is lossless 10-bit 4:4:4 BT.709, so one final encode is
+# the only place quality is spent. The tags stop players guessing a colour matrix.
+COLOR_TAGS = [
+    "-colorspace",
+    "bt709",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+    "-color_range",
+    "tv",
+]
+MASTER_PIX_FMT = "yuv444p10le"
+MASTER_ARGS = [
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-qp",
+    "0",
+    "-pix_fmt",
+    MASTER_PIX_FMT,
+    *COLOR_TAGS,
+]
+_SWS = "out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int"
+_TAG_FRAMES = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
+TO_BT709 = f"scale={_SWS},{_TAG_FRAMES}"
+TO_DELIVERY = f"scale={_SWS},format=yuv420p,{_TAG_FRAMES}"
+# aq-mode 3 spends bits in dark gradients, where 8-bit bands first. Deblock eased for fine detail.
+TO_PRORES = f"scale={_SWS},format=yuv422p10le,{_TAG_FRAMES}"
+PRORES_ARGS = [
+    "-c:v",
+    "prores_ks",
+    "-profile:v",
+    "3",
+    "-vendor",
+    "apl0",
+    *COLOR_TAGS,
+    "-movflags",
+    "+faststart+write_colr+write_gama",
+]
+X264_FINISH = "aq-mode=3:aq-strength=0.9:deblock=-1,-1:psy-rd=1.0,0.15"
+HDR_TO_SDR = (
+    "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,"
+    "zscale=t=bt709:m=bt709:r=tv"
+)
 
 
 class MediaError(RuntimeError):
     pass
 
 
+@cache
+def has_filter(name: str) -> bool:
+    """Whether this ffmpeg build has a filter. Builds differ, and the engine must adapt."""
+    proc = subprocess.run([FFMPEG, "-hide_banner", "-filters"], capture_output=True, text=True)
+    return any(line.split()[1:2] == [name] for line in proc.stdout.splitlines())
+
+
 def run(
-    args: list[str], *, quiet: bool = True, cwd: str | Path | None = None
+    args: list[str], *, cwd: str | Path | None = None, loglevel: str = "error"
 ) -> subprocess.CompletedProcess:
-    cmd = [FFMPEG, "-hide_banner", "-y", "-loglevel", "error" if quiet else "info", *args]
+    cmd = [FFMPEG, "-hide_banner", "-y", "-loglevel", loglevel, *args]
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if proc.returncode != 0:
         raise MediaError(
             f"ffmpeg failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stderr[-2000:]}"
         )
     return proc
+
+
+def filter_path(path: str | Path) -> str:
+    """A path as one filtergraph value, with the characters the parser treats as syntax escaped."""
+    return re.sub(r"([\\:',\[\];])", r"\\\1", str(path))
+
+
+def from_source_color(path: str | Path) -> list[str]:
+    """Filters that bring a source to SDR. Phones shoot HDR, which looks grey and flat untreated."""
+    transfer = stream_info(path, "video").get("color_transfer")
+    return [HDR_TO_SDR] if transfer in ("arib-std-b67", "smpte2084") else []
+
+
+def encode_rgb48(
+    frames, *, size: tuple[int, int], fps: float, vf: str, out: Path, cwd: Path
+) -> None:
+    """Encode rgb48 frames from a generator to the master format."""
+    cmd = [
+        FFMPEG,
+        "-hide_banner",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb48le",
+        "-s",
+        f"{size[0]}x{size[1]}",
+        "-r",
+        f"{fps:g}",
+        "-i",
+        "pipe:0",
+        "-vf",
+        vf,
+        *MASTER_ARGS,
+        str(out),
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+    try:
+        for frame in frames:
+            proc.stdin.write(frame)
+    except BrokenPipeError:
+        pass  # ffmpeg stopped early, and its own message explains why
+    _, err = proc.communicate()
+    if proc.returncode != 0:
+        raise MediaError(
+            f"ffmpeg failed ({proc.returncode}) encoding frames:\n{err.decode()[-2000:]}"
+        )
 
 
 def probe(path: str | Path) -> dict:
@@ -95,40 +211,109 @@ def loudness(path: str | Path) -> dict:
     summary = text[text.rfind("Summary:") :] if "Summary:" in text else text
     i = re.search(r"I:\s+(-?[\d.]+) LUFS", summary)
     tp = re.search(r"Peak:\s+(-?[\d.]+) dBFS", summary)
+    lra = re.search(r"LRA:\s+([\d.]+) LU", summary)
     return {
         "integrated_lufs": float(i.group(1)) if i else None,
         "true_peak_dbtp": float(tp.group(1)) if tp else None,
+        "loudness_range_lu": float(lra.group(1)) if lra else None,
     }
 
 
-def loudnorm_two_pass(
-    src: Path, dst: Path, target: float = -14.0, tp: float = -1.0, lra: float = 11.0
-) -> dict:
-    first = subprocess.run(
+def master_loudness(src: Path, dst: Path, target: float, ceiling: float) -> Path:
+    """Set the level with one gain, catch peaks with a limiter at 4x, and check the result.
+
+    A single gain keeps the mix's dynamics. loudnorm's dynamic mode, which it falls back to whenever
+    the peaks do not fit, rides the level and audibly pumps music under speech.
+    """
+    measured = loudness(src)["integrated_lufs"]
+    if measured is None:  # digital silence has no loudness to set
+        run(["-i", str(src), "-c:a", "pcm_s24le", "-ar", "48000", "-ac", "2", str(dst)])
+        return dst
+    limit = 10 ** ((ceiling - 0.3) / 20)
+    gain = target - measured
+    for _ in range(MASTER_PASSES):
+        chain = (
+            f"volume={gain:.3f}dB,aresample=192000,"
+            f"alimiter=limit={limit:.5f}:attack=1:release=60:level=disabled,aresample=48000"
+        )
+        run(["-i", str(src), "-af", chain, "-c:a", "pcm_s24le", "-ac", "2", str(dst)])
+        miss = target - (loudness(dst)["integrated_lufs"] or target)
+        if abs(miss) <= 0.1:
+            break
+        gain += miss
+    return dst
+
+
+def fader_ride(mono: np.ndarray, sr: int) -> np.ndarray:
+    """Gain for each sample that lifts quiet passages toward the loud ones, as a hand on a fader.
+
+    It only lifts, keeps a little of the shape, and leaves silence alone. A generated score can sit
+    30 dB under itself for half its length, which no fixed gain can put under a voice.
+    """
+    hop = sr // 2
+    n = mono.size // hop
+    if n == 0:
+        return np.ones(mono.size)
+    power = (mono[: n * hop].reshape(n, hop).astype(np.float64) ** 2).mean(axis=1)
+    reach = min(RIDE_WINDOW, n)
+    slow = np.convolve(power, np.ones(reach) / reach, mode="same")
+    level = 10 * np.log10(np.maximum(slow, 1e-12))
+    sounding = level > RIDE_SILENCE_DB
+    if not sounding.any():
+        return np.ones(mono.size)
+    top = float(np.percentile(level[sounding], 90))
+    lift = np.where(sounding, np.clip((top - level) * RIDE_SHARE, 0.0, RIDE_MOST_DB), 0.0)
+    centres = (np.arange(n) + 0.5) * hop
+    return 10 ** (np.interp(np.arange(mono.size), centres, lift) / 20)
+
+
+def even_out(src: Path, dst: Path) -> Path:
+    """Write a music bed with its slow swings in level ridden out."""
+    left, right, sr = decode_stereo(src)
+    gain = fader_ride((left + right) / 2, sr)
+    pcm = np.stack([left * gain, right * gain], axis=1).astype(np.float32)
+    subprocess.run(
         [
-            FFMPEG,
-            "-hide_banner",
-            "-nostats",
-            "-i",
-            str(src),
-            "-af",
-            f"loudnorm=I={target}:TP={tp}:LRA={lra}:print_format=json",
-            "-f",
-            "null",
-            "-",
+            FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "f32le", "-ar", str(sr), "-ac", "2", "-i", "-",
+            str(dst),
         ],
-        capture_output=True,
-        text=True,
+        input=pcm.tobytes(),
+        check=True,
+    )  # fmt: skip
+    return dst
+
+
+def loop_audio(src: Path, dst: Path, seconds: float, crossfade: float = 1.5) -> Path:
+    """Extend a bed to length with equal-power crossfades, so the joins are never heard."""
+    length = duration(src)
+    if length >= seconds:
+        run(["-i", str(src), "-t", f"{seconds:.3f}", "-ar", "48000", "-ac", "2", str(dst)])
+        return dst
+    fade = min(crossfade, length / 3)
+    copies = int(np.ceil((seconds - fade) / (length - fade))) + 1
+    inputs = [arg for _ in range(copies) for arg in ("-i", str(src))]
+    graph, last = "", "0:a"
+    for i in range(1, copies):
+        graph += f"[{last}][{i}:a]acrossfade=d={fade:.3f}:c1=qsin:c2=qsin[x{i}];"
+        last = f"x{i}"
+    run(
+        [
+            *inputs,
+            "-filter_complex",
+            graph.rstrip(";"),
+            "-map",
+            f"[{last}]",
+            "-t",
+            f"{seconds:.3f}",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            str(dst),
+        ]
     )
-    blob = first.stderr[first.stderr.rfind("{") : first.stderr.rfind("}") + 1]
-    m = json.loads(blob)
-    af = (
-        f"loudnorm=I={target}:TP={tp}:LRA={lra}:measured_I={m['input_i']}:measured_TP={m['input_tp']}"
-        f":measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}"
-        ":linear=true:print_format=summary"
-    )
-    run(["-i", str(src), "-af", af, "-ar", "48000", "-ac", "2", str(dst)])
-    return m
+    return dst
 
 
 def blackdetect(path: str | Path, min_dur: float = 0.5) -> list[tuple[float, float]]:
@@ -182,3 +367,124 @@ def silencedetect(
 def frame_at(path: str | Path, t: float, dst: Path) -> Path:
     run(["-ss", f"{t:.3f}", "-i", str(path), "-frames:v", "1", str(dst)])
     return dst
+
+
+def stream_info(path: str | Path, kind: str) -> dict:
+    """The first stream of a kind, as ffprobe reports it."""
+    return next((s for s in probe(path).get("streams", []) if s.get("codec_type") == kind), {})
+
+
+def scene_changes(path: str | Path, threshold: float = 0.32) -> list[float]:
+    """Seconds where the picture changes."""
+    proc = subprocess.run(
+        [
+            FFMPEG,
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(path),
+            "-an",
+            "-vf",
+            f"scale=320:-2,select='gt(scene,{threshold})',showinfo",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return [float(m) for m in re.findall(r"pts_time:([\d.]+)", proc.stderr)]
+
+
+def _decode(args: list[str]) -> bytes:
+    cmd = [FFMPEG, "-hide_banner", "-loglevel", "error", *args]
+    return subprocess.run(cmd, capture_output=True).stdout
+
+
+def decode_gray(
+    path: str | Path,
+    *,
+    width: int,
+    fps: float | None = None,
+    start: float = 0.0,
+    duration: float | None = None,
+) -> np.ndarray:
+    """Frames as uint8 luma [n, h, w]. Height follows the file's shape."""
+    info = summarize(path)
+    height = max(round(width * info["height"] / info["width"]) // 2 * 2, 2)
+    seek = ["-ss", f"{start:.3f}"] if start else []
+    span = ["-t", f"{duration:.3f}"] if duration else []
+    rate = f"fps={fps:g}," if fps else ""
+    blob = _decode(
+        [
+            *seek,
+            *span,
+            "-i",
+            str(path),
+            "-an",
+            "-vf",
+            f"{rate}scale={width}:{height}:flags=bicubic,format=gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ]
+    )
+    frames = np.frombuffer(blob, np.uint8)
+    n = frames.size // (width * height)
+    return frames[: n * width * height].reshape(n, height, width)
+
+
+def gray_frame(path: str | Path, t: float, *, width: int | None = None) -> np.ndarray:
+    """One frame as uint8 luma, full size unless a width is given."""
+    info = summarize(path)
+    w = width or info["width"]
+    return decode_gray(path, width=w, start=t, duration=0.08)[0]
+
+
+def has_picture(path: str | Path) -> bool:
+    """False when an image or clip is one flat tone from start to end, as a failed decode leaves."""
+    low, high = np.percentile(decode_gray(path, width=64), [0.5, 99.5])
+    return bool(high - low >= FLAT_TONE_LEVELS)
+
+
+def _bar_lengths(line: np.ndarray) -> tuple[int, int]:
+    """How far black runs in from each end of a row or column. Bars match; a dark sky does not."""
+    lit = np.flatnonzero(line > BAR_LEVEL)
+    if not lit.size:
+        return 0, 0
+    first, last = int(lit[0]), int(line.size - 1 - lit[-1])
+    if not (first and last) or abs(first - last) > max(line.size * BAR_MISMATCH, 1):
+        return 0, 0
+    return first + 1, last + 1  # scaling blurs the edge, so take one more than was measured
+
+
+def picture_box(path: str | Path, samples: int = 24) -> tuple[float, float, float, float]:
+    """The part of a source that ever holds picture, as shares of the frame: x, y, w, h.
+
+    A bar has to stay black across the whole source. In any one frame, black space below a planet
+    or a night sky above a horizon looks the same.
+    """
+    width = min(summarize(path).get("width", 0), 640)
+    if not width:
+        return FULL_FRAME
+    frames = decode_gray(path, width=width, fps=samples / max(duration(path), 0.1))
+    if not frames.size:
+        return FULL_FRAME
+    peak = frames.max(axis=0)
+    rows, cols = peak.max(axis=1), peak.max(axis=0)
+    top, bottom = _bar_lengths(rows)
+    left, right = _bar_lengths(cols)
+    return (
+        left / cols.size,
+        top / rows.size,
+        (cols.size - left - right) / cols.size,
+        (rows.size - top - bottom) / rows.size,
+    )
+
+
+def decode_stereo(path: str | Path, sr: int = 48000) -> tuple[np.ndarray, np.ndarray, int]:
+    """Left, right, and sample rate, as float32 in -1..1."""
+    blob = _decode(["-i", str(path), "-vn", "-ac", "2", "-ar", str(sr), "-f", "f32le", "-"])
+    x = np.frombuffer(blob, np.float32)
+    x = x[: x.size // 2 * 2].reshape(-1, 2)
+    return x[:, 0], x[:, 1], sr
