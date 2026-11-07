@@ -33,6 +33,8 @@ HARD_CUT_DROP_DB = 28.0
 SPEECH_FLOOR_DB = -36.0
 SILENCE_EPS = 1.0 / 32768
 MAX_MEASURE_FRAMES = 240
+LONG_WINDOWS = 4  # past one window's length, several short ones spread across the whole piece
+MAX_SHOTS_READ = 24
 MASTER_SIZES = {(1920, 1080), (3840, 2160), (4096, 2160)}
 MOTION_WIDTH = 320
 MOTION_STEP_SEC = 0.25  # long enough for a slow swell to show
@@ -379,27 +381,52 @@ def _shot_middles(path: Path, duration: float) -> list[float]:
     return [(a + b) / 2 for a, b in zip(starts, ends, strict=True)]
 
 
+def _windows(duration: float, fps: float) -> list[tuple[float, float]]:
+    """Where to read motion: all of a short piece, and samples across the whole of a long one."""
+    whole = MAX_MEASURE_FRAMES / fps
+    if duration <= whole:
+        return [(0.0, duration)]
+    span = whole / LONG_WINDOWS
+    gap = (duration - span) / max(LONG_WINDOWS - 1, 1)
+    return [(gap * i, span) for i in range(LONG_WINDOWS)]
+
+
 def _motion_readings(path: Path, duration: float) -> list[Reading]:
     fps = max(media.summarize(path).get("fps", 30.0), 1.0)
-    span = min(duration, MAX_MEASURE_FRAMES / fps)
-    start = max((duration - span) / 2, 0.0)
-    frames = media.decode_gray(path, width=540, start=start, duration=span)
-    if len(frames) < 3:
+    worst_stutter: float | None = None
+    jumps_seen, seconds_read = 0, 0.0
+    for start, span in _windows(duration, fps):
+        frames = media.decode_gray(path, width=540, start=start, duration=span)
+        if len(frames) < 3:
+            continue
+        diffs = np.abs(np.diff(frames.astype(np.int16), axis=0)).mean(axis=(1, 2))
+        # A cut is not unevenness, so the frames across one are left out and counted on their own.
+        jumps = diffs >= np.median(diffs) * 8 + 1.0
+        jumps_seen += int(np.count_nonzero(jumps))
+        seconds_read += span
+        stutter = stutter_score(diffs[~jumps])
+        worst_stutter = stutter if worst_stutter is None else max(worst_stutter, stutter)
+    if worst_stutter is None:
         return []
-    diffs = np.abs(np.diff(frames.astype(np.int16), axis=0)).mean(axis=(1, 2))
-    # A cut is not unevenness, so the frames across one are left out and counted on their own.
-    jumps = diffs >= np.median(diffs) * 8 + 1.0
-    per_min = float(np.count_nonzero(jumps)) / max(span / 60, 1e-6)
     return [
-        _at_most("picture.stutter", stutter_score(diffs[~jumps]), "stutter_max"),
-        _at_most("edit.cuts_per_min", per_min, "cuts_per_min_max"),
+        _at_most("picture.stutter", worst_stutter, "stutter_max"),
+        _at_most(
+            "edit.cuts_per_min", jumps_seen / max(seconds_read / 60, 1e-6), "cuts_per_min_max"
+        ),
     ]
+
+
+def _spread(items: list[float], most: int) -> list[float]:
+    """At most this many items, taken evenly across the list rather than from its start."""
+    if len(items) <= most:
+        return items
+    return [items[i * len(items) // most] for i in range(most)]
 
 
 def _frame_readings(path: Path, duration: float) -> list[Reading]:
     grays = [media.gray_frame(path, t) for t in _sample_times(duration, 6)]
-    middles = _shot_middles(path, duration)
-    shots = [media.gray_frame(path, t) for t in middles[:24]]
+    middles = _spread(_shot_middles(path, duration), MAX_SHOTS_READ)
+    shots = [media.gray_frame(path, t) for t in middles]
     thumbs = [np.asarray(Image.fromarray(s).resize((48, 27))) for s in shots]
     return [
         _at_most(
@@ -484,10 +511,26 @@ def _master_video(path: Path, target_fps: float) -> list[dict[str, Any]]:
     ]
 
 
+def _scan_held_frames(path: Path) -> tuple[float, float, float]:
+    """First level, last level, and held share, one frame at a time: a film has to fit in memory."""
+    first = last = 0.0
+    previous: Arr | None = None
+    held = lit = 0
+    for frame in media.iter_gray(path, width=480):
+        level = float(frame.mean())
+        if previous is None:
+            first = level
+        else:
+            moved = float(np.abs(frame.astype(np.int16) - previous.astype(np.int16)).mean())
+            if level > BLACK_LEVEL:
+                lit += 1
+                held += moved < DUPLICATE_LEVEL
+        last, previous = level, frame
+    return first, last, held / lit if lit else 0.0
+
+
 def _master_picture(path: Path) -> list[dict[str, Any]]:
-    frames = media.decode_gray(path, width=480)
-    first, last = float(frames[0].mean()), float(frames[-1].mean())
-    held = duplicate_share(frames)
+    first, last, held = _scan_held_frames(path)
     limit = float(limits()["duplicate_share_max"])
     return [
         _check(
@@ -527,14 +570,39 @@ def measure_master(path: Path, *, target_fps: float) -> list[dict[str, Any]]:
     return [*_master_video(path, target_fps), *_master_picture(path), *_master_sound(path)]
 
 
+def _tally(readings: list[dict[str, Any]]) -> dict[str, int]:
+    return {"met": sum(bool(r["ok"]) for r in readings), "total": len(readings)}
+
+
 def _summary(readings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Conformance and craft apart. Conformance is mostly the renderer checking its own work, so a
+    single total flatters anything it makes: a flat gradient reads higher than real footage.
+    """
     met = sum(bool(r["ok"]) for r in readings)
     return {
         "passed": met == len(readings),
         "met": met,
         "total": len(readings),
+        "conformance": _tally([r for r in readings if r["blocks"]]),
+        "craft": _tally([r for r in readings if not r["blocks"]]),
         "readings": readings,
     }
+
+
+def summary_line(report: dict[str, Any]) -> str:
+    """How a person should read a report: two numbers that mean different things."""
+    conform, craft = report["conformance"], report["craft"]
+    return (
+        f"conformance {conform['met']}/{conform['total']}, craft {craft['met']}/{craft['total']}. "
+        "A clean sheet shows no measured defect, not that the piece is good"
+    )
+
+
+def _cambi_readings(path: Path) -> list[Reading]:
+    found = media.cambi(path)
+    if found is None:
+        return []  # this ffmpeg has no libvmaf, which is fine: picture.banding still reads
+    return [_at_most("picture.cambi_peak", found[1], "cambi_peak_max")]
 
 
 def measure(path: Path) -> dict[str, Any]:
@@ -546,6 +614,7 @@ def measure(path: Path) -> dict[str, Any]:
         readings += _delivery_readings(path)
         readings += _frame_readings(path, duration)
         readings += _motion_readings(path, duration)
+        readings += _cambi_readings(path)
     if "sample_rate_hz" in info:
         readings += _sound_readings(path)
     return _summary([asdict(r) for r in readings])
@@ -585,6 +654,15 @@ def _generated_shots(work: Path, em: dict[str, Any], am: dict[str, Any]) -> dict
         if motion is not None:
             read[cut["source"]] = motion
     return read
+
+
+def _source_is_lossy(am: dict[str, Any]) -> list[str]:
+    """Assets that reached the mix through lossy audio, which no master can win back."""
+    return [
+        a["id"]
+        for a in am["assets"]
+        if str((a.get("provenance") or {}).get("audio_format", "")).startswith(("mp3", "opus"))
+    ]
 
 
 def _shot_motion_readings(work: Path, em: dict[str, Any], am: dict[str, Any]) -> list[Reading]:

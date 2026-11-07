@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import re
 
-from . import bar, config, consistency, media, prompts
+from . import bar, config, consistency, media, prompts, research, shots, timeline
 from .jobfs import DOCUMENT_MEDIA, ContractError, CostCapExceeded, Job
 from .providers import router
+
+# Files that came from a person or the engine itself, so there is no model licence to read.
+NO_LICENCE = {"operator", "kit", "chained", "clip", "track", "local"}
 
 
 def _check(checks: list, cid: str, ok: bool, detail: str, severity: str = "fail") -> None:
@@ -19,31 +22,128 @@ def _check(checks: list, cid: str, ok: bool, detail: str, severity: str = "fail"
 
 
 def contact_sheet(job: Job, final, em: dict) -> str | None:
-    work = job.work
-    times = [0.4] + [c.get("start_sec", 0) + 0.6 for c in em.get("cuts", [])[1:]]
-    frames = []
-    for i, t in enumerate(times[:12]):
-        f = work / f"qa_frame_{i:02d}.jpg"
-        try:
-            media.frame_at(final, min(t, em["duration_sec"] - 0.1), f)
-            frames.append(f)
-        except media.MediaError:
-            pass
-    if not frames:
-        return None
-    from PIL import Image
+    """Every shot's first and last frame, at the piece's real shape. Whether it moved shows here."""
+    out = timeline.shot_sheet(
+        final, em.get("cuts", []), em["duration_sec"], job.work / "contact.jpg"
+    )
+    return out.name if out else None
 
-    thumbs = [Image.open(f).resize((270, 480)) for f in frames]
-    cols = min(6, len(thumbs))
-    rows = (len(thumbs) + cols - 1) // cols
-    sheet = Image.new("RGB", (cols * 270, rows * 480), (0, 0, 0))
-    for i, im in enumerate(thumbs):
-        sheet.paste(im, ((i % cols) * 270, (i // cols) * 480))
-    out = work / "contact.jpg"
-    sheet.save(out, quality=85)
-    for f in frames:
-        f.unlink(missing_ok=True)
-    return "contact.jpg"
+
+def _promise_checks(data: dict, am: dict) -> list[dict]:
+    """A shot that asked to move and did not. Only a person can accept that, by saying so on the job."""
+    breaks = am.get("promise_breaks") or []
+    if not breaks:
+        return []
+    from .publish import placeholder_assets
+
+    forgiven = (data.get("brief") or {}).get("allow_stills") or placeholder_assets(am)
+    named = ", ".join(b["beat_id"] for b in breaks)
+    return [
+        {
+            "id": "delivery.motion_promise",
+            "status": "warn" if forgiven else "fail",
+            "detail": f"asked to move and did not: {named}",
+        }
+    ]
+
+
+def licence_checks(am: dict) -> list[dict]:
+    """What each model's terms ask of whoever releases this. A person reads and meets them."""
+    unknown, limited, owed = set(), set(), set()
+    for asset in am["assets"]:
+        provider = asset.get("provider")
+        if not provider or provider in NO_LICENCE:
+            continue
+        model = str(asset.get("model", "")).split(":")[0]
+        terms = config.licence_for(provider, model)
+        if not terms:
+            unknown.add(f"{provider}/{model}")
+            continue
+        if terms.get("commercial") is False:
+            limited.add(f"{provider}/{model}")
+        owed.update(str(o) for o in terms.get("obligations") or [])
+    out = []
+    if unknown:
+        detail = f"nobody has read the terms of {sorted(unknown)}"
+        out.append({"id": "rights.model_licence", "status": "warn", "detail": detail})
+    if limited:
+        detail = f"terms not confirmed for commercial use: {sorted(limited)}"
+        out.append({"id": "rights.commercial_use", "status": "warn", "detail": detail})
+    if owed:
+        out.append(
+            {"id": "rights.obligations", "status": "warn", "detail": "; ".join(sorted(owed))}
+        )
+    return out
+
+
+def _sound_checks(prof: dict, am: dict) -> list[dict]:
+    """What a premium mix would have that this one lacks. Only a person can say if it matters."""
+    if prof.get("delivery") != "mezzanine":
+        return []
+    out = []
+    if not any(a.get("role") == "sfx" for a in am["assets"]):
+        detail = "voice and music only: no sound of the place under the picture"
+        out.append({"id": "sound.layers", "status": "warn", "detail": detail})
+    lossy = bar._source_is_lossy(am)
+    if lossy:
+        detail = f"{lossy} reached the mix through lossy audio, which no master can win back"
+        out.append({"id": "sound.source_quality", "status": "warn", "detail": detail})
+    return out
+
+
+def _plan_checks(data: dict, packet: dict) -> list[dict]:
+    brief = data.get("brief") or {}
+    found = shots.review(
+        packet,
+        budget=int(brief.get("max_video_beats", 3)),
+        allow_stills=True,
+        wants_video="video" in data.get("media", []),
+    )
+    return [{**p, "status": "warn"} for p in found]
+
+
+def _cut_checks(final, em: dict) -> list[dict]:
+    if len(em.get("cuts", [])) < 2:
+        return []
+    bad = [c for c in timeline.cut_report(final, em["cuts"]) if c["flagged"]]
+    if not bad:
+        return [{"id": "edit.cuts", "status": "pass", "detail": "no click or flash at any cut"}]
+    spots = ", ".join(f"{c['at_sec']:.2f}s" for c in bad[:8])
+    detail = f"{len(bad)} cuts have a click or a flash: {spots}"
+    return [{"id": "edit.cuts", "status": "warn", "detail": detail}]
+
+
+def _judge_script(packet: dict) -> str:
+    return str(
+        [
+            {
+                "id": b["id"],
+                "line": b["text"],
+                "cue": b.get("visual_cue", ""),
+                "moves": b.get("visual_kind") == "video",
+            }
+            for b in packet["beats"]
+        ]
+    )
+
+
+def _shape(prof: dict) -> str:
+    width, height = prof.get("width", 1), prof.get("height", 1)
+    return "vertical" if height > width else "square" if height == width else "landscape"
+
+
+def _judged_shots(judge: dict) -> list[dict]:
+    bad = [
+        f"{s.get('id')}: {s.get('note') or 'see the sheet'}"
+        for s in judge.get("shots") or []
+        if s.get("moved") is False
+        or s.get("geometry_ok") is False
+        or s.get("matches_previous") is False
+    ]
+    if not judge.get("shots"):
+        return []
+    detail = "; ".join(bad)[:600] or "every shot read as it should"
+    return [{"id": "judge.shots", "status": "warn" if bad else "pass", "detail": detail}]
 
 
 def _kit_checks(job: Job, packet: dict, am: dict, sheet: str | None) -> list[dict]:
@@ -178,6 +278,39 @@ def run_file(job: Job) -> dict:
     return report
 
 
+def run_song(job: Job) -> dict:
+    """A song: its level blocks, its readings inform, and a person listens. Bound to the exact file."""
+    from . import songs
+    from .publish import sha256_file
+
+    data, final = job.job, job.artifact()
+    checks: list[dict] = []
+    summary: dict = {}
+    if final.exists():
+        checks, summary = songs.checks(job)
+    _check(checks, "render.exists", final.exists(), final.name)
+    manifest = job.read("asset_manifest")
+    _check(
+        checks,
+        "rights.assets",
+        all(a.get("rights") in ("owned", "licensed", "funded-brief") for a in manifest["assets"]),
+        "every asset carries rights",
+    )
+    checks.extend(licence_checks(manifest))
+    report = {
+        "schema_version": "0.1",
+        "job_id": data["job_id"],
+        "passed": all(c["status"] != "fail" for c in checks),
+        "checks": checks,
+        "artifacts": {"audio": final.name},
+        "artifacts_sha256": {"audio": sha256_file(final)} if final.exists() else {},
+    }
+    if summary:
+        report["bar"] = summary
+    job.write("qa", report)
+    return report
+
+
 def run_document(job: Job) -> dict:
     """A comic or a book: its own checks, bound to the exact file like any other piece."""
     from . import comic, story
@@ -207,6 +340,8 @@ def run_document(job: Job) -> dict:
 
 
 def run(job: Job) -> dict:
+    if "song" in job.job.get("media", []):
+        return run_song(job)
     if any(kind in job.job.get("media", []) for kind in DOCUMENT_MEDIA):
         return run_document(job)
     if not job.has("edit_manifest") or not job.read("edit_manifest").get("cuts"):
@@ -338,6 +473,11 @@ def run(job: Job) -> dict:
         f"claims without URL sources: {bad}" if bad else "all claims have URLs",
         "warn",
     )
+    checks.extend(research.claim_checks(job, packet))
+    checks.extend(_promise_checks(data, am))
+    checks.extend(_plan_checks(data, packet))
+    checks.extend(_sound_checks(prof, am))
+    checks.extend(_cut_checks(final, em))
 
     # disclosure
     synthetic = any(a.get("synthetic") for a in am["assets"])
@@ -367,6 +507,7 @@ def run(job: Job) -> dict:
         for a in am["assets"]
     )
     _check(checks, "rights.assets", rights_ok, "every asset carries rights")
+    checks.extend(licence_checks(am))
 
     sheet = contact_sheet(job, final, em)
     checks.extend(_kit_checks(job, packet, am, sheet))
@@ -379,12 +520,13 @@ def run(job: Job) -> dict:
                 job,
                 "llm",
                 "llm",
-                f"Script:\n{[b['text'] for b in packet['beats']]}\n\n{prompts.load('qa_rubric')}",
+                prompts.load("qa_rubric").format(shape=_shape(prof), script=_judge_script(packet)),
                 images=[job.work / sheet],
-                max_tokens=800,
+                max_tokens=1600,
                 note="qa-judge",
             )
             judge = extract_json(res.text)
+            checks.extend(_judged_shots(judge))
             _check(
                 checks,
                 "judge.verdict",
