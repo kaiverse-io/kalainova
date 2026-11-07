@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+from PIL import Image
 
-from kalainova import bar, config
+from kalainova import bar, config, media
 
 SR = 48000
 
@@ -172,3 +174,242 @@ def test_only_an_objective_defect_blocks_approval():
         ]
     }
     assert [c["status"] for c in bar.as_checks(report)] == ["fail", "warn", "pass"]
+
+
+# ------------------------------------------------------------------ what moves inside a shot
+MOTION_FPS = 24.0
+MOTION_LIMIT = config.bar_limits()["shot_motion_min"]
+
+
+def _scene(seed: int = 7, h: int = 180, w: int = 320, grain: int = 24) -> np.ndarray:
+    """Edges at several scales, the way a photograph has them."""
+    rng = np.random.default_rng(seed)
+    coarse = np.kron(
+        rng.uniform(30, 220, (h // grain + 2, w // grain + 2)), np.ones((grain, grain))
+    )
+    fine = np.kron(rng.uniform(-30, 30, (h // 4 + 2, w // 4 + 2)), np.ones((4, 4)))
+    return np.clip(coarse[:h, :w] + fine[:h, :w], 0, 255)
+
+
+def _clip(frame_at, seconds: float = 2.0) -> np.ndarray:
+    return (
+        np.array([frame_at(i) for i in range(int(seconds * MOTION_FPS))], dtype=np.float64)
+        .clip(0, 255)
+        .astype(np.uint8)
+    )
+
+
+def test_a_frozen_shot_with_nothing_moving_reads_as_still():
+    scene = _scene()
+    assert bar.shot_motion(_clip(lambda _: scene), MOTION_FPS) == 0.0
+
+
+@pytest.mark.parametrize(
+    "window",
+    [
+        lambda big, i: big[50:230, i : i + 320],  # the camera moves one way
+        lambda big, i: big[50:230, 100 - i : 420 - i],  # and back
+        lambda big, i: big[i : i + 180, 50:370],  # up
+        lambda big, i: big[60 - i : 240 - i, 50:370],  # and down
+    ],
+)
+def test_a_camera_move_across_a_frozen_picture_is_not_motion(window):
+    big = _scene(h=280, w=480)
+    move = _clip(lambda i: window(big, i))
+    assert np.abs(np.diff(move.astype(np.int16), axis=0)).mean() > 2  # plenty changes each frame
+    assert bar.shot_motion(move, MOTION_FPS) < MOTION_LIMIT
+
+
+def _pushed(rate: float, drift: float = 0.0, wide: np.ndarray | None = None):
+    """A camera pushing in on a frozen picture, and drifting, sampled the way a renderer samples."""
+    source = _scene(h=280, w=480) if wide is None else wide
+    picture = Image.fromarray(source.astype(np.uint8))
+
+    def frame(i: int) -> np.ndarray:
+        shrink = 1.0 / (1.0 + rate * i / MOTION_FPS)
+        left, top = 240 + drift * i - 160 * shrink, 140 - 90 * shrink
+        box = (shrink, 0, left, 0, shrink, top)
+        return np.asarray(picture.transform((320, 180), Image.AFFINE, box, Image.BILINEAR))
+
+    return _clip(frame)
+
+
+# The slow push a film holds a whole shot, a stills camera move, and the 5.7% a second a
+# model gave a generated shot in which nothing else moved.
+@pytest.mark.parametrize("rate", [0.012, 0.03, 0.06])
+def test_a_push_in_on_a_frozen_picture_is_not_motion(rate):
+    assert bar.shot_motion(_pushed(rate), MOTION_FPS) < MOTION_LIMIT
+
+
+def test_a_push_in_that_also_drifts_is_not_motion():
+    assert bar.shot_motion(_pushed(0.03, drift=0.5), MOTION_FPS) < MOTION_LIMIT
+
+
+def test_a_push_in_over_moving_water_still_counts_the_water():
+    pushed = _pushed(0.03)
+    pushed[:, 90:] = np.array([_scene(seed=100 + i)[90:] for i in range(len(pushed))]).astype(
+        np.uint8
+    )
+    assert bar.shot_motion(pushed, MOTION_FPS) > MOTION_LIMIT
+
+
+def test_a_picture_that_changes_completely_every_frame_reads_as_moving():
+    assert bar.shot_motion(_clip(lambda i: _scene(seed=i)), MOTION_FPS) > 0.5
+
+
+def test_a_flat_frame_reads_as_still_rather_than_failing():
+    flat = np.full((180, 320), 90.0)
+    assert bar.shot_motion(_clip(lambda _: flat), MOTION_FPS) == 0.0
+
+
+def test_a_push_in_on_detail_at_one_side_of_a_flat_sky_is_not_motion():
+    wide = _scene(h=280, w=480)
+    wide[:140] = 90.0  # a flat sky: nothing up here can say where the camera went
+    wide[:, :240] = 90.0
+    assert bar.shot_motion(_pushed(0.06, wide=wide), MOTION_FPS) < MOTION_LIMIT
+
+
+def test_a_large_object_moving_on_its_own_does_not_throw_the_camera_fit():
+    scene, boat = _scene(), _scene(seed=9, h=90, w=120)
+
+    def shot(i: int) -> np.ndarray:
+        frame = scene.copy()
+        frame[50:140, 20 + 3 * i : 140 + 3 * i] = boat
+        return frame
+
+    # a fifth of the frame moved; had it dragged the fit, the whole frame would read as changed
+    assert 0.1 < bar.shot_motion(_clip(shot), MOTION_FPS) < 0.35
+
+
+def test_a_large_object_moving_during_a_push_in_does_not_throw_the_camera_fit():
+    pushed, boat = _pushed(0.06), _scene(seed=9, h=90, w=120).astype(np.uint8)
+    for i, frame in enumerate(pushed):
+        frame[50:140, 20 + 3 * i : 140 + 3 * i] = boat
+    assert 0.1 < bar.shot_motion(pushed, MOTION_FPS) < 0.35
+
+
+def test_a_peak_between_samples_is_found_to_a_fraction_of_a_sample():
+    parabola = -((np.arange(8.0) - 3.3) ** 2)
+    assert bar._peak_offset(parabola, 3) == pytest.approx(0.3)
+
+
+def test_a_source_slower_than_the_measuring_step_can_still_be_read():
+    frames = _clip(lambda _: _scene(), seconds=0.5)
+    assert bar.shot_motion(frames, 1.0) == 0.0
+
+
+def test_exactly_one_step_of_frames_is_too_few_to_compare():
+    frames = _clip(lambda _: _scene(), seconds=1.0)
+    step = round(bar.MOTION_STEP_SEC * MOTION_FPS)
+    assert bar.shot_motion(frames[:step], MOTION_FPS) is None
+    assert bar.shot_motion(frames[: step + 1], MOTION_FPS) == 0.0
+
+
+def _still_then_moving(path) -> None:
+    media.run(
+        [
+            "-f", "lavfi", "-i", "smptebars=size=320x180:rate=24:duration=1.5",
+            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=1.5",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]",
+            "-map", "[v]", "-pix_fmt", "yuv420p", str(path),
+        ]
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("cut", "frozen"),
+    [
+        ({"in_sec": 0.6, "out_sec": 1.4}, True),  # stops before the clip starts moving
+        ({"in_sec": 1.6, "out_sec": 2.9}, False),
+        ({"in_sec": 1.6}, False),  # no end named: runs to the end of the clip
+    ],
+)
+def test_only_the_part_of_a_clip_the_edit_uses_is_read(tmp_path, cut, frozen):
+    _still_then_moving(tmp_path / "clip.mp4")
+    am = {"assets": [{"id": "c", "kind": "video", "path": "clip.mp4", "synthetic": True}]}
+    read = bar._generated_shots(tmp_path, {"cuts": [{"source": "c", **cut}]}, am)["c"]
+    assert read < MOTION_LIMIT if frozen else read > 0.25  # 0.2 if the still part is read too
+
+
+def test_a_move_too_far_for_any_camera_is_not_taken_out():
+    swing = _scene(w=1400)
+    whip = _clip(lambda i: swing[:, 20 * i : 20 * i + 320])
+    assert bar.shot_motion(whip, MOTION_FPS) > MOTION_LIMIT
+
+
+def test_film_grain_over_a_frozen_picture_is_not_motion():
+    scene, rng = _scene(), np.random.default_rng(3)
+    grainy = _clip(lambda _: scene + rng.normal(0, 2.0, scene.shape))
+    assert bar.shot_motion(grainy, MOTION_FPS) < MOTION_LIMIT
+
+
+def test_water_moving_under_a_still_sky_reads_as_the_share_of_the_frame_that_moves():
+    sky = _scene(seed=1)
+
+    def shot(i: int) -> np.ndarray:
+        frame = sky.copy()
+        frame[90:] = _scene(seed=100 + i)[90:]
+        return frame
+
+    assert 0.3 < bar.shot_motion(_clip(shot), MOTION_FPS) <= 0.5
+
+
+def test_a_pan_over_moving_water_still_counts_the_water():
+    wide = _scene(seed=1, w=640)
+
+    def shot(i: int) -> np.ndarray:
+        frame = wide[:, i : i + 320].copy()
+        frame[90:] = _scene(seed=100 + i)[90:]
+        return frame
+
+    assert bar.shot_motion(_clip(shot), MOTION_FPS) > MOTION_LIMIT
+
+
+def test_a_clip_too_short_to_measure_reads_as_unknown_not_still():
+    assert bar.shot_motion(_clip(lambda _: _scene(), seconds=0.1), MOTION_FPS) is None
+
+
+def _make_clip(path, source: str) -> None:
+    media.run(
+        ["-f", "lavfi", "-i", source, "-t", "1.5", "-r", "24", "-pix_fmt", "yuv420p", str(path)]
+    )
+
+
+def _two_shot_job(tmp_path, *, frozen_is_generated: bool = True):
+    _make_clip(tmp_path / "moving.mp4", "testsrc2=size=320x180:rate=24")
+    _make_clip(tmp_path / "frozen.mp4", "smptebars=size=320x180:rate=24")
+    media.run(["-i", str(tmp_path / "moving.mp4"), "-c", "copy", str(tmp_path / "final.mp4")])
+    frozen = {"id": "b2.video", "kind": "video", "path": "frozen.mp4"}
+    am = {
+        "assets": [
+            {"id": "b1.video", "kind": "video", "path": "moving.mp4", "synthetic": True},
+            {**frozen, "synthetic": frozen_is_generated},
+        ]
+    }
+    em = {
+        "duration_sec": 3.0,
+        "profile": {"width": 320, "height": 180, "fps": 24.0},
+        "cuts": [
+            {"source": "b1.video", "start_sec": 0.0, "in_sec": 0.0, "out_sec": 1.5},
+            {"source": "b2.video", "start_sec": 1.5, "in_sec": 0.0, "out_sec": 1.5},
+        ],
+    }
+    return bar.measure_job(tmp_path, em, am)
+
+
+def _reading(report, rid):
+    return next((r for r in report["readings"] if r["id"] == rid), None)
+
+
+def test_a_job_with_a_generated_clip_that_never_moves_misses_and_names_the_shot(tmp_path):
+    reading = _reading(_two_shot_job(tmp_path), "source.shot_motion")
+    assert reading is not None
+    assert not reading["ok"]
+    assert "b2.video" in reading["value"]
+
+
+def test_a_quiet_shot_of_real_footage_is_the_editors_choice(tmp_path):
+    reading = _reading(_two_shot_job(tmp_path, frozen_is_generated=False), "source.shot_motion")
+    assert reading is not None
+    assert reading["ok"]
+    assert "b1.video" in reading["value"]

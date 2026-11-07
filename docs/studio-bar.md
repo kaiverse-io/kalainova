@@ -33,7 +33,8 @@ It reads any file, including one the engine did not make, so outside work is hel
 | `picture.detail` | Softness from upscaling or over-compression |
 | `picture.repetition` | Shots that look like other shots in the piece |
 | `picture.corner_mark`, `source.corner_mark` | A logo or watermark that stays put across shots |
-| `edit.moving_share` | Too much of the runtime on stills, which reads as a slideshow |
+| `edit.moving_share` | Too much of the runtime on stills, which reads as a slideshow. It reads the file type only |
+| `source.shot_motion` | A generated clip where almost nothing moves once the camera's pan and zoom are taken out. Names the worst shot. Real footage is not measured, because a quiet shot is a choice. It reads how much of the frame moves, so a generated talking head can miss it, and frozen water behind a moving person only misses it if the person is small. Look at the shot before regenerating it |
 | `edit.cuts_per_min` | Choppy cutting |
 | `source.scale` | A source too small for the delivery size |
 

@@ -127,6 +127,7 @@ bar:
   source_mark_max: 0.004
   source_scale_min: 0.75
   moving_share_min: 0.6
+  shot_motion_min: 0.05            # share of a generated clip that moves, with the camera's pan and zoom taken out
   duplicate_share_max: 0.0
   master_integrated_lkfs_max: -18
   master_true_peak_dbtp_max: -1
