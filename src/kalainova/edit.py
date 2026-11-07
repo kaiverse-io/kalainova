@@ -182,6 +182,21 @@ def run(job: Job, *, force: bool = False) -> dict:
         if "music_gain_db" in opts:
             audio["music_gain_db"] = float(opts["music_gain_db"])
         audio["duck"] = True
+    if "voice" not in by_id and "music" in by_id:
+        audio.setdefault("music_gain_db", 0.0)  # nothing to sit under: the track is the piece
+        audio["duck"] = False
+    ambience = [
+        {
+            "asset_id": f"{span['beat_id']}.ambience",
+            "start_sec": span["start_sec"],
+            "end_sec": span["end_sec"],
+            "gain_db": float(opts.get("ambience_gain_db", -24.0)),
+        }
+        for span in am["timeline"]
+        if f"{span['beat_id']}.ambience" in by_id
+    ]
+    if ambience:
+        audio["ambience"] = ambience
     if "whoosh" in by_id and opts.get("whoosh", not studio):
         audio["sfx"] = [
             {"asset_id": "whoosh", "start_sec": max(0, c["start_sec"] - 0.25), "gain_db": -14}

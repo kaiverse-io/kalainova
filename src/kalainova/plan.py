@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 
-from . import consistency, prompts
+from . import consistency, prompts, shots
 from .jobfs import ContractError, Job
 from .providers import router
 
@@ -35,17 +35,66 @@ def _prompt(job: dict) -> str:
                 "visual_cue": "precise shot description for an image/video model",
                 "visual_kind": "still|video",
                 "emphasis": ["words to highlight"],
+                "cast": ["a name from continuity.people, if anyone is seen"],
+                "location": "a name from continuity.places",
+                "ambience": "what this place sounds like",
+                "continues": "true only if this shot picks up exactly where the last one ended",
+                "shot": {
+                    "size": "wide|medium|close",
+                    "first_frame": "the still picture at the start, with nothing happening yet",
+                    "last_frame": "the still picture at the end",
+                    "camera": "how the camera moves, and what it reveals when it stops",
+                    "action": "what the subject does, start to finish",
+                    "environment": "what else moves: water, smoke, cloud, crowd",
+                },
             }
         ],
-        "claims": [{"id": "c1", "statement": "exact fact", "source": "URL"}],
+        "continuity": {
+            "people": {"name": "age, build, hair, and exactly what they wear"},
+            "places": {"name": "what the place is and how it is laid out"},
+            "props": {"name": "what it looks like"},
+        },
+        "claims": [
+            {"id": "c1", "statement": "exact fact", "source": "URL", "finding": "a finding id"}
+        ],
         "publish": {"title": "platform title", "description": "2-3 lines", "hashtags": ["#tag"]},
     }
+    budget = brief.get("max_video_beats", 3)
     return (
         f"Brief:\n{json.dumps(brief, indent=2, ensure_ascii=False)}\n\n"
         f"Media: {job.get('media')}. Rights: {job.get('rights')}. Target duration: {target}s.\n"
-        f"Write 6-10 beats. visual_kind=video only for the beats where motion matters most (max 3).\n\n"
+        f"Write 6-10 beats. visual_kind=video for at most {budget} beats, choosing where motion matters most.\n\n"
         f"JSON shape:\n{json.dumps(schema_hint, indent=2)}"
     )
+
+
+def _research_context(job: Job) -> str:
+    """Findings checked against their sources. The writer states facts from here and nowhere else."""
+    if not job.has("research"):
+        return ""
+    data = job.read("research")
+    urls = {s["id"]: s["url"] for s in data["sources"]}
+    usable = [
+        {
+            "finding": f["id"],
+            "statement": f["statement"],
+            "source": urls.get(f["source_ids"][0], ""),
+        }
+        for f in data["findings"]
+        if f.get("verified")
+    ]
+    return "\n\n" + prompts.load("plan_research").format(
+        findings=json.dumps(usable, indent=2, ensure_ascii=False),
+        gaps=json.dumps(data.get("gaps") or [], ensure_ascii=False),
+    )
+
+
+def plan_refusals(job: Job, packet: dict) -> list[str]:
+    """What shots.review refuses, so a planner can be told and try again."""
+    brief = job.job.get("brief") or {}
+    budget = int(brief.get("max_video_beats", 3))
+    found = shots.review(packet, budget=budget, allow_stills=bool(brief.get("allow_stills")))
+    return [p["detail"] for p in found if p["status"] == "fail"]
 
 
 def extract_json(text: str) -> dict:
@@ -77,6 +126,7 @@ def run(job: Job, *, force: bool = False) -> dict:
             fixed = "\n\n" + prompts.load("plan_kit").format(context=context)
         prompt = (
             _prompt(data)
+            + _research_context(job)
             + fixed
             + (
                 f"\n\nYour previous output failed validation:\n{last_err}\nFix it."
@@ -99,8 +149,11 @@ def run(job: Job, *, force: bool = False) -> dict:
             packet["job_id"] = data["job_id"]
             if locked:
                 consistency.check_script(job, locked[0], packet, locked[1]["cast"])
+            refused = plan_refusals(job, packet)
+            if refused:
+                raise ContractError("; ".join(refused))
             job.write("script_packet", packet)
             return packet
-        except (ValueError, ContractError) as exc:
+        except (ValueError, KeyError, ContractError) as exc:
             last_err = str(exc)[:1500]
     raise ContractError(f"{job.id}: planner failed validation 3 times: {last_err}")
