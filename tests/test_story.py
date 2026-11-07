@@ -6,10 +6,12 @@ import json
 import xml.etree.ElementTree as ET
 import zipfile
 
+import pypdf
 import pytest
 from PIL import Image
+from reportlab.pdfbase import pdfmetrics
 
-from kalainova import publish, qa, story
+from kalainova import bookpdf, publish, qa, story
 from kalainova.jobfs import ContractError, Job
 
 
@@ -178,6 +180,75 @@ def test_a_story_delivers_a_print_book_page_by_page(tmp_path, monkeypatch):
     pages = sorted((job.work / "book").glob("*.png"))
     assert len(pages) >= 3
     assert Image.open(pages[0]).size == (story.PAGE_W, story.PAGE_H)
+
+
+def _embedded_fonts(reader):
+    found = set()
+    for page in reader.pages[1:]:
+        for ref in page["/Resources"]["/Font"].values():
+            font = ref.get_object()
+            if "/FontFile2" in font["/FontDescriptor"].get_object():
+                found.add(str(font["/BaseFont"]))
+    return found
+
+
+def test_a_printed_book_holds_real_text_set_in_its_own_embedded_type(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    script = job.read("story")
+    final = story.run(job)
+    reader = pypdf.PdfReader(final)
+    assert len(reader.pages) == len(list((job.work / "book").glob("*.png")))
+    box = reader.pages[0].mediabox
+    assert (float(box.width), float(box.height)) == pytest.approx((396.0, 612.0)), "5.5 x 8.5 in"
+    assert reader.metadata.title == script["title"]
+    read_back = " ".join(page.extract_text() for page in reader.pages[1:]).split()
+    for chapter in script["chapters"]:
+        for paragraph in chapter["paragraphs"]:
+            assert " ".join(paragraph.split()[:6]) in " ".join(read_back)
+    assert all("Literata" in name for name in _embedded_fonts(reader)) and _embedded_fonts(reader)
+
+
+def test_a_printed_book_is_the_same_bytes_each_time(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    first = story.run(job).read_bytes()
+    assert story.run(job).read_bytes() == first, "approval is bound to these bytes"
+
+
+def test_a_page_image_and_its_pdf_page_put_a_word_in_the_same_place(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    story.run(job)
+    laid = story.lay_out(job.read("story")["chapters"][0], 1)
+    item = next(i for i in story.page_items(laid, 0) if not i.centred)
+    assert item.x == story.MARGIN_X, "the first line of a chapter takes no indent"
+    assert story.MARGIN_TOP + story.OPENER_DROP - laid.lift < item.baseline
+
+
+def test_kerning_moves_a_pair_and_keeps_every_letter():
+    item = bookpdf.Placed("AVATAR", 0.0, 0.0, 92, optical=48)
+    pieces = bookpdf._pieces(item, story.captions.FONTS / story.BODY_FACE)
+    assert "".join(text for text, _ in pieces) == "AVATAR"
+    if len(pieces) > 1:  # a Pillow built without text shaping sees no kerning in this face
+        assert all(nudge < 0 for _, nudge in pieces[:-1])
+
+
+def test_a_word_is_as_wide_in_print_as_the_line_breaker_measured_it(tmp_path):
+    face = story.captions.FONTS / story.BODY_FACE
+    book = bookpdf.Book("t", "", story.PAGE_W, story.PAGE_H, tmp_path, face, tmp_path / "cuts")
+    name = bookpdf._cut(book, 12, 400)
+    font = bookpdf.pil_font(face, story.BODY_SIZE)
+    for word in ("The", "first", "office", "Toward", "AVATAR"):
+        pieces = bookpdf._pieces(bookpdf.Placed(word, 0.0, 0.0, story.BODY_SIZE), face)
+        printed = sum(
+            pdfmetrics.stringWidth(text, name, story.BODY_SIZE) + nudge for text, nudge in pieces
+        )
+        assert printed == pytest.approx(bookpdf.width(font, word), abs=0.5), word
+
+
+def test_letters_a_ligature_would_join_are_not_crushed_together():
+    font = bookpdf.pil_font(story.captions.FONTS / story.BODY_FACE, 46)
+    wide = font.getlength("T") + font.getlength("h")
+    assert abs(bookpdf._kern(font, "T", "h")) < wide * 0.02
+    assert abs(bookpdf._kern(font, "f", "i")) < wide * 0.02
 
 
 def test_a_story_passes_qa_on_its_own_bytes_and_placeholder_cover_cannot_be_approved(
