@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import bar, look, media, motion
+from . import bar, look, media, motion, rendercache
 from . import captions as ass
 from .jobfs import ContractError, Job
 
@@ -48,6 +48,7 @@ DUCK = "sidechaincompress=threshold=0.05:ratio=3:attack=25:release=450:makeup=1"
 # A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
 ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
 MUSIC_FADE_SEC = 2.5
+AMBIENCE_FADE_SEC = 0.5
 MUSIC_CLEAN = "highpass=f=25"  # generated music can carry DC and rumble nobody can hear
 # Video usually arrives in 8 bits, which leaves contours in skies. This smooths them at high precision.
 DEBAND_VIDEO = "format=yuv444p16le,deband=1thr=0.012:2thr=0.012:3thr=0.012:range=20:blur=1"
@@ -138,6 +139,7 @@ SPEC = {
         "music_gain_db": "num?",
         "duck": "bool?",
         "sfx": "list",
+        "ambience": "list",
     },
     "loudnorm": {"input": "path", "out": "path", "target_lufs": "num", "true_peak_dbtp_max": "num"},
     "export": {
@@ -206,14 +208,14 @@ def _coerce(op: str, args: dict, n: int) -> dict:
         except ValueError as exc:
             raise ContractError(f"step {n} ({op}): {key}: {exc}") from exc
         out[key] = v
-    for s in out.get("sfx") or []:
+    for s in [*(out.get("sfx") or []), *(out.get("ambience") or [])]:
         if not (
             isinstance(s, dict)
             and isinstance(s.get("path"), str)
             and not s["path"].startswith("-")
             and all(
                 isinstance(s.get(k, 0), (int, float)) and not isinstance(s.get(k, 0), bool)
-                for k in ("start_sec", "gain_db")
+                for k in ("start_sec", "end_sec", "gain_db")
             )
         ):
             raise ContractError(f"step {n} (mix_audio): malformed sfx entry")
@@ -255,6 +257,15 @@ def _audio_steps(em: dict, assets: dict, *, original: bool) -> list[dict]:
             "gain_db": x.get("gain_db", -12),
         }
         for x in a.get("sfx", [])
+    ]
+    mix["ambience"] = [
+        {
+            "path": assets[x["asset_id"]]["path"],
+            "start_sec": x["start_sec"],
+            "end_sec": x["end_sec"],
+            "gain_db": x.get("gain_db", -24),
+        }
+        for x in a.get("ambience", [])
     ]
     master = {
         "input": "mix.wav",
@@ -509,17 +520,20 @@ def _safe(work: Path, rel: str) -> Path:
 def stamp(job: Job, video: Path) -> None:
     """Tie the rendered file to the asset record it was made from."""
     if job.has("asset_manifest"):
-        job.write_stamp(
-            {
-                "artifact_sha256": hashlib.sha256(video.read_bytes()).hexdigest(),
-                "asset_manifest_sha256": hashlib.sha256(
-                    job.path("asset_manifest").read_bytes()
-                ).hexdigest(),
-            }
-        )
+        record = {
+            "artifact_sha256": hashlib.sha256(video.read_bytes()).hexdigest(),
+            "asset_manifest_sha256": hashlib.sha256(
+                job.path("asset_manifest").read_bytes()
+            ).hexdigest(),
+        }
+        master = video.with_name("final.master.mov")
+        if master.exists():
+            record["master_sha256"] = hashlib.sha256(master.read_bytes()).hexdigest()
+        job.write_stamp(record)
 
 
-def execute(job: Job, plan: dict | None = None) -> Path:
+def execute(job: Job, plan: dict | None = None, *, cache: bool = True) -> Path:
+    """Run the plan. A step whose inputs and settings have not changed keeps its old output."""
     plan = plan or job.read("render_plan")
     if plan.get("edit_manifest_sha256") and job.has("edit_manifest"):
         current = hashlib.sha256(job.path("edit_manifest").read_bytes()).hexdigest()
@@ -529,11 +543,18 @@ def execute(job: Job, plan: dict | None = None) -> Path:
             )
     work = job.work
     (work / "seg").mkdir(exist_ok=True)
+    done = rendercache.load(work) if cache else {}
     for n, step in enumerate(plan["steps"]):
         op, a = step["op"], step.get("args", {})
         if op not in OPS:
             raise ContractError(f"step {n}: op {op!r} not allowed")
-        globals()[f"_op_{op}"](work, _coerce(op, a if isinstance(a, dict) else {}, n))
+        args = _coerce(op, a if isinstance(a, dict) else {}, n)
+        key = rendercache.key(work, op, args)
+        if cache and rendercache.unchanged(work, done, n, key, args):
+            continue
+        globals()[f"_op_{op}"](work, args)
+        rendercache.remember(done, n, key)
+        rendercache.save(work, done)
     out = work / "final.mp4" if "video" in job.job.get("media", []) else job.artifact()
     (work / "render.done.json").write_text(
         json.dumps(
@@ -881,6 +902,8 @@ def _op_mix_audio(work: Path, a: dict) -> None:
         labels += ["[voice]", "[room]"]
         maps += ["-map", "[vstem]", str(work / "voice.stem.wav")]
         idx = 1
+    for stale in ("music.stem.wav", "effects.stem.wav", "me.stem.wav"):
+        (work / stale).unlink(missing_ok=True)
     if a.get("music"):
         bed = media.loop_audio(_safe(work, a["music"]), work / "music.bed.wav", D)
         gain, key_gain = a.get("music_gain_db", MUSIC_UNDER_VOICE_DB), 0.0
@@ -899,6 +922,16 @@ def _op_mix_audio(work: Path, a: dict) -> None:
         maps += ["-map", "[mstem]", str(work / "music.stem.wav")]
     if has_voice and not a.get("music"):
         chains.append("[vkey]anullsink")
+    places = a.get("ambience") or []
+    for k, s in enumerate(places):
+        ins += ["-i", str(_safe(work, s["path"]))]
+        chains.append(_ambience_chain(idx, k, s))
+        idx += 1
+    if places:
+        joined = "".join(f"[amb{k}]" for k in range(len(places)))
+        chains.append(f"{joined}amix=inputs={len(places)}:normalize=0,asplit=2[fx][fxstem]")
+        labels.append("[fx]")
+        maps += ["-map", "[fxstem]", str(work / "effects.stem.wav")]
     for k, s in enumerate(a.get("sfx", [])):
         ins += ["-i", str(_safe(work, s["path"]))]
         ms = max(int(float(s["start_sec"]) * 1000), 0)
@@ -929,6 +962,30 @@ def _op_mix_audio(work: Path, a: dict) -> None:
             *maps,
         ]
     )
+    _music_and_effects(work)
+
+
+def _ambience_chain(index: int, k: int, s: dict) -> str:
+    """One place's sound, fading in and out so a cut between two places is never heard as a step."""
+    span = max(float(s["end_sec"]) - float(s["start_sec"]), 0.1)
+    fade = min(AMBIENCE_FADE_SEC, span / 3)
+    start_ms = max(int(float(s["start_sec"]) * 1000), 0)
+    return (
+        f"[{index}:a]aresample=48000,aformat=channel_layouts=stereo,"
+        f"aloop=loop=-1:size=2147483647,atrim=0:{span:.3f},"
+        f"afade=t=in:d={fade:.3f},afade=t=out:st={span - fade:.3f}:d={fade:.3f},"
+        f"volume={float(s.get('gain_db', -24)):.2f}dB,adelay={start_ms}|{start_ms}[amb{k}]"
+    )
+
+
+def _music_and_effects(work: Path) -> None:
+    """Everything but the voice, which a dub or a foreign version is built on."""
+    stems = [p for p in (work / "music.stem.wav", work / "effects.stem.wav") if p.exists()]
+    if not stems:
+        return
+    inputs = [arg for stem in stems for arg in ("-i", str(stem))]
+    graph = ["-filter_complex", f"amix=inputs={len(stems)}:normalize=0"] if len(stems) > 1 else []
+    media.run([*inputs, *graph, "-ar", "48000", str(work / "me.stem.wav")])
 
 
 def _op_loudnorm(work: Path, a: dict) -> None:
