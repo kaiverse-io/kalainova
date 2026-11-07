@@ -14,7 +14,7 @@ from kalainova.jobfs import ContractError, Job
 
 
 def test_a_paragraph_breaks_into_lines_that_fit_and_lose_no_words():
-    text = "The keeper climbed the stairs again that night, as he had every night before it. " * 4
+    text = "The porter walked the platform again that night, as he had every night before it. " * 4
     lines = story.break_lines(text, measure=900, size=46, indent=46)
     assert " ".join(" ".join(line.words) for line in lines).split() == text.split()
     assert all(line.width <= 900 for line in lines)
@@ -23,9 +23,9 @@ def test_a_paragraph_breaks_into_lines_that_fit_and_lose_no_words():
 
 def test_lines_are_broken_for_the_whole_paragraph_not_one_line_at_a_time():
     text = (
-        "boat, bolted a grey box to the wall of the lamp room, shaken his hand, and told him he "
-        "could go ashore whenever he liked. That had been a Tuesday. On the Wednesday, at a "
-        "quarter to six, he climbed the stairs anyway, and the extraordinary quiet of the tower "
+        "train, bolted a grey box to the wall of the ticket room, shaken his hand, and told him he "
+        "could go home whenever he liked. That had been a Tuesday. On the Wednesday, at a "
+        "quarter to six, he walked the platform anyway, and the extraordinary quiet of the station "
         "met him."
     )
     measure = 900

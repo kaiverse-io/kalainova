@@ -100,7 +100,7 @@ def test_a_clip_starts_from_its_still_when_given_one(calls, tmp_path):
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_still_comes_back_as_a_png_in_a_size_the_model_can_make(calls, tmp_path):
     out = tmp_path / "s.png"
-    mac.Mac().image("a lighthouse", out, width=3840, height=2160)
+    mac.Mac().image("a bridge", out, width=3840, height=2160)
     cmd = calls[0]
     width, height = int(cmd[cmd.index("--width") + 1]), int(cmd[cmd.index("--height") + 1])
     assert width % 16 == 0 and height % 16 == 0

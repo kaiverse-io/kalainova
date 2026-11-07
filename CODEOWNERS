@@ -7,3 +7,16 @@
 
 # ADRs require explicit sign-off
 docs/decisions/   @kaiverse-io
+
+# The gates themselves. An agent that can edit the check can make any change pass it, so a
+# change here needs the owner's review, not just a green build (chassis#10).
+justfile                  @kaiverse-io
+.github/workflows/        @kaiverse-io
+.pre-commit-config.yaml   @kaiverse-io
+.opengrep/                @kaiverse-io
+.importlinter             @kaiverse-io
+pyproject.toml            @kaiverse-io
+.claude/settings.json     @kaiverse-io
+.codex/                   @kaiverse-io
+.mcp.json                 @kaiverse-io
+AGENTS.md                 @kaiverse-io

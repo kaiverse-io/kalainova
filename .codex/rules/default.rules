@@ -23,3 +23,30 @@ prefix_rule(
     decision = "forbidden",
     justification = "git push --no-verify bypasses the pre-push hook (osv-scanner) — fix the violation, never skip the gate.",
 )
+
+# One-way doors (chassis#10, #9): history rewrites and discarded work cannot be undone by a
+# later commit. Same prefix-match limitation as above — `git push origin main --force` is NOT
+# caught; CI and branch protection are the real floor.
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Force-push rewrites shared history — open a new commit or ask a human.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Force-push rewrites shared history — open a new commit or ask a human.",
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "git reset --hard discards uncommitted work irrecoverably — ask a human first.",
+)
+
+prefix_rule(
+    pattern = ["git", "clean", "-f"],
+    decision = "forbidden",
+    justification = "git clean -f deletes untracked files irrecoverably — ask a human first.",
+)
