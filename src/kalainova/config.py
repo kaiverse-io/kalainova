@@ -63,6 +63,29 @@ def profile(name: str) -> dict:
     return dict(studio().get("profiles", {}).get(name, {}))
 
 
+@lru_cache(maxsize=1)
+def _repo_licences() -> dict:
+    path = REPO / "config" / "studio.yaml"
+    return yaml.safe_load(path.read_text()).get("licences", {}) if path.exists() else {}
+
+
+def licence_for(provider: str, model: str) -> dict:
+    """What a model's terms allow, or {} if nobody has read them. A private config can add to these."""
+    merged = {**_repo_licences(), **(studio().get("licences") or {})}
+    table = merged.get(provider) or {}
+    return dict(table.get(model) or table.get("*") or {})
+
+
+def takes() -> dict:
+    """How many takes a shot gets before anyone asks for more. A job's brief can override it."""
+    return dict(studio().get("takes") or {})
+
+
+def space_spec(capability: str) -> dict:
+    """How a hosted Gradio app takes a request for this capability."""
+    return dict((studio().get("models", {}).get("spaces") or {}).get(capability) or {})
+
+
 def estimate(
     provider: str, capability: str, *, chars: int = 0, duration: float = 0.0, key: str | None = None
 ) -> float:
@@ -74,5 +97,6 @@ def estimate(
         + duration / 60 * p.get("per_min", 0)
         + p.get("per_image", 0)
         + p.get("per_track", 0)
+        + p.get("per_call", 0)
         + (4000 / 1e6 * p.get("input_per_mtok", 0) + 4000 / 1e6 * p.get("output_per_mtok", 0))
     )

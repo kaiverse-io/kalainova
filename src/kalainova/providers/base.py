@@ -23,7 +23,31 @@ from typing import Any
 
 from .. import config
 
-CAPABILITIES = ("llm", "voice", "image", "video", "music", "song", "sfx", "transcribe")
+CAPABILITIES = (
+    "llm",
+    "voice",
+    "image",
+    "video",
+    "music",
+    "song",
+    "sfx",
+    "transcribe",
+    "lipsync",
+    "separate",
+    "graphics",
+    "search",
+)
+
+
+class BilledError(RuntimeError):
+    """The vendor charged for this call, and then the file could not be fetched.
+
+    Raised by an adapter so the ledger still records the money.
+    """
+
+    def __init__(self, billed: float, message: str) -> None:
+        super().__init__(message)
+        self.billed = billed
 
 
 @dataclass
@@ -45,6 +69,9 @@ class Provider:
     synthetic = True  # output is AI-generated and must be declared where platforms ask
     free = False  # calls cost nothing, so no price is needed under a cost cap
     placeholder = False  # output never counts as a real result
+    # Keeps its own deadline, so time queued for a shared GPU does not count against the call, and a
+    # call that runs out can really be stopped. Python cannot kill a worker thread.
+    self_timed = False
 
     def missing_env(self) -> list[str]:
         needed = ((self.env_key,) if self.env_key else ()) + tuple(self.env_keys)
@@ -118,6 +145,21 @@ class Provider:
         raise NotImplementedError
 
     def transcribe(self, src: Path, **kw) -> Result:
+        raise NotImplementedError
+
+    def lipsync(self, video: Path, audio: Path, dst: Path, **kw) -> Result:
+        raise NotImplementedError
+
+    def separate(self, src: Path, vocals: Path, rest: Path, **kw) -> Result:
+        """Split a mix into its vocals and everything else."""
+        raise NotImplementedError
+
+    def graphics(self, folder: Path, dst: Path, **kw) -> Result:
+        """Render a composition folder to a file."""
+        raise NotImplementedError
+
+    def search(self, query: str, *, limit: int = 5, **kw) -> Result:
+        """Find sources. meta["hits"] holds url, title, publisher, snippet, and text when known."""
         raise NotImplementedError
 
 

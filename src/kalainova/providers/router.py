@@ -25,16 +25,27 @@ from typing import Any
 
 from .. import config, media
 from ..blobstore import sha256_file
-from ..jobfs import ContractError, CostCapExceeded, Job
+from ..jobfs import ContractError, Job
 from . import base
 
 # capability -> the position of the destination path in the call's arguments
-OUTPUT_ARG = {"voice": 1, "image": 1, "video": 1, "music": 1, "song": 1, "sfx": 1}
+OUTPUT_ARG = {
+    "voice": 1,
+    "image": 1,
+    "video": 1,
+    "music": 1,
+    "song": 1,
+    "sfx": 1,
+    "lipsync": 2,
+    "separate": 1,
+    "graphics": 1,
+}
 # OSError covers connection, timeout, and HTTP errors. ValueError, KeyError, and IndexError cover a malformed reply.
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = "generations.jsonl"
-PICTURE_OUTPUTS = ("image", "video")
+PICTURE_OUTPUTS = ("image", "video", "lipsync", "graphics")
+SOUND_OUTPUTS = ("song", "music")
 ASPECT_TOLERANCE = 0.03
 MIN_SCALE = 0.5  # the editor can upscale a large image, not rescue a thumbnail
 
@@ -115,6 +126,8 @@ def _check_output(capability: str, path: Path, kw: dict) -> None:
         raise ValueError("file has no duration")
     if capability in PICTURE_OUTPUTS and not media.has_picture(path):
         raise ValueError("no picture: one flat tone throughout, the model's decode failed")
+    if capability in SOUND_OUTPUTS and not media.has_sound(path):
+        raise ValueError("no sound: the file is silent, the model's decode failed")
 
 
 def _request_key(capability: str, fn_name: str, args: tuple, kw: dict) -> str:
@@ -207,39 +220,64 @@ def generate(
         if estimate is None and cap is not None:
             errors.append(f"{p.name}: no price for {capability}, and this job has a cost cap")
             continue
-        job.reserve(p.name, capability, estimate or 0.0)
+        reservation = job.reserve(p.name, capability, estimate or 0.0)
         call_args = list(args)
         attempt = None
         if has_output:
             attempt = dst.with_name(f".{uuid.uuid4().hex[:8]}.{dst.name}")
             call_args[OUTPUT_ARG[capability]] = attempt
+        limit = _deadline(capability)
+        call_kw = {**kw, "deadline_sec": limit} if p.self_timed else kw
         try:
-            res = _call(getattr(p, fn_name), tuple(call_args), kw, _deadline(capability))
-        except CostCapExceeded:
-            raise
-        except ContractError:
-            raise
+            res = _call(
+                getattr(p, fn_name), tuple(call_args), call_kw, None if p.self_timed else limit
+            )
         except ProviderTimeout as exc:
             job.charge(
                 p.name,
                 capability,
                 estimate or 0.0,
                 f"{note or fn_name}: timed out, may have been billed",
+                reservation,
             )
             errors.append(f"{p.name}: {exc}")
             continue
+        except base.BilledError as exc:
+            job.charge(
+                p.name,
+                capability,
+                exc.billed,
+                f"{note or fn_name}: billed, then failed",
+                reservation,
+            )
+            errors.append(f"{p.name}: {str(exc)[:300]}")
+            continue
         except PROVIDER_FAILURES as exc:
+            if isinstance(exc, ContractError):  # a rule the engine set, not a vendor's failure
+                job.release(reservation)
+                raise
+            job.release(reservation)
             errors.append(f"{p.name}: {type(exc).__name__}: {str(exc)[:300]}")
             continue
+        except BaseException:  # a bug in an adapter, or the cap: raised, with nothing left held
+            job.release(reservation)
+            raise
         if has_output:
             if not attempt.is_file():
+                job.charge(p.name, capability, res.cost, f"{note or fn_name}: no file", reservation)
                 errors.append(f"{p.name}: returned no file")
                 continue
             try:
                 _check_output(capability, attempt, kw)
             except PROVIDER_FAILURES as exc:
                 attempt.unlink(missing_ok=True)
-                job.charge(p.name, capability, res.cost, f"{note or fn_name}: output rejected")
+                job.charge(
+                    p.name,
+                    capability,
+                    res.cost,
+                    f"{note or fn_name}: output rejected",
+                    reservation,
+                )
                 errors.append(f"{p.name}: rejected output: {str(exc)[:200]}")
                 continue
             os.replace(attempt, dst)
@@ -250,6 +288,6 @@ def generate(
             print(
                 f"{job.id}: {capability}: used {p.name} after: {'; '.join(errors)}", file=sys.stderr
             )
-        job.charge(p.name, capability, res.cost, note or fn_name)
+        job.charge(p.name, capability, res.cost, note or fn_name, reservation)
         return p, res
     raise ProviderError(f"{job.id}: every provider failed for {capability}: {'; '.join(errors)}")

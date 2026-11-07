@@ -94,6 +94,7 @@
               "visual",
               "music",
               "sfx",
+              "song",
               "other"
             ]
           },
@@ -113,6 +114,11 @@
           "provenance": {
             "type": "object",
             "description": "Open record of how the provider made this asset, such as a node, a weights hash, or a seed."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The bytes this entry describes."
           }
         }
       }
@@ -180,6 +186,26 @@
     "kit_lock_sha256": {
       "type": "string",
       "description": "The kit lock these assets were made under."
+    },
+    "promise_breaks": {
+      "type": "array",
+      "description": "Shots that asked to move and did not, each with the reason.",
+      "items": {
+        "type": "object",
+        "required": [
+          "beat_id",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

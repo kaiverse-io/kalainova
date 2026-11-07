@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/song-0.1.json",
+  "title": "Song",
+  "description": "A song to make: its words, its sound, and what it is asked to hit.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "title",
+    "style",
+    "sections"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "style": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Genre, instruments, mood, and voice in plain words. Never a named artist."
+    },
+    "avoid": {
+      "type": "string",
+      "description": "Sounds to keep out."
+    },
+    "bpm": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "key": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string",
+      "description": "BCP 47 tag of the lyrics."
+    },
+    "duration_sec": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "instrumental": {
+      "type": "boolean"
+    },
+    "byline": {
+      "type": "string"
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "intro",
+              "verse",
+              "pre-chorus",
+              "chorus",
+              "hook",
+              "bridge",
+              "solo",
+              "breakdown",
+              "outro"
+            ]
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "style": {
+            "type": "string",
+            "description": "How this section differs from the rest."
+          },
+          "visual": {
+            "type": "string",
+            "description": "What a lyric video shows here."
+          }
+        }
+      }
+    },
+    "publish": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "hashtags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

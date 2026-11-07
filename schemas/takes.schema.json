@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/takes-0.1.json",
+  "title": "Takes",
+  "description": "Every attempt at a shot or a song, what each was read as, and which one the piece uses.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "shots"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "shots": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "chosen",
+          "chosen_by",
+          "takes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "chosen": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "chosen_by": {
+            "enum": [
+              "reading",
+              "human"
+            ]
+          },
+          "takes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "n",
+                "seed",
+                "file",
+                "ok"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "n": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                },
+                "readings": {
+                  "type": "object"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "meta": {
+                  "type": "object"
+                },
+                "words": {
+                  "type": "array"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from functools import cache
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import numpy as np
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
 MASTER_PASSES = 3
+SOUND_FLOOR = 10 ** (-60 / 20)  # a file that never reaches -60 dBFS holds no sound worth keeping
 # Luma levels of 255: an encoder keeps a flat field this tight, and a dark shot is never this flat.
 FLAT_TONE_LEVELS = 3
 RIDE_WINDOW = 9  # half-second frames: the level it follows, about four seconds wide
@@ -445,6 +447,58 @@ def has_picture(path: str | Path) -> bool:
     """False when an image or clip is one flat tone from start to end, as a failed decode leaves."""
     low, high = np.percentile(decode_gray(path, width=64), [0.5, 99.5])
     return bool(high - low >= FLAT_TONE_LEVELS)
+
+
+def has_sound(path: str | Path) -> bool:
+    """False when a file holds nothing above the noise floor, as a failed decode leaves."""
+    left, right, _ = decode_stereo(path)
+    if not left.size:
+        return False
+    return bool(max(float(np.abs(left).max()), float(np.abs(right).max())) >= SOUND_FLOOR)
+
+
+def iter_gray(path: str | Path, *, width: int):
+    """Luma frames one at a time, so a long file never has to fit in memory."""
+    info = summarize(path)
+    height = max(round(width * info["height"] / info["width"]) // 2 * 2, 2)
+    cmd = [
+        FFMPEG, "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
+        "-vf", f"scale={width}:{height}:flags=bicubic,format=gray",
+        "-f", "rawvideo", "-",
+    ]  # fmt: skip
+    size = width * height
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
+        while True:
+            blob = proc.stdout.read(size)
+            if len(blob) < size:
+                return
+            yield np.frombuffer(blob, np.uint8).reshape(height, width)
+
+
+def cambi(path: str | Path, *, every: int = 6) -> tuple[float, float] | None:
+    """the CAMBI banding index, mean and peak, from every Nth frame. None if ffmpeg lacks it.
+
+    About 5 reads as slightly annoying. It needs no reference, so the file is its own second input.
+    """
+    if not has_filter("libvmaf"):
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / "cambi.json"
+        graph = (
+            "[0:v][1:v]libvmaf=feature=name=cambi:log_fmt=json:"
+            f"log_path={filter_path(log)}:n_subsample={every}"
+        )
+        proc = subprocess.run(
+            [FFMPEG, "-hide_banner", "-nostats", "-loglevel", "error", "-i", str(path),
+             "-i", str(path), "-lavfi", graph, "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+        )  # fmt: skip
+        if proc.returncode != 0 or not log.exists():
+            return None
+        pooled = json.loads(log.read_text()).get("pooled_metrics", {})
+    found = next((v for k, v in pooled.items() if "cambi" in k.lower()), None)
+    return (float(found["mean"]), float(found["max"])) if found else None
 
 
 def _bar_lengths(line: np.ndarray) -> tuple[int, int]:

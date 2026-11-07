@@ -332,6 +332,7 @@ def fake_media(monkeypatch):
     monkeypatch.setattr(media, "duration", lambda path: 2.0)
     monkeypatch.setattr(media, "summarize", lambda path: {})
     monkeypatch.setattr(media, "has_picture", lambda path: True)
+    monkeypatch.setattr(media, "has_sound", lambda path: True)
 
     def run(args):
         open(args[-1], "wb").close()

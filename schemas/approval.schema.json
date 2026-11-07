@@ -62,6 +62,11 @@
         "unlisted",
         "private"
       ]
+    },
+    "master_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "The delivery master QA checked, when the job has one."
     }
   }
 }

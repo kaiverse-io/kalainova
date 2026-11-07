@@ -277,6 +277,35 @@
         },
         "duck": {
           "type": "boolean"
+        },
+        "ambience": {
+          "type": "array",
+          "description": "The sound of each place, laid under its beat.",
+          "items": {
+            "type": "object",
+            "required": [
+              "asset_id",
+              "start_sec",
+              "end_sec"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "asset_id": {
+                "type": "string"
+              },
+              "start_sec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "end_sec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "gain_db": {
+                "type": "number"
+              }
+            }
+          }
         }
       }
     },
