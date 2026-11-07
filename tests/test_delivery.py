@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
-from kalainova import assets, bar, captions, config, edit, media, render
+from kalainova import assets, bar, captions, config, edit, media, qa, render
 from kalainova.jobfs import Job
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
@@ -93,6 +93,8 @@ def test_a_film_opens_on_picture_and_music_and_holds_after_the_last_word(tmp_pat
     voice, _, sr = media.decode_stereo(job.work / "voice.wav")
     assert abs(voice[: int(sr * (prof["open_sec"] - 0.2))]).max() < 0.001
     assert abs(voice[int(sr * prof["open_sec"]) : int(sr * (prof["open_sec"] + 2))]).max() > 0.01
+    checks = {c["id"]: c["status"] for c in qa.run(job)["checks"]}
+    assert checks["hook.first_word"] == "pass", "the opening is the design, not a slow hook"
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")

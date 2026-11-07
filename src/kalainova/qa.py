@@ -294,11 +294,13 @@ def run(job: Job) -> dict:
     # hook timing
     caps = em.get("captions") or em.get("closed_captions") or []
     first = caps[0]["start_sec"] if caps else None
+    # a film's opening is its design, so it does not count against the first word
+    opening = float(config.profile(job.job.get("profile") or "").get("open_sec", 0.0))
     if caps or am.get("words"):  # edits of silent footage carry no captions to time
         _check(
             checks,
             "hook.first_word",
-            first is not None and first <= 0.6,
+            first is not None and first <= 0.6 + opening,
             f"first caption at {first}s",
             "warn",
         )
