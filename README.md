@@ -79,14 +79,18 @@ Then follow **[How to run channels and characters](docs/how-to/run-a-stream.md)*
 
 | Area | What's included |
 |---|---|
-| **Generation** | Voice with word timings, images, video, music, and effects, through provider adapters with a per-job provider list |
+| **Generation** | Voice with word timings, images, video, music, songs, effects, lip sync, stem separation, and rendered graphics, through provider adapters with a per-job provider list |
+| **Direction** | First frame, last frame, and motion written apart; several takes of a shot, each with its own seed; a reading picks and a person overrides; one shot retaken alone; a shot that asked to move cannot quietly become a still |
 | **Continuity** | Character, style, and sound kits; a job lockfile; an append-only story canon; per-shot reference selection |
 | **Editing** | A lossless 10-bit picture path, a sub-pixel camera on stills, one grade path for stills and footage, type placed against the picture, sidechain-ducked music, true-peak mastering, and an editor for your own footage that takes revision notes |
-| **Comics and stories** | Pages laid out and lettered by the engine with art that carries no words, print PDF, CBZ, and phone scroll; typeset books with a real EPUB |
-| **Delivery** | Web H.264, a ProRes 422 HQ master with LPCM stereo for film profiles, and captions as SRT, WebVTT, and iTunes Timed Text files |
-| **Quality gates** | Frame, duration, loudness, true peak, black frames, dead air, pacing, hook timing, caption coverage, claim sources, rights, disclosure, a vision judge, and [the studio bar](docs/studio-bar.md): banding, judder, repetition, source marks, detail, clicks, voice-to-music, and delivery checks |
+| **Comics and stories** | Pages laid out and lettered by the engine with art that carries no words, print PDF, CBZ, and phone scroll; typeset books as a PDF with live, embedded type and a real EPUB |
+| **Songs** | Lyrics to takes, readings that pick among them, a master, lyric files, and a video cut to the finished track |
+| **Research** | Sources, a private saved copy of each, and findings that reach a script only when their quote is found in that copy |
+| **Footage** | An editor that takes revision notes, speech cut on words instead of silences, closed captions from what was said, and short clips found in a long recording |
+| **Delivery** | Web H.264, a ProRes 422 HQ master with LPCM stereo for film profiles, voice and music-and-effects stems, dubbing into another language, captions as SRT, WebVTT, and iTunes Timed Text files, and the cut as FCPXML, OpenTimelineIO, or EDL |
+| **Quality gates** | Frame, duration, loudness, true peak, black frames, dead air, pacing, hook timing, caption coverage, claim sources, rights, disclosure, a vision judge, [the studio bar](docs/studio-bar.md): banding, judder, motion with the camera's move taken out, repetition, source marks, detail, clicks, voice-to-music, and delivery checks, with conformance and craft reported apart |
 | **Publishing** | YouTube Data API and Upload-Post, with the synthetic-media label required |
-| **Operations** | Cost caps and ledger, saved paid results that a restart reuses, posting limits, dated schedules, and 48-hour measurement |
+| **Operations** | Cost reserved before each call and settled at the real amount, saved paid results that a restart reuses, a render that re-encodes only what changed, a chain of title for each piece, human verdicts checked against the readings, posting limits, dated schedules, and 48-hour measurement |
 
 Models and prices live in [`config/studio.yaml`](config/studio.yaml).
 
@@ -98,6 +102,7 @@ Kalainova is pre-1.0. The line runs and is tested, but it hasn't yet proven itse
 |---|---|
 | Pipeline, gates, approval binding | Built and tested with placeholder providers |
 | Kits, streams, locks, schedules | Built and tested with stand-in providers |
+| Takes, songs, research, dubbing, clips, timeline export | Built and tested with faked models. None has made a real piece yet. [The studio goal](docs/studio-goal.md) keeps the score |
 | Live model and publishing adapters | Written from vendor docs; verify model IDs and fields before your first paid run |
 | A piece accepted or measured in public | Not yet. This is the next milestone |
 | Postgres, workers, and a review service | Designed in [ADR 0010](docs/decisions/0010-private-home-and-cloud-path.md), not built |

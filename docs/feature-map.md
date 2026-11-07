@@ -7,4 +7,25 @@
 
 | Feature | Entry point | Code | Tests |
 |---|---|---|---|
-| _Example — replace:_ health check | `GET /healthz` | `src/<package>/api/health.py` | `tests/test_health.py` |
+| Make a generated piece | `kalainova make` | `assets.py`, `edit.py`, `render/` | `tests/test_engine.py` |
+| Plan review before spending | `kalainova shotplan` | `shots.py` | `tests/test_shots.py` |
+| Takes and retakes | `kalainova takes`, `take`, `retake` | `takes.py`, `shotmake.py` | `tests/test_takes.py` |
+| The motion promise | `kalainova make` | `assets.py`, `qachecks.py` | `tests/test_takes.py` |
+| Songs | `kalainova song`, `song-video` | `songs.py`, `bar/song.py` | `tests/test_songs.py` |
+| Scripts from a brief | `kalainova song`, `comic`, `story` | `writers.py` | `tests/test_songs.py` |
+| Research with checked quotes | `kalainova research` | `research.py`, `providers/search.py` | `tests/test_research.py` |
+| Shot sheet, filmstrip, cut check | `kalainova sheet`, `filmstrip`, `cutcheck` | `timeline.py` | `tests/test_timeline.py` |
+| Timeline export | `kalainova export` | `nle.py` | `tests/test_nle.py` |
+| Footage edit | `kalainova ingest`, `edit`, `revise` | `editor/` | `tests/test_editor.py` |
+| Word-level speech cuts | `kalainova edit` | `editor/speech.py` | `tests/test_speech_clips.py` |
+| Clips from a long source | `kalainova clips` | `editor/clips.py` | `tests/test_speech_clips.py` |
+| Dubbing | `kalainova dub` | `dub.py` | `tests/test_dub.py` |
+| Comics and books | `kalainova comic`, `story` | `comic.py`, `story.py` | `tests/test_comic.py`, `tests/test_story.py` |
+| Kits, streams, locks | `kalainova kit`, `stream`, `request` | `kits.py`, `streams.py`, `consistency.py` | `tests/test_kits.py`, `tests/test_kit_jobs.py` |
+| The studio bar | `kalainova bar` | `bar/` | `tests/test_bar.py` |
+| Verdicts and signals | `kalainova verdict`, `signals` | `verdicts.py` | `tests/test_verdicts_provenance.py` |
+| Chain of title | `kalainova provenance`, `ledger` | `provenance.py` | `tests/test_verdicts_provenance.py` |
+| Approval and publishing | `kalainova approve`, `publish` | `publish/` | `tests/test_engine.py`, `tests/test_gate_master.py` |
+| Reservations and the ledger | every paid call | `jobfs.py`, `providers/router.py` | `tests/test_ledger.py`, `tests/test_router.py` |
+| Open models on this machine | `providers: {"video": ["mac"]}` | `providers/mac.py`, `providers/runners/` | `tests/test_mac_provider.py` |
+| Incremental render | `kalainova make --from edit` | `render/cache.py` | `tests/test_rendercache.py` |
