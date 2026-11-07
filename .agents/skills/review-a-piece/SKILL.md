@@ -1,0 +1,21 @@
+---
+name: review-a-piece
+description: Check a rendered Kalainova piece by looking and listening before a human reviews it. Use when a film, short, reel, comic, book, or audio piece is rendered, or when asked whether a piece is ready.
+---
+
+# Review a piece
+
+Gates catch craft faults. Reading the piece catches the rest: a balloon tail across a face, a title that swallowed an instruction, and a film cut from the wrong assets all passed every check first.
+
+1. **Confirm what was cut.** Read `edit_manifest.json`. Do the cuts name the assets you expect, and does the duration match? A stale edit looks like a success.
+2. **Probe the inputs.** Size and frame rate of every source, with `ffprobe`. Do not blame the edit for a small source.
+3. **Run `kalainova bar <job>`, and read the numbers,** not just ok or MISS. A value far past its limit in the passing direction is a fault too.
+4. **Look at it.**
+   - Picture: a contact sheet of the whole piece, then two or three frames at full size.
+   - Motion: step through 8 frames of any shot with people. Limbs, hands, and faces fail first.
+   - Comic: read every page. Check tails, overlaps, and lettering against the art.
+   - Book: view every page. Check stranded lines and near-empty pages.
+5. **Check continuity between shots:** same place, same clothes, same object.
+6. **Check the sound.** Whisper on the final mix confirms the words. Per-second levels of the voice and music stems show whether the music can be heard. You cannot judge taste this way, so say so.
+7. **Fix engine faults at the root, with a test.** Re-render from the earliest stage that changed. Never `--force` an assets stage that took hours.
+8. **Say what you could not check,** and ask the operator specific questions. Never approve a piece, and never claim an outside platform would accept it.
