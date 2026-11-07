@@ -19,6 +19,10 @@ What stays the same (see `kalainova kit --help`, `stream --help`):
   kalainova schedule <stream> <date> "<brief>"
   kalainova request <stream> "<brief>" [--cast a,b]   a locked job for that stream
 
+Shot by shot, songs, research, and what comes after a cut (see production_cli.py):
+  kalainova shotplan|takes|take|retake|sheet|filmstrip|cutcheck|export <job> ...
+  kalainova song|song-video|research|clips|dub|verdict|signals|provenance|ledger <job> ...
+
 Editing arm (your own footage):
   uv run kalainova ingest <job> <files or folders...>   split into shots, score every shot
   uv run kalainova edit <job> "30s reel, warm, fast cuts, title: ..."   direct -> render -> qa
@@ -38,7 +42,7 @@ import shutil
 import sys
 import time
 
-from . import assets, edit, plan, qa, render, studio_cli
+from . import assets, edit, plan, production_cli, qa, render, studio_cli
 from .jobfs import REPO, ContractError, home, open_job
 
 
@@ -240,10 +244,13 @@ def main(argv: list[str] | None = None) -> int:
     rl.add_argument("--identity", default="stock-reels")
     rl.add_argument("--count", type=int, default=10)
     studio_cli.add_parsers(sub)
+    production_cli.add_parsers(sub)
     a = p.parse_args(argv)
 
     try:
         handled = studio_cli.dispatch(a)
+        if handled is None:
+            handled = production_cli.dispatch(a)
         if handled is not None:
             return handled
         if a.cmd == "new":

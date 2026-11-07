@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from kalainova.editor import notes
+from kalainova.editor import choose, notes
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 
@@ -178,55 +178,43 @@ def _moment(sig, source="s1"):
 
 
 def test_a_shot_that_looks_like_one_already_used_waits_its_turn():
-    from kalainova.editor import direct
-
     horizon = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     other = [6.0, 1.0, 5.0, 2.0, 4.0, 3.0]
     pool = [_moment(list(horizon), "s2"), _moment(other, "s3")]
-    assert direct.next_moment(pool, used=[horizon], last_source="s1") is pool[1]
-    assert direct.next_moment(pool[:1], used=[horizon], last_source="s1") is None
+    assert choose.next_moment(pool, used=[horizon], last_source="s1") is pool[1]
+    assert choose.next_moment(pool[:1], used=[horizon], last_source="s1") is None
 
 
 def test_the_first_moment_is_free_to_be_anything():
-    from kalainova.editor import direct
-
     pool = [_moment([1.0, 2.0, 3.0, 4.0])]
-    assert direct.next_moment(pool, used=[], last_source=None) is pool[0]
+    assert choose.next_moment(pool, used=[], last_source=None) is pool[0]
 
 
 def test_shot_lengths_vary_and_stay_on_the_beat():
-    from kalainova.editor import direct
-
     for pace in ("fast", "medium", "cinematic"):
-        lengths = [direct.beats_for(pace, i) for i in range(12)]
+        lengths = [choose.beats_for(pace, i) for i in range(12)]
         assert len(set(lengths)) >= 2, pace
         assert all(n % 2 == 0 for n in lengths), pace
 
 
 def test_exposure_is_only_nudged_and_a_dark_shot_stays_dark():
-    from kalainova.editor import direct
-
     def shot(level):
         return {"series": {"lum": [level] * 4}}
 
-    assert direct._gamma(shot(0.45)) == 1.0  # already fine, so it is left alone
-    assert direct._gamma(shot(0.25)) == 1.0  # a night shot is meant to be dark
-    assert 1.0 < direct._gamma(shot(0.08)) <= 1.25
-    assert 0.85 <= direct._gamma(shot(0.92)) < 1.0
+    assert choose.gamma(shot(0.45)) == 1.0  # already fine, so it is left alone
+    assert choose.gamma(shot(0.25)) == 1.0  # a night shot is meant to be dark
+    assert 1.0 < choose.gamma(shot(0.08)) <= 1.25
+    assert 0.85 <= choose.gamma(shot(0.92)) < 1.0
 
 
 def test_natural_pauses_stay_and_a_long_one_is_only_shortened():
-    from kalainova.editor import direct
-
     silences = [(5.0, 5.6), (10.0, 13.0), (20.0, 22.0)]
-    keep = direct.speech_keeps(silences, 30.0)
+    keep = choose.speech_keeps(silences, 30.0)
     assert keep == [(0.0, 10.15), (12.85, 20.15), (21.85, 30.0)]
 
 
 def test_a_sliver_of_speech_between_two_pauses_is_not_left_on_its_own():
-    from kalainova.editor import direct
-
-    keep = direct.speech_keeps([(4.0, 6.0), (6.4, 9.0)], 15.0)
+    keep = choose.speech_keeps([(4.0, 6.0), (6.4, 9.0)], 15.0)
     assert all(b - a >= 1.5 for a, b in keep)
     assert keep[0][0] == 0.0 and keep[-1][1] == 15.0
 
@@ -240,23 +228,19 @@ def _shot(sig, source="s1", span=20.0):
 
 
 def test_a_shot_long_enough_for_the_beat_is_preferred():
-    from kalainova.editor import direct
-
     short = _shot([1.0, 2.0, 3.0, 4.0], "s1", span=1.0)
     long = _shot([4.0, 1.0, 3.0, 2.0], "s2", span=9.0)
-    assert direct.next_moment([short, long], used=[], last_source=None, need=4.0) is long
-    assert direct.next_moment([short], used=[], last_source=None, need=4.0) is short
+    assert choose.next_moment([short, long], used=[], last_source=None, need=4.0) is long
+    assert choose.next_moment([short], used=[], last_source=None, need=4.0) is short
 
 
 def test_the_least_used_source_goes_next_so_two_clips_do_not_trade_turns():
-    from kalainova.editor import direct
-
     a, b, c = (
         _shot([1.0, 2.0, 3.0, 4.0], "a"),
         _shot([4.0, 1.0, 3.0, 2.0], "b"),
         _shot([2.0, 4.0, 1.0, 3.0], "c"),
     )
-    picked = direct.next_moment([a, b, c], used=[], last_source="z", usage={"a": 3, "b": 3, "c": 1})
+    picked = choose.next_moment([a, b, c], used=[], last_source="z", usage={"a": 3, "b": 3, "c": 1})
     assert picked is c
 
 
@@ -297,3 +281,62 @@ def test_a_reel_cuts_in_a_phrase_and_warns_about_tiny_sources(tmp_path, monkeypa
     lengths = [round(b - a, 1) for a, b in zip(starts, starts[1:], strict=False)]
     assert max(lengths) >= min(lengths) * 1.6, lengths
     assert "too small" in (info["note"] or "")
+
+
+def _take(name, source, at, quality=0.5, motion=0.5):
+    return {
+        "id": name,
+        "source": source,
+        "in_sec": at,
+        "quality": quality,
+        "scores": {"motion": motion},
+    }
+
+
+SOURCES = {"a": {"name": "first_clip.mp4"}, "b": {"name": "second_clip.mp4"}}
+TAKES = [
+    _take("s1", "a", 4.0, quality=0.4, motion=0.2),
+    _take("s2", "a", 0.0, quality=0.9, motion=0.9),
+    _take("s3", "b", 2.0, quality=0.5, motion=0.1),
+    _take("s4", "b", 0.0, quality=0.6, motion=0.4),
+]
+
+
+def _ordered(name, start_with="", end_with=""):
+    settings = {"order": name, "start_with": start_with, "end_with": end_with}
+    return [s["id"] for s in choose.order(list(TAKES), settings, SOURCES)]
+
+
+def test_chronological_order_follows_each_source_as_it_was_shot():
+    assert _ordered("chronological") == ["s2", "s1", "s4", "s3"]
+
+
+def test_best_first_puts_the_strongest_take_first():
+    assert _ordered("best_first") == ["s2", "s4", "s3", "s1"]
+
+
+def test_story_order_opens_on_the_strongest_moving_shot_and_closes_on_a_calm_one():
+    assert _ordered("story") == ["s2", "s1", "s3", "s4"]
+
+
+def test_story_order_with_too_few_shots_keeps_them_all_and_finds_no_closer():
+    settings = {"order": "story", "start_with": "", "end_with": ""}
+    assert [s["id"] for s in choose.order(TAKES[:2], settings, SOURCES)] == ["s2", "s1"]
+    assert choose.order([], settings, SOURCES) == []
+
+
+def test_a_note_can_name_the_first_and_last_shot_by_id_or_by_file_name():
+    assert _ordered("best_first", start_with="s1")[0] == "s1"
+    assert _ordered("best_first", end_with="s2")[-1] == "s2"
+    assert _ordered("chronological", start_with="second_clip")[0] == "s4"
+
+
+def test_a_note_naming_nothing_changes_nothing():
+    assert _ordered("best_first", start_with="no such shot") == _ordered("best_first")
+
+
+def test_an_empty_name_matches_no_shot():
+    assert not choose.matches(TAKES[0], SOURCES, "  ")
+    assert choose.matches(TAKES[0], SOURCES, "a")
+    assert choose.matches(TAKES[0], SOURCES, "FIRST")
+    assert not choose.matches(TAKES[0], SOURCES, "second")
