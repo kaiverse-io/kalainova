@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 
 import pytest
-from fakes import Studio, make_job, studio  # noqa: F401
+from fakes import make_job
 from PIL import Image
 
 from kalainova.jobfs import CostCapExceeded

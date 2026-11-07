@@ -9,12 +9,9 @@ from __future__ import annotations
 
 import re
 
-from . import bar, config, consistency, media, prompts, research, shots, timeline
-from .jobfs import DOCUMENT_MEDIA, ContractError, CostCapExceeded, Job
+from . import bar, config, media, prompts, qachecks, research, timeline
+from .jobfs import DOCUMENT_MEDIA, CostCapExceeded, Job
 from .providers import router
-
-# Files that came from a person or the engine itself, so there is no model licence to read.
-NO_LICENCE = {"operator", "kit", "chained", "clip", "track", "local"}
 
 
 def _check(checks: list, cid: str, ok: bool, detail: str, severity: str = "fail") -> None:
@@ -27,161 +24,6 @@ def contact_sheet(job: Job, final, em: dict) -> str | None:
         final, em.get("cuts", []), em["duration_sec"], job.work / "contact.jpg"
     )
     return out.name if out else None
-
-
-def _promise_checks(data: dict, am: dict) -> list[dict]:
-    """A shot that asked to move and did not. Only a person can accept that, by saying so on the job."""
-    breaks = am.get("promise_breaks") or []
-    if not breaks:
-        return []
-    from .publish import placeholder_assets
-
-    forgiven = (data.get("brief") or {}).get("allow_stills") or placeholder_assets(am)
-    named = ", ".join(b["beat_id"] for b in breaks)
-    return [
-        {
-            "id": "delivery.motion_promise",
-            "status": "warn" if forgiven else "fail",
-            "detail": f"asked to move and did not: {named}",
-        }
-    ]
-
-
-def licence_checks(am: dict) -> list[dict]:
-    """What each model's terms ask of whoever releases this. A person reads and meets them."""
-    unknown, limited, owed = set(), set(), set()
-    for asset in am["assets"]:
-        provider = asset.get("provider")
-        if not provider or provider in NO_LICENCE:
-            continue
-        model = str(asset.get("model", "")).split(":")[0]
-        terms = config.licence_for(provider, model)
-        if not terms:
-            unknown.add(f"{provider}/{model}")
-            continue
-        if terms.get("commercial") is False:
-            limited.add(f"{provider}/{model}")
-        owed.update(str(o) for o in terms.get("obligations") or [])
-    out = []
-    if unknown:
-        detail = f"nobody has read the terms of {sorted(unknown)}"
-        out.append({"id": "rights.model_licence", "status": "warn", "detail": detail})
-    if limited:
-        detail = f"terms not confirmed for commercial use: {sorted(limited)}"
-        out.append({"id": "rights.commercial_use", "status": "warn", "detail": detail})
-    if owed:
-        out.append(
-            {"id": "rights.obligations", "status": "warn", "detail": "; ".join(sorted(owed))}
-        )
-    return out
-
-
-def _sound_checks(prof: dict, am: dict) -> list[dict]:
-    """What a premium mix would have that this one lacks. Only a person can say if it matters."""
-    if prof.get("delivery") != "mezzanine":
-        return []
-    out = []
-    if not any(a.get("role") == "sfx" for a in am["assets"]):
-        detail = "voice and music only: no sound of the place under the picture"
-        out.append({"id": "sound.layers", "status": "warn", "detail": detail})
-    lossy = bar._source_is_lossy(am)
-    if lossy:
-        detail = f"{lossy} reached the mix through lossy audio, which no master can win back"
-        out.append({"id": "sound.source_quality", "status": "warn", "detail": detail})
-    return out
-
-
-def _plan_checks(data: dict, packet: dict) -> list[dict]:
-    brief = data.get("brief") or {}
-    found = shots.review(
-        packet,
-        budget=int(brief.get("max_video_beats", 3)),
-        allow_stills=True,
-        wants_video="video" in data.get("media", []),
-    )
-    return [{**p, "status": "warn"} for p in found]
-
-
-def _cut_checks(final, em: dict) -> list[dict]:
-    if len(em.get("cuts", [])) < 2:
-        return []
-    bad = [c for c in timeline.cut_report(final, em["cuts"]) if c["flagged"]]
-    if not bad:
-        return [{"id": "edit.cuts", "status": "pass", "detail": "no click or flash at any cut"}]
-    spots = ", ".join(f"{c['at_sec']:.2f}s" for c in bad[:8])
-    detail = f"{len(bad)} cuts have a click or a flash: {spots}"
-    return [{"id": "edit.cuts", "status": "warn", "detail": detail}]
-
-
-def _judge_script(packet: dict) -> str:
-    return str(
-        [
-            {
-                "id": b["id"],
-                "line": b["text"],
-                "cue": b.get("visual_cue", ""),
-                "moves": b.get("visual_kind") == "video",
-            }
-            for b in packet["beats"]
-        ]
-    )
-
-
-def _shape(prof: dict) -> str:
-    width, height = prof.get("width", 1), prof.get("height", 1)
-    return "vertical" if height > width else "square" if height == width else "landscape"
-
-
-def _judged_shots(judge: dict) -> list[dict]:
-    bad = [
-        f"{s.get('id')}: {s.get('note') or 'see the sheet'}"
-        for s in judge.get("shots") or []
-        if s.get("moved") is False
-        or s.get("geometry_ok") is False
-        or s.get("matches_previous") is False
-    ]
-    if not judge.get("shots"):
-        return []
-    detail = "; ".join(bad)[:600] or "every shot read as it should"
-    return [{"id": "judge.shots", "status": "warn" if bad else "pass", "detail": detail}]
-
-
-def _kit_checks(job: Job, packet: dict, am: dict, sheet: str | None) -> list[dict]:
-    """A stream job proves the lock held: first from the record, then by looking at the frames."""
-    from .plan import extract_json
-
-    try:
-        locked = consistency.for_job(job)
-    except ContractError as exc:
-        return [{"id": "consistency.lock", "status": "fail", "detail": str(exc)[:500]}]
-    if not locked:
-        return []
-    resolved, lock = locked
-    checks = [{"id": "consistency.lock", "status": "pass", "detail": "kits match the job's lock"}]
-    checks += consistency.recorded_checks(resolved, lock, packet, am)
-    if am.get("kit_lock_sha256") != consistency.lock_sha256(job):
-        checks.append(
-            {"id": "consistency.manifest", "status": "fail", "detail": "assets predate this lock"}
-        )
-    unseen = {"id": "consistency.vision", "status": "warn"}
-    if not sheet:
-        return [*checks, {**unseen, "detail": "no contact sheet; a human compares the frames"}]
-    text = prompts.load("qa_consistency").format(
-        context=consistency.judge_brief(resolved, lock["cast"]),
-        script=[b["text"] for b in packet["beats"]],
-    )
-    images = [*consistency.judge_images(resolved, lock["cast"]), job.work / sheet]
-    try:
-        _, res = router.generate(
-            job, "llm", "llm", text, images=images, max_tokens=800, note="qa-consistency"
-        )
-        return [*checks, *consistency.judge_checks(extract_json(res.text))]
-    except CostCapExceeded:
-        raise
-    except LookupError:
-        return [*checks, {**unseen, "detail": "no vision model ready; a human compares the frames"}]
-    except Exception as exc:  # the human gate still stands, and the warning says so
-        return [*checks, {**unseen, "detail": f"vision check failed: {exc}"[:300]}]
 
 
 def run_file(job: Job) -> dict:
@@ -296,7 +138,7 @@ def run_song(job: Job) -> dict:
         all(a.get("rights") in ("owned", "licensed", "funded-brief") for a in manifest["assets"]),
         "every asset carries rights",
     )
-    checks.extend(licence_checks(manifest))
+    checks.extend(qachecks.licence_checks(manifest))
     report = {
         "schema_version": "0.1",
         "job_id": data["job_id"],
@@ -474,10 +316,10 @@ def run(job: Job) -> dict:
         "warn",
     )
     checks.extend(research.claim_checks(job, packet))
-    checks.extend(_promise_checks(data, am))
-    checks.extend(_plan_checks(data, packet))
-    checks.extend(_sound_checks(prof, am))
-    checks.extend(_cut_checks(final, em))
+    checks.extend(qachecks.promise_checks(data, am))
+    checks.extend(qachecks.plan_checks(data, packet))
+    checks.extend(qachecks.sound_checks(prof, am))
+    checks.extend(qachecks.cut_checks(final, em))
 
     # disclosure
     synthetic = any(a.get("synthetic") for a in am["assets"])
@@ -507,10 +349,10 @@ def run(job: Job) -> dict:
         for a in am["assets"]
     )
     _check(checks, "rights.assets", rights_ok, "every asset carries rights")
-    checks.extend(licence_checks(am))
+    checks.extend(qachecks.licence_checks(am))
 
     sheet = contact_sheet(job, final, em)
-    checks.extend(_kit_checks(job, packet, am, sheet))
+    checks.extend(qachecks.kit_checks(job, packet, am, sheet))
     judge = None
     try:
         if sheet:
@@ -520,13 +362,15 @@ def run(job: Job) -> dict:
                 job,
                 "llm",
                 "llm",
-                prompts.load("qa_rubric").format(shape=_shape(prof), script=_judge_script(packet)),
+                prompts.load("qa_rubric").format(
+                    shape=qachecks.shape(prof), script=qachecks.judge_script(packet)
+                ),
                 images=[job.work / sheet],
                 max_tokens=1600,
                 note="qa-judge",
             )
             judge = extract_json(res.text)
-            checks.extend(_judged_shots(judge))
+            checks.extend(qachecks.judged_shots(judge))
             _check(
                 checks,
                 "judge.verdict",

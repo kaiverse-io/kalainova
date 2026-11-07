@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from fakes import make_job, studio  # noqa: F401
+from fakes import make_job
 
 from kalainova import plan, research
 from kalainova.jobfs import ContractError
@@ -49,7 +49,10 @@ def test_gathering_twice_does_not_read_the_same_source_twice(tmp_path, found):
 
 
 def test_a_page_is_read_for_its_words_and_not_its_furniture():
-    html = "<html><nav>Menu</nav><script>var x=1</script><p>The bridge was open.</p><footer>c</footer></html>"
+    html = (
+        "<html><nav>Menu</nav><script>var x=1</script>"
+        "<p>The bridge was open.</p><footer>c</footer></html>"
+    )
     assert research.page_text(html) == "The bridge was open."
 
 
@@ -248,3 +251,48 @@ def test_exa_needs_a_key_and_sends_it(monkeypatch):
 
 def test_no_request_identifies_a_person():
     assert "@" not in search_providers.HEADERS["User-Agent"]
+
+
+class Page:
+    def __init__(self, blob=b"", kind="text/html", status=200):
+        self.blob, self.status = blob, status
+        self.headers = {"content-type": kind}
+        self.encoding = "utf-8"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            raise OSError(str(self.status))
+
+    def iter_content(self, size):
+        return iter([self.blob])
+
+
+def _serving(monkeypatch, page):
+    monkeypatch.setattr(research.requests, "get", lambda url, **kw: page)
+
+
+def test_a_web_page_is_read_as_its_words(monkeypatch):
+    _serving(monkeypatch, Page(b"<html><p>The bridge opened.</p></html>"))
+    assert research.fetch_text("https://example.org/a") == "The bridge opened."
+
+
+def test_a_plain_text_page_is_kept_as_it_is(monkeypatch):
+    _serving(monkeypatch, Page(b"<not markup>", kind="text/plain; charset=utf-8"))
+    assert research.fetch_text("https://example.org/a") == "<not markup>"
+
+
+def test_a_file_that_is_not_a_page_is_not_read(monkeypatch):
+    _serving(monkeypatch, Page(b"%PDF", kind="application/pdf"))
+    assert research.fetch_text("https://example.org/a.pdf") == ""
+
+
+def test_a_page_that_will_not_load_is_an_error_the_caller_sees(monkeypatch):
+    _serving(monkeypatch, Page(status=404))
+    with pytest.raises(OSError, match="404"):
+        research.fetch_text("https://example.org/gone")

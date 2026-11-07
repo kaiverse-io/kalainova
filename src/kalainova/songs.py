@@ -17,8 +17,10 @@ from typing import Any
 
 import numpy as np
 
-from . import captions, config, media, musicbar, render, takes, writers
-from .jobfs import ContractError, Job, home
+from . import captions, config, media, render, takes, writers
+from .bar import song as musicbar
+from .bar.readings import summarise
+from .jobfs import ContractError, Job, open_child
 from .providers import router
 
 Song = dict[str, Any]
@@ -365,13 +367,7 @@ def checks(job: Job) -> tuple[list[dict[str, str]], dict[str, Any]]:
             "detail": "no reading can judge a song; a human listens",
         }
     )
-    return out, bar_summary(readings)
-
-
-def bar_summary(readings: list[dict[str, Any]]) -> dict[str, Any]:
-    from .bar import _summary
-
-    return _summary(readings)
+    return out, summarise(readings)
 
 
 def _heard_of_chosen(job: Job) -> list[dict[str, Any]] | None:
@@ -416,6 +412,22 @@ def _visual_for(song: Song, line: str) -> str:
     return str(song["style"])
 
 
+def _beats_for_spans(
+    song: Song, spans: list[dict[str, Any]], still_only: bool
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": f"s{n:02d}",
+            "role": "hook" if n == 0 else ("payoff" if n == len(spans) - 1 else "body"),
+            "text": span["text"] or song["title"],
+            "visual_cue": _visual_for(song, span["text"]),
+            "visual_kind": "still" if still_only else "video",
+            "duration_sec": round(span["end"] - span["start"], 3),
+        }
+        for n, span in enumerate(spans)
+    ]
+
+
 def video_job(
     job: Job, new_id: str, *, profile: str = "landscape", still_only: bool = False
 ) -> Path:
@@ -435,10 +447,6 @@ def video_job(
     length = media.duration(final)
     grid = [float(b) for b in beat_tools.beat_grid(final, length)["beats"]]
     spans = _shots_for(song, cues, length, grid)
-    folder = home() / "jobs" / new_id
-    if folder.exists():
-        raise ContractError(f"{folder} already exists")
-    folder.mkdir(parents=True)
     source = job.job
     brief = {
         "subject": (source.get("brief") or {}).get("subject", song["title"]),
@@ -449,35 +457,7 @@ def video_job(
         "max_video_beats": 0 if still_only else len(spans),
         "visual_style": (source.get("brief") or {}).get("visual_style", ""),
     }
-    data = {
-        "schema_version": "0.1",
-        "job_id": new_id,
-        "strategy": source["strategy"],
-        "media": ["video", "audio"],
-        "rights": source["rights"],
-        "distribution_identity": source.get("distribution_identity"),
-        "status": "draft",
-        "cost_cap": source.get("cost_cap"),
-        "parent_job_id": job.id,
-        "profile": profile,
-        "brief": brief,
-    }
-    for key in ("providers", "skip_funded"):
-        if key in source:
-            data[key] = source[key]
-    (folder / "job.json").write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-    beats = [
-        {
-            "id": f"s{n:02d}",
-            "role": "hook" if n == 0 else ("payoff" if n == len(spans) - 1 else "body"),
-            "text": span["text"] or song["title"],
-            "visual_cue": _visual_for(song, span["text"]),
-            "visual_kind": "still" if still_only else "video",
-            "duration_sec": round(span["end"] - span["start"], 3),
-        }
-        for n, span in enumerate(spans)
-    ]
-    child = Job(folder)
+    child = open_child(job, new_id, profile=profile, brief=brief)
     shutil.copyfile(final, child.work / "track.wav")
     child.write(
         "script_packet",
@@ -485,8 +465,8 @@ def video_job(
             "schema_version": "0.1",
             "job_id": new_id,
             "title": song["title"],
-            "beats": beats,
+            "beats": _beats_for_spans(song, spans, still_only),
             **({"publish": song["publish"]} if song.get("publish") else {}),
         },
     )
-    return folder
+    return child.folder

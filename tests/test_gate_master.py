@@ -108,7 +108,7 @@ def _reading(rid, ok, *, blocks):
 
 
 def test_a_report_keeps_conformance_apart_from_craft():
-    report = bar._summary(
+    report = bar.summarise(
         [
             _reading("master.codec", True, blocks=True),
             _reading("master.size", True, blocks=True),

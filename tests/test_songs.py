@@ -6,9 +6,10 @@ import json
 
 import numpy as np
 import pytest
-from fakes import make_job, needs_ffmpeg, studio  # noqa: F401
+from fakes import make_job, needs_ffmpeg
 
-from kalainova import media, musicbar, publish, qa, songs, takes, writers
+from kalainova import media, publish, qa, songs, takes, writers
+from kalainova.bar import song as musicbar
 from kalainova.editor import beats
 from kalainova.jobfs import ContractError, Job
 from kalainova.providers import router
@@ -143,7 +144,10 @@ def test_a_line_the_transcript_missed_sits_between_the_lines_around_it(tmp_path)
     heard = [{"start_sec": float(i), "end_sec": i + 0.5, "text": w} for i, w in enumerate(words)]
     song = _song(
         sections=[
-            {"kind": "verse", "lines": ["Paper boats on the kitchen floor", "Pencil marks beside the door"]},
+            {
+                "kind": "verse",
+                "lines": ["Paper boats on the kitchen floor", "Pencil marks beside the door"],
+            },
             {"kind": "chorus", "lines": ["Hand me down the garden hose"]},
         ]
     )
@@ -259,7 +263,9 @@ def test_a_finished_song_opens_a_job_that_cuts_a_video_to_it(tmp_path, monkeypat
     assert sum(b["duration_sec"] for b in packet["beats"]) == pytest.approx(
         media.duration(job.artifact()), abs=0.3
     )
-    assert packet["beats"][0]["visual_cue"] == "paper boats on a floor" or packet["beats"][0]["text"]
+    assert (
+        packet["beats"][0]["visual_cue"] == "paper boats on a floor" or packet["beats"][0]["text"]
+    )
 
 
 def test_a_video_of_a_song_runs_the_line_with_no_voice_and_the_track_unchanged(

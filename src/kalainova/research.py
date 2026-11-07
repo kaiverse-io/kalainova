@@ -74,7 +74,7 @@ def fetch_text(url: str) -> str:
 
 
 def normalise(text: str) -> str:
-    """Compare words, not typography: curly quotes, dashes, and line breaks must not hide a match."""
+    """Compare words, not typography: curly quotes, dashes, and line breaks must not hide one."""
     swaps = {"‘": "'", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-"}
     for old, new in swaps.items():
         text = text.replace(old, new)
@@ -184,7 +184,7 @@ def _read_snapshot(job: Job, source: dict[str, Any]) -> str:
 
 
 def verify(job: Job) -> list[str]:
-    """Mark each finding by whether its quote is really in a source it cites. Returns what failed."""
+    """Mark each finding by whether its quote is in a source it cites. Returns what failed."""
     data = job.read("research")
     sources = {s["id"]: s for s in data["sources"]}
     failed = []

@@ -126,6 +126,17 @@ def _timed_words(audio: Path, text: str) -> list[dict[str, Any]]:
     return [{**w, "confidence": 0.85} for w in words]
 
 
+def _song_options(kw: dict[str, Any]) -> list[str]:
+    """What a song asks of its engine beyond the words, in the runners' shared flags."""
+    options = [
+        arg
+        for flag, key in (("--bpm", "bpm"), ("--key", "key"), ("--language", "language"))
+        if kw.get(key)
+        for arg in (flag, str(kw[key]))
+    ]
+    return [*options, "--instrumental"] if kw.get("instrumental") else options
+
+
 @register
 class Mac(Provider):
     name = "mac"
@@ -273,12 +284,7 @@ class Mac(Provider):
                 "--seed", str(seed),
                 "--out", str(raw),
             ]  # fmt: skip
-            for flag, key in (("--bpm", "bpm"), ("--key", "key"), ("--language", "language")):
-                if kw.get(key):
-                    cmd += [flag, str(kw[key])]
-            if kw.get("instrumental"):
-                cmd.append("--instrumental")
-            _run(cmd, kw.get("deadline_sec"))
+            _run([*cmd, *_song_options(kw)], kw.get("deadline_sec"))
             media.run(["-i", str(raw), "-ar", "48000", "-ac", "2", str(dst)])
         return Result(path=dst, model=engine, meta={"seed": seed})
 

@@ -81,6 +81,16 @@ def word_limit(names: list[str]) -> int | None:
     return min(limits) if limits else None
 
 
+def _what_moves(beat: Beat, shot: dict[str, Any]) -> str:
+    motion = [shot.get("camera"), shot.get("action"), shot.get("environment")]
+    if not any(motion):
+        return _joined([str(beat.get("visual_cue") or beat["text"])])
+    text = _joined(motion)
+    if shot.get("last_frame"):
+        return f"{text} It ends on this: {str(shot['last_frame']).rstrip('.')}."
+    return text
+
+
 def motion_prompt(
     packet: Packet,
     beat: Beat,
@@ -92,13 +102,7 @@ def motion_prompt(
 ) -> str:
     """What moves, first. With no start image, the model also needs the picture, after that."""
     shot = beat.get("shot") or {}
-    motion = [shot.get("camera"), shot.get("action"), shot.get("environment")]
-    if any(motion):
-        text = _joined(motion)
-        if shot.get("last_frame"):
-            text = f"{text} It ends on this: {str(shot['last_frame']).rstrip('.')}."
-    else:
-        text = _joined([str(beat.get("visual_cue") or beat["text"])])
+    text = _what_moves(beat, shot)
     if not has_start_image:
         text = f"{text} {still_prompt(packet, beat, style)}"
     text = re.sub(r"\s{2,}", " ", STILL_WORDS.sub("", text))
@@ -120,7 +124,7 @@ def _alike(a: Beat, b: Beat) -> bool:
     right = _token_set(str(b.get("visual_cue") or ""))
     if not left or not right:
         return False
-    return len(left & right) / max(len(left | right), 1) >= ALIKE
+    return len(left & right) / len(left | right) >= ALIKE
 
 
 def _names_known(packet: Packet) -> list[Problem]:

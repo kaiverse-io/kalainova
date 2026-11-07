@@ -39,6 +39,7 @@ dev = [
     "import-linter>=2.1",
     "types-PyYAML",
     "types-requests",
+    "pypdf>=7.0.0",
 ]
 
 [tool.ruff]
@@ -55,7 +56,6 @@ ignore = ["S101"]
 "scripts/check.py" = ["C901", "E501", "E741", "S607"]
 "scripts/lint_docs.py" = ["C901", "E501"]
 "src/kalainova/__main__.py" = ["C901", "E501"]
-"src/kalainova/assets.py" = ["C901", "E501", "N806"]
 "src/kalainova/captions.py" = ["B007", "E501", "E741", "F841"]
 "src/kalainova/config.py" = ["E501"]
 "src/kalainova/edit.py" = ["B905", "C901", "E501"]
@@ -73,7 +73,6 @@ ignore = ["S101"]
 "src/kalainova/providers/router.py" = ["C901", "E501", "N818"]
 "src/kalainova/publish/__init__.py" = ["C901", "E501"]
 "src/kalainova/qa.py" = ["B905", "C901", "E501"]
-"src/kalainova/render.py" = ["C901", "E501", "F841", "N806"]
 "src/kalainova/stock.py" = ["E501"]
 "tests/footage_fixtures.py" = ["E501", "N806"]
 "tests/test_engine.py" = ["B905", "E501", "N814"]
@@ -88,7 +87,6 @@ mypy_path = "src"
 [[tool.mypy.overrides]]
 module = [
     "kalainova.__main__",
-    "kalainova.assets",
     "kalainova.captions",
     "kalainova.config",
     "kalainova.edit",
@@ -106,7 +104,6 @@ module = [
     "kalainova.providers.router",
     "kalainova.publish",
     "kalainova.qa",
-    "kalainova.render",
     "kalainova.stock",
 ]
 ignore_errors = true

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageFilter
 
-from kalainova import bar, config, media
+from kalainova import bar, config, media, mediascan
 
 SR = 48000
 
@@ -300,7 +300,7 @@ def test_a_large_object_moving_during_a_push_in_does_not_throw_the_camera_fit():
 
 def test_a_peak_between_samples_is_found_to_a_fraction_of_a_sample():
     parabola = -((np.arange(8.0) - 3.3) ** 2)
-    assert bar._peak_offset(parabola, 3) == pytest.approx(0.3)
+    assert bar.motion._peak_offset(parabola, 3) == pytest.approx(0.3)
 
 
 def test_a_source_slower_than_the_measuring_step_can_still_be_read():
@@ -331,7 +331,7 @@ def test_only_the_part_of_a_clip_the_edit_uses_is_read(tmp_path):
     am = {"assets": [{"id": "c", "kind": "video", "path": "clip.mp4", "synthetic": True}]}
 
     def read(**cut) -> float:
-        return bar._generated_shots(tmp_path, {"cuts": [{"source": "c", **cut}]}, am)["c"]
+        return bar.sources._generated_shots(tmp_path, {"cuts": [{"source": "c", **cut}]}, am)["c"]
 
     # compared with each other, because an encoder build moves the moving part's reading
     whole_clip = read()
@@ -422,3 +422,37 @@ def test_a_quiet_shot_of_real_footage_is_the_editors_choice(tmp_path):
     assert reading is not None
     assert reading["ok"]
     assert "b1.video" in reading["value"]
+
+
+def test_a_stamp_shared_by_the_stills_a_piece_uses_is_read_from_the_sources(tmp_path):
+    names = ["a.png", "b.png", "c.png", "unused.png"]
+    for name in names:
+        Image.linear_gradient("L").resize((640, 360)).convert("RGB").save(tmp_path / name)
+    assets = [{"id": n, "kind": "still", "path": n} for n in names]
+    em = {
+        "profile": {"width": 640, "height": 360},
+        "duration_sec": 3.0,
+        "cuts": [{"source": n, "start_sec": float(i)} for i, n in enumerate(names[:3])],
+    }
+    found = {r.id: r for r in bar.sources.source_readings(tmp_path, em, {"assets": assets})}
+    assert found["source.scale"].value == 1.0
+    assert "source.corner_mark" in found
+    assert found["edit.moving_share"].ok is False, "three stills and no footage"
+
+
+def test_with_too_few_stills_no_stamp_can_be_told_from_the_picture(tmp_path):
+    Image.linear_gradient("L").save(tmp_path / "a.png")
+    assets = [{"id": "a.png", "kind": "still", "path": "a.png"}]
+    em = {"profile": {}, "duration_sec": 1.0, "cuts": [{"source": "a.png", "start_sec": 0.0}]}
+    found = {r.id for r in bar.sources.source_readings(tmp_path, em, {"assets": assets})}
+    assert "source.corner_mark" not in found
+
+
+def test_with_no_banding_filter_the_reading_is_left_out(monkeypatch, tmp_path):
+    monkeypatch.setattr(mediascan, "has_filter", lambda name: False)
+    assert mediascan.cambi(tmp_path / "any.mp4") is None
+
+
+def test_a_banding_run_that_fails_reads_as_nothing(monkeypatch, tmp_path):
+    monkeypatch.setattr(mediascan, "has_filter", lambda name: True)
+    assert mediascan.cambi(tmp_path / "missing.mp4") is None

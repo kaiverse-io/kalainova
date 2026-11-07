@@ -253,5 +253,32 @@ def open_job(ref: str | Path) -> Job:
     return Job(path.resolve())
 
 
+def open_child(parent: Job, new_id: str, *, profile: str, brief: dict) -> Job:
+    """A new job made from another: the same rights, identity, and limits, and a line back to it."""
+    folder = home() / "jobs" / new_id
+    if folder.exists():
+        raise ContractError(f"{folder} already exists")
+    source = parent.job
+    data = {
+        "schema_version": "0.1",
+        "job_id": new_id,
+        "strategy": source["strategy"],
+        "media": ["video", "audio"],
+        "rights": source["rights"],
+        "distribution_identity": source.get("distribution_identity"),
+        "status": "draft",
+        "cost_cap": source.get("cost_cap"),
+        "parent_job_id": parent.id,
+        "profile": profile,
+        "brief": brief,
+    }
+    for key in ("providers", "skip_funded"):
+        if key in source:
+            data[key] = source[key]
+    folder.mkdir(parents=True)
+    (folder / "job.json").write_text(dump(data) + "\n")
+    return Job(folder)
+
+
 def dump(data: Any) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)

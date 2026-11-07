@@ -6,7 +6,8 @@ import os
 
 from fakes import make_job, needs_ffmpeg
 
-from kalainova import media, render, rendercache
+from kalainova import media, render
+from kalainova.render import cache as rendercache
 
 pytestmark = needs_ffmpeg
 

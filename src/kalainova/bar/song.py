@@ -15,12 +15,13 @@ from typing import Any
 
 import numpy as np
 
-from . import bar, media
-from .editor import beats
+from .. import media
+from ..editor import beats
+from .readings import Reading, at_least, at_most, summarise
+from .sound import clipped_share, dc_offset, ending_drop_db, stereo_correlation
 
 Song = dict[str, Any]
 Word = dict[str, Any]
-Reading = bar.Reading
 WINDOW_SEC = 8.0
 HOP_SEC = 4.0
 LOW_BPM, HIGH_BPM = 70.0, 180.0
@@ -78,22 +79,20 @@ def _sound_readings(path: Path) -> list[Reading]:
     left, right, sr = media.decode_stereo(path)
     mono = (left + right) / 2
     return [
-        bar._at_most("audio.clipping", bar.clipped_share(mono), "clipped_share_max", blocks=True),
-        bar._at_most("audio.dc_offset", bar.dc_offset(mono), "dc_offset_max"),
-        bar._at_least(
-            "audio.mono_safe", bar.stereo_correlation(left, right), "stereo_correlation_min"
-        ),
+        at_most("audio.clipping", clipped_share(mono), "clipped_share_max", blocks=True),
+        at_most("audio.dc_offset", dc_offset(mono), "dc_offset_max"),
+        at_least("audio.mono_safe", stereo_correlation(left, right), "stereo_correlation_min"),
     ]
 
 
 def _tempo_readings(path: Path, song: Song) -> list[Reading]:
     env = beats.onset_envelope(beats._pcm(path))
     fps = beats.SR / beats.HOP
-    out = [bar._at_most("song.tempo_drift", tempo_drift(env, fps), "song_tempo_drift_max")]
+    out = [at_most("song.tempo_drift", tempo_drift(env, fps), "song_tempo_drift_max")]
     if song.get("bpm"):
         detected = float(beats.beat_grid(path)["bpm"])
         miss = tempo_miss(detected, float(song["bpm"]))
-        out.append(bar._at_most("song.tempo", miss, "song_tempo_tolerance"))
+        out.append(at_most("song.tempo", miss, "song_tempo_tolerance"))
     return out
 
 
@@ -103,14 +102,14 @@ def measure(path: Path, song: Song, heard: list[Word] | None) -> dict[str, Any]:
     duration = media.duration(path)
     if song.get("duration_sec"):
         miss = abs(duration / float(song["duration_sec"]) - 1.0)
-        readings.append(bar._at_most("song.length", miss, "song_length_tolerance"))
+        readings.append(at_most("song.length", miss, "song_length_tolerance"))
     lra = media.loudness(path).get("loudness_range_lu")
     if lra is not None:
-        readings.append(bar._at_least("song.shape", float(lra), "song_range_lu_min"))
+        readings.append(at_least("song.shape", float(lra), "song_range_lu_min"))
     if heard is not None and not song.get("instrumental"):
         found = words_found(lyric_lines(song), heard)
-        readings.append(bar._at_least("song.words_found", found, "song_words_found_min"))
-    return bar._summary([asdict(r) for r in readings])
+        readings.append(at_least("song.words_found", found, "song_words_found_min"))
+    return summarise([asdict(r) for r in readings])
 
 
 def score(report: dict[str, Any]) -> float:
@@ -141,6 +140,6 @@ def master_readings(path: Path, target: float, ceiling: float) -> list[dict[str,
             peak is not None and peak <= ceiling + 0.3,
             True,
         ),
-        bar._at_most("audio.ending_drop_db", bar.ending_drop_db(mono, sr), "ending_drop_db_max"),
+        at_most("audio.ending_drop_db", ending_drop_db(mono, sr), "ending_drop_db_max"),
     ]
     return [asdict(r) for r in readings]

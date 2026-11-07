@@ -19,14 +19,26 @@ OUTPUT_KEYS = {"out", "audio_out", "thumbnail", "audio_only", "master", "deliver
 INPUT_LIST_KEYS = {"inputs", "audio_inputs"}
 INPUT_ENTRY_KEYS = {"sfx", "ambience"}
 INPUT_KEYS = {"source", "input", "video", "audio", "voice", "music"}
-ENGINE_FILES = ("render.py", "media.py", "captions.py", "motion.py", "look.py", "rendercache.py")
+ENGINE_FILES = (
+    "render/__init__.py",
+    "render/spec.py",
+    "render/picture.py",
+    "render/sound.py",
+    "render/export.py",
+    "render/cache.py",
+    "bar/sound.py",  # the mix sets music against the voice with this measure
+    "media.py",
+    "captions.py",
+    "motion.py",
+    "look.py",
+)
 
 
 @cache
 def _engine_version() -> str:
     """Changing how a step runs must re-run it, so the code is part of what a step depends on."""
     digest = hashlib.sha256()
-    here = Path(__file__).parent
+    here = Path(__file__).parents[1]
     for name in ENGINE_FILES:
         digest.update((here / name).read_bytes())
     return digest.hexdigest()

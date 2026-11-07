@@ -30,6 +30,22 @@ def _first_path(output: Any) -> str:
     raise ValueError(f"the app returned no file: {str(output)[:200]}")
 
 
+def _song_request(
+    spec: dict[str, Any], lyrics: str, style: str, duration: float | None, seed: int | None
+) -> dict[str, Any]:
+    """The app's own names for what is being asked. A request an app cannot take leaves it out."""
+    request = {
+        str(spec["lyrics_param"]): lyrics,
+        str(spec["style_param"]): style,
+        **dict(spec.get("extra") or {}),
+    }
+    if duration and spec.get("duration_param"):
+        request[str(spec["duration_param"])] = int(duration)
+    if seed is not None and spec.get("seed_param"):
+        request[str(spec["seed_param"])] = seed
+    return request
+
+
 @register
 class Spaces(Provider):
     name = "spaces"
@@ -47,15 +63,7 @@ class Spaces(Provider):
         spec = config.space_spec("song")
         if not spec.get("space"):
             raise ValueError("models.spaces.song names no app in config/studio.yaml")
-        request = {
-            str(spec["lyrics_param"]): lyrics,
-            str(spec["style_param"]): style,
-            **dict(spec.get("extra") or {}),
-        }
-        if duration and spec.get("duration_param"):
-            request[str(spec["duration_param"])] = int(duration)
-        if kw.get("seed") is not None and spec.get("seed_param"):
-            request[str(spec["seed_param"])] = kw["seed"]
+        request = _song_request(spec, lyrics, style, duration, kw.get("seed"))
         client = importlib.import_module("gradio_client").Client(spec["space"], verbose=False)
         made = _first_path(client.predict(api_name=spec["api_name"], **request))
         media.run(["-i", made, "-ar", "48000", "-ac", "2", str(dst)])

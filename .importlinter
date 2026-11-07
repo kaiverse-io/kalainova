@@ -41,3 +41,26 @@ source_modules =
 forbidden_modules =
     kalainova.providers
     kalainova.publish
+
+[importlinter:contract:measuring-spends-nothing]
+name = The bar and an editor's decisions reach no model, so reading a piece never costs anything
+type = forbidden
+source_modules =
+    kalainova.bar
+    kalainova.editor.choose
+    kalainova.render.spec
+forbidden_modules =
+    kalainova.providers
+    kalainova.publish
+    kalainova.assets
+
+[importlinter:contract:a-record-cannot-publish]
+name = A verdict, a provenance report, and a timeline export cannot reach the publisher
+type = forbidden
+source_modules =
+    kalainova.verdicts
+    kalainova.provenance
+    kalainova.nle
+forbidden_modules =
+    kalainova.publish
+    kalainova.providers

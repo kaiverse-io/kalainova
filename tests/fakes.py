@@ -192,3 +192,20 @@ def make_job(tmp_path: Path, *, beats=None, packet=None, job_id="p1", **extra) -
             {"schema_version": "0.1", "job_id": job_id, "beats": beats, **(packet or {})},
         )
     return job
+
+
+class Reply:
+    """A vendor's HTTP reply."""
+
+    def __init__(self, *, status=200, body=None, content=b"", text=""):
+        self.status_code = status
+        self.body = body or {}
+        self.content = content
+        self.text = text
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise OSError(f"{self.status_code}")
+
+    def json(self):
+        return self.body
