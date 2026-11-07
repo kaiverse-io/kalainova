@@ -10,6 +10,10 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "asset_manifest_sha256": {
+      "type": "string",
+      "description": "The asset manifest this edit was cut from. When it differs, the edit is rebuilt."
+    },
     "schema_version": {
       "const": "0.1"
     },

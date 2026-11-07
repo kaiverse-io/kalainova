@@ -9,6 +9,7 @@ Retention defaults (override on job.edit):
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from . import config
@@ -77,8 +78,11 @@ def caption_cards(
 
 
 def run(job: Job, *, force: bool = False) -> dict:
+    cut_from = hashlib.sha256(job.path("asset_manifest").read_bytes()).hexdigest()
     if job.has("edit_manifest") and not force:
-        return job.read("edit_manifest")
+        kept = job.read("edit_manifest")
+        if kept.get("asset_manifest_sha256") == cut_from:
+            return kept  # new assets must never be cut with the old edit, and a hand edit stays
     data = job.job
     packet = job.read("script_packet")
     am = job.read("asset_manifest")
@@ -202,6 +206,7 @@ def run(job: Job, *, force: bool = False) -> dict:
         "fade_out_sec": float(opts.get("fade_out_sec", 1.0 if mezzanine else 0.5)),
         "overlays": overlays,
         "audio": audio,
+        "asset_manifest_sha256": cut_from,
     }
     job.write("edit_manifest", manifest)
     return manifest

@@ -96,6 +96,28 @@ def test_a_film_opens_on_picture_and_music_and_holds_after_the_last_word(tmp_pat
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_new_assets_are_never_cut_with_the_old_edit(tmp_path, monkeypatch):
+    job = _film_job(tmp_path, monkeypatch)
+    first = job.read("edit_manifest")
+    am = job.read("asset_manifest")
+    am["timeline"][-1]["end_sec"] += 5.0
+    am["duration_sec"] += 5.0
+    job.write("asset_manifest", am)
+    rebuilt = edit.run(job)
+    assert rebuilt["cuts"][-1]["out_sec"] > first["cuts"][-1]["out_sec"]
+    assert job.read("edit_manifest") == rebuilt
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_the_edit_is_kept_while_its_assets_have_not_changed(tmp_path, monkeypatch):
+    job = _film_job(tmp_path, monkeypatch)
+    em = job.read("edit_manifest")
+    em["fade_out_sec"] = 2.5  # a hand change, which a re-run must not undo
+    job.write("edit_manifest", em)
+    assert edit.run(job)["fade_out_sec"] == 2.5
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_master_with_no_sound_misses_the_audio_reading(tmp_path):
     silent = tmp_path / "silent.mov"
     media.run(["-f", "lavfi", "-i", "testsrc2=s=64x64:d=1:r=24", "-c:v", "prores_ks", str(silent)])
