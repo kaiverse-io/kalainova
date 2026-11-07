@@ -59,7 +59,7 @@ def estimate_words(text: str, total: float, offset: float = 0.0) -> list[dict]:
 @register
 class LocalProvider(Provider):
     name = "local"
-    capabilities = ("voice", "image", "music", "sfx")
+    capabilities = ("voice", "image", "music", "song", "sfx")
     env_key = None
     synthetic = True
     free = True
@@ -330,6 +330,12 @@ class LocalProvider(Provider):
             ]
         )
         return Result(path=dst, model="local-pad", meta={"duration_sec": duration})
+
+    def song(
+        self, lyrics: str, dst: Path, *, style: str = "", duration: float | None = None, **kw
+    ) -> Result:
+        """A placeholder with no voice in it, so the line can run with no model. approve refuses it."""
+        return self.music(style or lyrics, dst, duration=float(duration or 20))
 
     def sfx(self, prompt: str, dst: Path, *, duration: float = 0.6, **kw) -> Result:
         """A whoosh: filtered noise with a fast swell."""

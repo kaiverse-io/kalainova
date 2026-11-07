@@ -64,7 +64,7 @@ def test_kling_takes_its_first_frame_under_its_own_field_name():
 
 def test_no_deprecated_or_missing_model_is_configured():
     assert config.model_for("elevenlabs", "music") == "music_v2_5"
-    assert config.model_for("elevenlabs", "sfx") == "eleven_text_to_sound_v3"
+    assert config.model_for("elevenlabs", "sfx") == "eleven_text_to_sound_v2"
     assert "fal-ai/wan/v3" not in config.model_for("fal", "image_to_video")
     assert "fal-ai/wan/v3" not in config.model_for("fal", "video")
 

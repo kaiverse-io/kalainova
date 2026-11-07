@@ -28,7 +28,7 @@ def calls(monkeypatch, tmp_path):
     def tone(path: Path) -> None:
         media.run(["-f", "lavfi", "-i", "sine=f=220:d=2", str(path)])
 
-    def fake(cmd: list[str]) -> str:
+    def fake(cmd: list[str], timeout: float | None = None) -> str:
         seen.append(cmd)
         if "mlx_audio.tts.generate" in cmd:
             tone(after(cmd, "--output_path") / "v_000.wav")
@@ -139,7 +139,17 @@ def test_a_transcript_keeps_what_was_heard(calls, tmp_path):
 
 def test_a_failed_model_process_is_a_provider_failure(monkeypatch, tmp_path):
     monkeypatch.setenv(mac.PYTHON_ENV, str(tmp_path / "bin" / "python"))
-    failed = subprocess.CompletedProcess([], 1, stdout="", stderr="out of memory")
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: failed)
+
+    class Failed:
+        pid = 1
+        returncode = 1
+
+        def __init__(self, *a, **k):
+            pass
+
+        def communicate(self, timeout=None):
+            return "", "out of memory"
+
+    monkeypatch.setattr(subprocess, "Popen", Failed)
     with pytest.raises(RuntimeError, match="out of memory"):
         mac._run(["python", "-m", "something"])
