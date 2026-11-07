@@ -64,7 +64,10 @@ def record(job: Job, shot: str, take: Take) -> dict[str, Any]:
     entry["takes"] = [t for t in entry["takes"] if t["n"] != take["n"]] + [take]
     entry["takes"].sort(key=lambda t: t["n"])
     if entry["chosen_by"] != "human":
-        entry["chosen"] = _best(entry["takes"])
+        # someone asked for this take because they saw what a reading cannot, so it is used if it
+        # reads well, even when an earlier take reads just as well
+        asked_for = take.get("note") and take.get("ok")
+        entry["chosen"] = take["n"] if asked_for else _best(entry["takes"])
     job.write("takes", data)
     return dict(entry)
 

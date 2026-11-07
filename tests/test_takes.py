@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from fakes import Studio, make_job, needs_ffmpeg, studio  # noqa: F401
+from fakes import make_job, needs_ffmpeg
 
-from kalainova import assets, edit, media, publish, qa, render, takes
+from kalainova import assets, edit, media, publish, qa, render, shotmake, takes
 from kalainova.jobfs import ContractError
 
 pytestmark = needs_ffmpeg
@@ -90,8 +90,8 @@ def test_a_persons_choice_stands_against_a_better_reading(tmp_path, studio):
     job = make_job(tmp_path, beats=[_moving_beat()])
     assets.run(job)
     takes.choose(job, "b1", 0)
-    assets.apply_chosen(job, "b1")
-    assets.retake(job, "b1")
+    shotmake.apply_chosen(job, "b1")
+    shotmake.retake(job, "b1")
     shot = _shot(job)
     assert shot["chosen"] == 0 and shot["chosen_by"] == "human" and len(shot["takes"]) == 3
 
@@ -111,11 +111,37 @@ def test_a_retake_with_a_note_says_it_to_the_model_and_touches_no_other_shot(tmp
     assets.run(job)
     other = publish.sha256_file(job.work / "beats" / "b2.video.mp4")
     studio.calls.clear()
-    assets.retake(job, "b1", "The water must keep moving.")
+    shotmake.retake(job, "b1", "The water must keep moving.")
     assert [c["capability"] for c in studio.calls] == ["video"]
     assert "The water must keep moving." in studio.calls[0]["prompt"]
     assert publish.sha256_file(job.work / "beats" / "b2.video.mp4") == other
     assert _shot(job)["takes"][-1]["note"] == "The water must keep moving."
+
+
+def test_a_retake_that_reads_well_is_used_because_a_person_saw_what_a_reading_cannot(
+    tmp_path, studio
+):
+    job = make_job(tmp_path, beats=[_moving_beat()])
+    assets.run(job)
+    assert _shot(job)["chosen"] == 0
+    take = shotmake.retake(job, "b1", "The light is wrong.")
+    assert take["n"] == 1 and _shot(job)["chosen"] == 1
+    assert _shot(job)["chosen_by"] == "reading", "only a person's own choice is marked as theirs"
+
+
+def test_a_retake_that_comes_back_frozen_is_not_used(tmp_path, studio):
+    job = make_job(tmp_path, beats=[_moving_beat()])
+    assets.run(job)
+    studio.frozen_takes = 99
+    take = shotmake.retake(job, "b1", "The light is wrong.")
+    assert take["n"] == 0 and _shot(job)["chosen"] == 0
+
+
+def test_a_retake_of_a_shot_the_script_does_not_have_is_refused(tmp_path, studio):
+    job = make_job(tmp_path, beats=[_moving_beat()])
+    assets.run(job)
+    with pytest.raises(ContractError, match="no beat b9"):
+        shotmake.retake(job, "b9")
 
 
 def test_a_new_take_reaches_the_cut(tmp_path, studio):
@@ -123,7 +149,7 @@ def test_a_new_take_reaches_the_cut(tmp_path, studio):
     assets.run(job)
     first = edit.run(job)["asset_manifest_sha256"]
     takes_before = takes.load(job)["shots"]["b1"]["chosen"]
-    assets.retake(job, "b1")
+    shotmake.retake(job, "b1")
     assert takes.load(job)["shots"]["b1"]["chosen"] in (takes_before, 1)
     assert edit.run(job)["asset_manifest_sha256"] != first, "the manifest records the new bytes"
 
