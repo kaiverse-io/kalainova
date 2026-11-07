@@ -97,6 +97,25 @@ def test_a_film_opens_on_picture_and_music_and_holds_after_the_last_word(tmp_pat
     assert checks["hook.first_word"] == "pass", "the opening is the design, not a slow hook"
 
 
+@pytest.mark.parametrize(
+    ("profile_fps", "sources", "expected"),
+    [
+        (30, [24.0, 24.0, 24.0], 24.0),  # up to 30 would repeat every fourth frame
+        (30, [25.0], 25.0),
+        (30, [23.976, 23.976], 23.976),
+        (24, [24.0], 24),  # already there
+        (30, [30.0], 30),
+        (30, [60.0], 30),  # a faster source drops frames evenly
+        (30, [24.0, 30.0], 30),  # mixed sources have no one native rate
+        (30, [], 30),  # stills are drawn at any rate
+    ],
+)
+def test_a_piece_keeps_its_sources_frame_rate_rather_than_repeating_frames(
+    profile_fps, sources, expected
+):
+    assert edit.frame_rate_for(profile_fps, sources) == expected
+
+
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_new_assets_are_never_cut_with_the_old_edit(tmp_path, monkeypatch):
     job = _film_job(tmp_path, monkeypatch)

@@ -48,6 +48,7 @@ DUCK = "sidechaincompress=threshold=0.05:ratio=3:attack=25:release=450:makeup=1"
 # A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
 ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
 MUSIC_FADE_SEC = 2.5
+MUSIC_CLEAN = "highpass=f=25"  # generated music can carry DC and rumble nobody can hear
 # Video usually arrives in 8 bits, which leaves contours in skies. This smooths them at high precision.
 DEBAND_VIDEO = "format=yuv444p16le,deband=1thr=0.012:2thr=0.012:3thr=0.012:range=20:blur=1"
 SHARPEN_ENLARGED = "cas=strength=0.3"
@@ -855,7 +856,8 @@ def _music_chain(index: int, gain: float, duration: float, under_voice: bool) ->
     fade = min(MUSIC_FADE_SEC, duration * 0.25)
     pocket = f"{MUSIC_POCKET}," if under_voice else ""
     return (
-        f"[{index}:a]aresample=48000,aformat=channel_layouts=stereo,{pocket}volume={gain:.2f}dB,"
+        f"[{index}:a]aresample=48000,aformat=channel_layouts=stereo,{MUSIC_CLEAN},{pocket}"
+        f"volume={gain:.2f}dB,"
         f"afade=t=in:d=0.2,afade=t=out:st={duration - fade:.3f}:d={fade:.3f}"
     )
 

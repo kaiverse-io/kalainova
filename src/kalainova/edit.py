@@ -77,6 +77,14 @@ def caption_cards(
     return cards
 
 
+def frame_rate_for(profile_fps: float, sources: list[float]) -> float:
+    """The rate a piece runs at. Going above a source's own rate can only repeat frames: judder."""
+    rates = set(sources)
+    if len(rates) == 1 and min(rates) < profile_fps:
+        return min(rates)
+    return profile_fps
+
+
 def run(job: Job, *, force: bool = False) -> dict:
     cut_from = hashlib.sha256(job.path("asset_manifest").read_bytes()).hexdigest()
     if job.has("edit_manifest") and not force:
@@ -180,6 +188,11 @@ def run(job: Job, *, force: bool = False) -> dict:
             for c in cuts[1:]
         ]
 
+    moving_rates = [
+        float(a["probe"]["fps"])
+        for a in (by_id[c["source"]] for c in cuts)
+        if a["kind"] == "video" and a.get("probe", {}).get("fps")
+    ]
     manifest = {
         "schema_version": "0.1",
         "job_id": data["job_id"],
@@ -189,7 +202,7 @@ def run(job: Job, *, force: bool = False) -> dict:
             "aspect": prof.get("aspect", "9:16"),
             "width": int(prof.get("width", 1080)),
             "height": int(prof.get("height", 1920)),
-            "fps": float(prof.get("fps", 30)),
+            "fps": frame_rate_for(float(prof.get("fps", 30)), moving_rates),
             "target_lufs": float(prof.get("target_lufs", -14)),
             "true_peak_dbtp_max": float(prof.get("true_peak_dbtp_max", -1)),
             "delivery": prof.get("delivery", "web"),

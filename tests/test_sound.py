@@ -182,6 +182,31 @@ def test_a_voice_alone_has_no_music_stem_and_an_effect_lands_on_its_mark(tmp_pat
     assert abs(left[int(sr * 3.05) : int(sr * 3.15)]).max() > 0.05
 
 
+def test_a_dc_offset_in_generated_music_does_not_reach_the_mix(tmp_path):
+    _tone(tmp_path / "v.wav", 4.0, volume=2.0)
+    media.run(
+        [
+            "-f", "lavfi", "-i", "aevalsrc='0.05+0.1*sin(2*PI*110*t)':s=48000:d=4",
+            "-ac", "2", str(tmp_path / "m.wav"),
+        ]
+    )  # fmt: skip
+    render._op_mix_audio(
+        tmp_path,
+        {
+            "out": "mix.wav",
+            "duration_sec": 4.0,
+            "voice": "v.wav",
+            "voice_chain": False,
+            "music": "m.wav",
+            "duck": True,
+            "sfx": [],
+        },
+    )
+    music, _, sr = media.decode_stereo(tmp_path / "music.stem.wav")
+    level = float(np.sqrt(np.mean(music[sr:-sr] ** 2)))
+    assert abs(bar.dc_offset(music[sr:-sr])) < level * 0.05
+
+
 def test_music_too_quiet_to_hear_misses_the_bar(tmp_path):
     _tone(tmp_path / "voice.stem.wav", 2.0, volume=0.4)
     _tone(tmp_path / "music.stem.wav", 2.0, freq=110.0, volume=0.002)
