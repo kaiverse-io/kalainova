@@ -361,6 +361,79 @@ def test_a_render_crops_a_baked_in_letterbox_away(tmp_path):
     assert frame[:3].mean() > 30 and frame[-3:].mean() > 30
 
 
+def _scale_args(**extra):
+    return {
+        "input": "raw.mp4",
+        "out": "out.mp4",
+        "fps": 24,
+        "duration_sec": 0.5,
+        **extra,
+    }
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_contours_in_an_eight_bit_sky_are_smoothed(tmp_path):
+    # A slow gradient in 8 bits, the way a video model hands back a dark sky.
+    raw = tmp_path / "raw.mp4"
+    ramp = "geq=lum='48+X/W*48':cb=128:cr=128"
+    media.run(
+        [
+            "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=24:d=1",
+            "-vf", f"format=yuv444p,{ramp}",
+            "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p", str(raw),
+        ]
+    )  # fmt: skip
+    before = bar.banding_score(media.gray_frame(raw, 0.5))
+    render._op_scale(tmp_path, _scale_args(width=1280, height=720))
+    final = tmp_path / "final.mp4"
+    media.run(
+        [
+            "-i", str(tmp_path / "out.mp4"), "-vf", media.TO_DELIVERY,
+            "-c:v", "libx264", "-preset", "slow", "-crf", "16", str(final),
+        ]
+    )  # fmt: skip
+    after = bar.banding_score(media.gray_frame(final, 0.25))
+    assert before > 0.3
+    assert (
+        after < before * 0.7
+    )  # a flat ramp is the hardest case; a real sky fell from 0.13 to 0.03
+
+
+def test_an_enlarged_source_is_sharpened_and_a_full_size_one_is_not():
+    assert "cas=" in render._finish_after_scale((1472, 832), 1920, 1080)
+    assert render._finish_after_scale((1920, 1080), 1920, 1080) == ""
+    assert render._finish_after_scale((3840, 2160), 1920, 1080) == ""
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_an_enlarged_soft_source_comes_out_with_more_detail(tmp_path):
+    raw = tmp_path / "raw.mp4"
+    media.run(
+        [
+            "-f", "lavfi", "-i", "testsrc2=s=960x540:r=24:d=1",
+            "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p", str(raw),
+        ]
+    )  # fmt: skip
+    plain = tmp_path / "plain.mp4"
+    media.run(
+        [
+            "-i",
+            str(raw),
+            "-vf",
+            "scale=1920:1080:flags=lanczos",
+            "-c:v",
+            "libx264",
+            "-qp",
+            "0",
+            str(plain),
+        ]
+    )
+    render._op_scale(tmp_path, _scale_args(width=1920, height=1080))
+    soft = bar.detail_ratio(media.gray_frame(plain, 0.25))
+    sharp = bar.detail_ratio(media.gray_frame(tmp_path / "out.mp4", 0.25))
+    assert sharp > soft
+
+
 @pytest.mark.parametrize(
     "box",
     [

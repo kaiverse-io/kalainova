@@ -48,6 +48,9 @@ DUCK = "sidechaincompress=threshold=0.05:ratio=3:attack=25:release=450:makeup=1"
 # A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
 ROOM_TONE = "anoisesrc=d={duration:.3f}:c=pink:r=48000:a=0.0007:seed=7,lowpass=f=7000,aformat=channel_layouts=stereo[room]"
 MUSIC_FADE_SEC = 2.5
+# Video usually arrives in 8 bits, which leaves contours in skies. This smooths them at high precision.
+DEBAND_VIDEO = "format=yuv444p16le,deband=1thr=0.012:2thr=0.012:3thr=0.012:range=20:blur=1"
+SHARPEN_ENLARGED = "cas=strength=0.3"
 # Against the voice where it speaks, before ducking. On real speech it lands 15 dB under the words.
 MUSIC_UNDER_VOICE_DB = -10.0
 DUCK_KEY_LUFS = -27.0  # where the ducker hears the voice, so it ducks the same for any voice
@@ -646,17 +649,26 @@ def _op_cut(work: Path, a: dict) -> None:
             )
 
 
+def _finish_after_scale(source: tuple[int, int], width: int, height: int) -> str:
+    """An enlarged source comes back soft, and gets a light sharpen. One at full size is left alone."""
+    enlarged = max(width / source[0], height / source[1]) > 1.0
+    return f"{SHARPEN_ENLARGED}," if enlarged else ""
+
+
 def _op_scale(work: Path, a: dict) -> None:
     src, out = _safe(work, a["input"]), _safe(work, a["out"])
     W, H = a["width"], a["height"]
     z = a.get("zoom") or 1.0
+    info = media.summarize(src)
+    sharpen = _finish_after_scale((info["width"], info["height"]), W, H)
     cx = 0.5 if a.get("crop_x") is None else a["crop_x"]
     box = a.get("picture_box")
     bars = f"crop=iw*{box[2]:.5f}:ih*{box[3]:.5f}:iw*{box[0]:.5f}:ih*{box[1]:.5f}," if box else ""
     # fill the frame, punch in if asked, then crop around the subject (clamped inside the frame)
     fit = (
-        f"{bars}scale={int(W * z)}:{int(H * z)}:force_original_aspect_ratio=increase:flags=lanczos,"
-        f"crop={W}:{H}:x='(iw-{W})*{min(max(cx, 0.0), 1.0):.4f}':y='(ih-{H})/2',fps={a['fps']:g},setsar=1"
+        f"{bars}{DEBAND_VIDEO},"
+        f"scale={int(W * z)}:{int(H * z)}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"{sharpen}crop={W}:{H}:x='(iw-{W})*{min(max(cx, 0.0), 1.0):.4f}':y='(ih-{H})/2',fps={a['fps']:g},setsar=1"
     )
     trim = f"trim=duration={a['duration_sec']:.3f}"
     media.run(
