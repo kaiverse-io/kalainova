@@ -13,6 +13,8 @@ Gates catch craft faults. Reading the piece catches the rest: a balloon tail acr
 4. **Look at it.**
    - Picture: a contact sheet of the whole piece, then two or three frames at full size.
    - Motion: step through 8 frames of any shot with people. Limbs, hands, and faces fail first.
+   - Action: compare the first and last frame of every shot. Did each thing the cue says moves actually move, including water and sky behind a moving person? Regenerate a shot under `source.shot_motion` before showing it.
+   - Geometry: does the action fit the place? Check that a person stands on the steps they climb and that the steps rise the way they travel. No number catches this.
    - Comic: read every page. Check tails, overlaps, and lettering against the art.
    - Book: view every page. Check stranded lines and near-empty pages.
 5. **Check continuity between shots:** same place, same clothes, same object.
