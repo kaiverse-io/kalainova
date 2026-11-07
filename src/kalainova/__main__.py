@@ -77,7 +77,7 @@ STAGES = {
     "assets": lambda j, f: assets.run(j, force=f),
     "edit": lambda j, f: edit.run(j, force=f),
     "compile": lambda j, f: render.compile_plan(j),
-    "render": lambda j, f: render.execute(j),
+    "render": lambda j, f: render.execute(j, cache=not f),
     "qa": lambda j, f: qa.run(j),
 }
 
@@ -120,7 +120,7 @@ def _render_edit(job) -> int:
     )
     for st in ("compile", "render", "qa"):
         t0 = time.time()
-        STAGES[st](job, True)
+        STAGES[st](job, False)
         print(f"  {st:<8} ok  {time.time() - t0:5.1f}s")
         if st == "render":
             job.set_status("rendered")
@@ -135,13 +135,16 @@ def _render_edit(job) -> int:
 
 def _print_bar(report: dict) -> None:
     if report.get("bar"):
-        print(f"studio bar {report['bar']['met']}/{report['bar']['total']}")
+        from . import bar
+
+        print(f"studio bar: {bar.summary_line(report['bar'])}")
 
 
 def _document(a) -> int:
-    from . import comic, story
+    from . import comic, story, writers
 
     job = open_job(a.job)
+    writers.ensure(job, a.cmd)
     final = (comic if a.cmd == "comic" else story).run(job)
     report = qa.run(job)
     for c in report["checks"]:
@@ -166,7 +169,7 @@ def _bar(a) -> int:
     for r in report["readings"]:
         mark = "ok  " if r["ok"] else "MISS"
         print(f"{mark} {r['id']:<30} {str(r['value'])[:26]:<28} {r['limit']}")
-    print(f"studio bar {report['met']}/{report['total']}")
+    print(f"studio bar: {bar.summary_line(report)}")
     return 0 if report["passed"] else 2
 
 
