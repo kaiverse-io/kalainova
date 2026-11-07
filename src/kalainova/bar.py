@@ -96,11 +96,16 @@ def _peak_offset(line: Arr, at: int) -> float:
 
 
 def _phase_match(a: Arr, b: Arr) -> tuple[float, float, float]:
-    """How far b's picture travelled to reach a, and how clear that match is."""
-    cross = np.fft.rfft2(a - a.mean()) * np.conj(np.fft.rfft2(b - b.mean()))
+    """How far b's picture travelled to reach a, and how clear that match is.
+
+    Windowed, because a block's own edges stay where they are. On a smooth picture that still
+    pattern outweighs the picture's move, and the match says nothing moved.
+    """
+    h, w = a.shape
+    window = np.outer(np.hanning(h), np.hanning(w))
+    cross = np.fft.rfft2((a - a.mean()) * window) * np.conj(np.fft.rfft2((b - b.mean()) * window))
     peak = np.fft.irfft2(cross / (np.abs(cross) + 1e-6), s=a.shape)
     y, x = (int(i) for i in np.unravel_index(int(np.argmax(peak)), peak.shape))
-    h, w = a.shape
     dx = (x if x <= w // 2 else x - w) + _peak_offset(peak[y, :], x)
     dy = (y if y <= h // 2 else y - h) + _peak_offset(peak[:, x], y)
     return dx, dy, float(peak[y, x])

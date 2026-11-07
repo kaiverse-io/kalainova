@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from kalainova import bar, config, media
 
@@ -220,10 +220,10 @@ def test_a_camera_move_across_a_frozen_picture_is_not_motion(window):
     assert bar.shot_motion(move, MOTION_FPS) < MOTION_LIMIT
 
 
-def _pushed(rate: float, drift: float = 0.0, wide: np.ndarray | None = None):
+def _pushed(rate: float, drift: float = 0.0, wide: np.ndarray | None = None, soften: float = 0.0):
     """A camera pushing in on a frozen picture, and drifting, sampled the way a renderer samples."""
     source = _scene(h=280, w=480) if wide is None else wide
-    picture = Image.fromarray(source.astype(np.uint8))
+    picture = Image.fromarray(source.astype(np.uint8)).filter(ImageFilter.GaussianBlur(soften))
 
     def frame(i: int) -> np.ndarray:
         shrink = 1.0 / (1.0 + rate * i / MOTION_FPS)
@@ -237,12 +237,22 @@ def _pushed(rate: float, drift: float = 0.0, wide: np.ndarray | None = None):
 # The slow push a film holds a whole shot, a stills camera move, and the 5.7% a second a
 # model gave a generated shot in which nothing else moved.
 @pytest.mark.parametrize("rate", [0.012, 0.03, 0.06])
-def test_a_push_in_on_a_frozen_picture_is_not_motion(rate):
-    assert bar.shot_motion(_pushed(rate), MOTION_FPS) < MOTION_LIMIT
+@pytest.mark.parametrize("soften", [0.0, 1.0, 3.0], ids=["sharp", "soft", "fog"])
+def test_a_push_in_on_a_frozen_picture_is_not_motion(rate, soften):
+    pushed = _pushed(rate, soften=soften)
+    assert bar.shot_motion(pushed, MOTION_FPS) < MOTION_LIMIT / 2
 
 
-def test_a_push_in_that_also_drifts_is_not_motion():
-    assert bar.shot_motion(_pushed(0.03, drift=0.5), MOTION_FPS) < MOTION_LIMIT
+@pytest.mark.parametrize("soften", [0.0, 1.0, 3.0], ids=["sharp", "soft", "fog"])
+def test_a_push_in_that_also_drifts_is_not_motion(soften):
+    pushed = _pushed(0.03, drift=0.5, soften=soften)
+    assert bar.shot_motion(pushed, MOTION_FPS) < MOTION_LIMIT / 2
+
+
+def test_a_pushed_clip_measures_real_change_before_the_camera_is_taken_out():
+    # without this, the two tests above would pass on a clip that barely changes
+    pushed = _pushed(0.06, soften=1.0).astype(np.int16)
+    assert np.abs(pushed[-1] - pushed[0]).mean() > 5
 
 
 def test_a_push_in_over_moving_water_still_counts_the_water():
@@ -308,7 +318,7 @@ def test_exactly_one_step_of_frames_is_too_few_to_compare():
 def _still_then_moving(path) -> None:
     media.run(
         [
-            "-f", "lavfi", "-i", "smptebars=size=320x180:rate=24:duration=1.5",
+            "-f", "lavfi", "-i", "smptebars=size=320x180:rate=24:duration=3",
             "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=1.5",
             "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]",
             "-map", "[v]", "-pix_fmt", "yuv420p", str(path),
@@ -316,19 +326,18 @@ def _still_then_moving(path) -> None:
     )  # fmt: skip
 
 
-@pytest.mark.parametrize(
-    ("cut", "frozen"),
-    [
-        ({"in_sec": 0.6, "out_sec": 1.4}, True),  # stops before the clip starts moving
-        ({"in_sec": 1.6, "out_sec": 2.9}, False),
-        ({"in_sec": 1.6}, False),  # no end named: runs to the end of the clip
-    ],
-)
-def test_only_the_part_of_a_clip_the_edit_uses_is_read(tmp_path, cut, frozen):
+def test_only_the_part_of_a_clip_the_edit_uses_is_read(tmp_path):
     _still_then_moving(tmp_path / "clip.mp4")
     am = {"assets": [{"id": "c", "kind": "video", "path": "clip.mp4", "synthetic": True}]}
-    read = bar._generated_shots(tmp_path, {"cuts": [{"source": "c", **cut}]}, am)["c"]
-    assert read < MOTION_LIMIT if frozen else read > 0.25  # 0.2 if the still part is read too
+
+    def read(**cut) -> float:
+        return bar._generated_shots(tmp_path, {"cuts": [{"source": "c", **cut}]}, am)["c"]
+
+    # compared with each other, because an encoder build moves the moving part's reading
+    whole_clip = read()
+    assert read(in_sec=0.6, out_sec=2.4) < MOTION_LIMIT  # stops before the clip starts moving
+    assert read(in_sec=3.1, out_sec=4.4) > whole_clip  # leaves the still part out
+    assert read(in_sec=3.1) > whole_clip  # no end named: runs to the end of the clip
 
 
 def test_a_move_too_far_for_any_camera_is_not_taken_out():
