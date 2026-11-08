@@ -340,3 +340,89 @@ def test_an_empty_name_matches_no_shot():
     assert choose.matches(TAKES[0], SOURCES, "a")
     assert choose.matches(TAKES[0], SOURCES, "FIRST")
     assert not choose.matches(TAKES[0], SOURCES, "second")
+
+
+def _graded(kind="video", sharpness=0.5, exposure=0.5, shake=0.1, **extra):
+    scores = {"sharpness": sharpness, "exposure": exposure, "shake": shake}
+    return {"kind": kind, "scores": scores, **extra}
+
+
+def test_a_soft_video_is_rejected_and_a_still_is_not_judged_for_focus():
+    assert "soft focus" in choose.defects(_graded(sharpness=0.1))
+    assert choose.defects(_graded(sharpness=0.15)) == []
+    assert choose.defects(_graded(kind="still", sharpness=0.1)) == []
+
+
+def test_a_bad_exposure_is_rejected_at_its_limit_and_not_past_it():
+    assert "badly exposed" in choose.defects(_graded(exposure=0.34))
+    assert choose.defects(_graded(exposure=0.35)) == []
+
+
+def test_shake_counts_only_when_the_camera_really_moved():
+    assert "shaky" in choose.defects(_graded(jitter_px=3.1))
+    assert choose.defects(_graded(jitter_px=3.0)) == []
+    assert "shaky" in choose.defects(_graded(shake=0.8, jitter_px=1.6))
+    assert choose.defects(_graded(shake=0.7, jitter_px=1.6)) == []
+    assert choose.defects(_graded(shake=0.8, jitter_px=1.5)) == []
+
+
+@pytest.mark.parametrize("level", [0.15, 0.75])
+def test_an_exposure_at_the_edge_of_normal_is_left_alone(level):
+    assert choose.gamma({"series": {"lum": [level]}}) == 1.0
+
+
+def test_a_shot_with_no_light_reading_is_left_alone():
+    assert choose.gamma({"series": {"lum": []}}) == 1.0
+
+
+def test_a_dark_shot_is_brought_up_by_the_exponent_that_lands_on_mid_grey():
+    assert choose.gamma({"series": {"lum": [0.14]}}) == pytest.approx(1.25)
+    assert choose.gamma({"series": {"lum": [0.8]}}) == pytest.approx(0.85)
+
+
+def test_shots_that_look_alike_are_told_apart_only_when_they_can_be_compared():
+    assert choose._looks_like([1.0, 2.0, 3.0], [2.0, 4.0, 6.0])
+    assert not choose._looks_like([1.0, 2.0, 3.0], [3.0, 2.0, 1.0])
+    assert not choose._looks_like([1.0, 2.0], [1.0, 2.0, 3.0]), "different lengths"
+    assert not choose._looks_like([1.0, 1.0, 1.0], [1.0, 2.0, 3.0]), "the first is flat"
+    assert not choose._looks_like([1.0, 2.0, 3.0], [1.0, 1.0, 1.0]), "the second is flat"
+
+
+def test_the_next_moment_prefers_a_shot_long_enough_for_the_rhythm():
+    short = {"shot": {"source": "a", "in_sec": 0.0, "out_sec": 1.0, "sig": []}}
+    enough = {"shot": {"source": "a", "in_sec": 2.0, "out_sec": 3.0, "sig": []}}
+    long_shot = {"shot": {"source": "b", "in_sec": 0.0, "out_sec": 4.0, "sig": []}}
+    assert choose.next_moment([short, long_shot], [], None, need=2.0) is long_shot
+    assert choose.next_moment([short, enough], [], None, need=1.0) is short, "exactly long enough"
+
+
+def test_the_next_moment_avoids_the_source_just_used():
+    same = {"shot": {"source": "a", "in_sec": 0.0, "out_sec": 2.0, "sig": []}}
+    other = {"shot": {"source": "b", "in_sec": 0.0, "out_sec": 2.0, "sig": []}}
+    assert choose.next_moment([same, other], [], "a") is other
+
+
+def test_a_pause_is_shortened_to_a_breath_and_speech_is_never_cut():
+    kept = choose.speech_keeps([(3.0, 5.0)], 8.0)
+    half = choose.PAUSE_KEPT_SEC / 2
+    assert kept == [(0.0, 3.0 + half), (5.0 - half, 8.0)]
+
+
+def test_a_short_pause_stays_in():
+    just_under = choose.MIN_PAUSE_TO_CUT_SEC - 0.01
+    assert choose.speech_keeps([(3.0, 3.0 + just_under)], 8.0) == [(0.0, 8.0)]
+    assert len(choose.speech_keeps([(4.0, 4.0 + choose.MIN_PAUSE_TO_CUT_SEC)], 8.0)) == 2
+
+
+def test_no_sliver_of_speech_is_left_between_two_cuts():
+    assert choose.speech_keeps([(0.5, 3.0)], 8.0) == [(0.0, 8.0)]
+
+
+def test_a_source_this_edit_has_to_enlarge_too_far_is_named():
+    sources = {
+        "a": {"name": "small.mp4", "width": 320, "height": 180},
+        "b": {"name": "fine.mp4", "width": 960, "height": 540},
+    }
+    cuts = [{"source": "a"}, {"source": "b"}]
+    prof = {"width": 1920, "height": 1080}
+    assert choose.too_small(cuts, sources, prof) == ["small.mp4"], "exactly twice is still sharp"

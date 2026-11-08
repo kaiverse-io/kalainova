@@ -103,6 +103,27 @@ def test_voice_and_music_connect_below_the_picture(tmp_path, monkeypatch):
     assert [c.get("lane") for c in connected] == ["-1", "-2"]
 
 
+def test_every_clip_points_at_an_asset_that_exists_and_only_sound_lacks_a_picture(
+    tmp_path, monkeypatch
+):
+    job = _job(tmp_path, monkeypatch)
+    root = ET.fromstring(nle.fcpxml(nle.build(job)))
+    assets = {asset.get("id"): asset for asset in root.findall(".//resources/asset")}
+    clips = root.findall(".//spine/asset-clip")
+    connected = clips[0].findall("asset-clip")
+    assert all(clip.get("ref") in assets for clip in [*clips, *connected])
+    assert all(assets[clip.get("ref")].get("hasVideo") == "1" for clip in clips)
+    assert all(assets[clip.get("ref")].get("hasVideo") == "0" for clip in connected)
+    assert "r1" not in assets, "the format holds that id"
+
+
+def test_sound_connects_to_the_first_clip_alone(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    clips = ET.fromstring(nle.fcpxml(nle.build(job))).findall(".//spine/asset-clip")
+    assert clips[0].findall("asset-clip")
+    assert not any(clip.findall("asset-clip") for clip in clips[1:])
+
+
 def test_otio_holds_a_track_for_picture_and_for_each_sound(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     document = json.loads(nle.otio(nle.build(job)))
