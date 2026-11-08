@@ -38,7 +38,20 @@ def _qa_bound(job: Job, final: Path) -> dict:
     checked = hashes.get("video") or hashes.get("audio") or hashes.get("document")
     if not checked or checked != sha256_file(final):
         raise ContractError(f"{job.id}: {final.name} is not the file QA checked; run qa again")
+    _master_bound(job, final, hashes)
     return qa
+
+
+def _master_bound(job: Job, final: Path, hashes: dict) -> None:
+    """The delivery master is what a platform ingests, so it is held to the same rule."""
+    master = final.with_name("final.master.mov")
+    checked = hashes.get("master")
+    if checked is None and master.exists():
+        raise ContractError(f"{job.id}: {master.name} exists and QA never checked it; run qa again")
+    if checked is None:
+        return
+    if not master.exists() or sha256_file(master) != checked:
+        raise ContractError(f"{job.id}: {master.name} is not the master QA checked; run qa again")
 
 
 CAPTION_LIMITS = {
@@ -85,6 +98,12 @@ def _not_placeholder(job: Job) -> None:
     ):
         raise ContractError(
             f"{job.id}: {final.name} was not rendered from this asset_manifest.json; render again"
+        )
+    allowed = (job.job.get("brief") or {}).get("allow_stills")
+    if job.read("asset_manifest").get("promise_breaks") and not allowed:
+        raise ContractError(
+            f"{job.id}: shots that asked to move did not; regenerate them, write those beats as "
+            "stills, or set brief.allow_stills"
         )
 
 
@@ -140,6 +159,7 @@ def approve(
         "reviewer": reviewer,
         "approved_at": _now(),
         "artifact_sha256": sha256_file(final),
+        **_master_record(final),
         "platforms": platforms,
         "title": pub.get("title") or packet.get("title") or job.id,
         "description": pub.get("description", ""),
@@ -151,6 +171,11 @@ def approve(
     job.write("approval", record)
     job.set_status("approved")
     return record
+
+
+def _master_record(final: Path) -> dict:
+    master = final.with_name("final.master.mov")
+    return {"master_sha256": sha256_file(master)} if master.exists() else {}
 
 
 def _log(job: Job, entry: dict) -> None:
@@ -177,6 +202,8 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
         raise ContractError(
             f"{job.id}: {final.name} changed after approval; re-run QA and approval"
         )
+    if _master_record(final).get("master_sha256") != appr.get("master_sha256"):
+        raise ContractError(f"{job.id}: the master changed after approval; re-run QA and approval")
     _qa_bound(job, final)
     _not_placeholder(job)
     handle = None

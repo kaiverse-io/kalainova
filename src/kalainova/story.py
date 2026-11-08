@@ -1,7 +1,8 @@
 """STORIES. story.json -> a typeset book as PDF, and a real EPUB with the whole text.
 
 Book typography, by rule: a comfortable measure, justified lines, and no stranded line at the top or
-foot of a page. The EPUB holds live text, so it reflows and is read aloud by any reader.
+foot of a page. Both files hold live text, so they can be searched and read aloud. Pages are laid
+out once, then drawn twice: as images to review, and as type to print.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import captions, comic, render
+from . import bookpdf, captions, comic, render
+from .bookpdf import Placed
 from .jobfs import ContractError, Job
 from .providers import router
 
@@ -27,6 +29,7 @@ INDENT = 46
 OPENER_DROP = 620  # a chapter starts a third of the way down its page
 LONE_WORD_COST = 1.0  # worth a much looser line elsewhere in the paragraph
 MIN_LAST_PAGE_LINES = 5  # fewer than this on a chapter's last page looks like a mistake
+TITLE_SIZE, TITLE_OPTICAL, FOLIO_SIZE = 92, 48, 38
 BODY_FACE = "Literata.ttf"
 FOOT_DARKNESS = 0.82
 INK = (22, 22, 24)
@@ -41,10 +44,16 @@ class Line:
     indent: int
 
 
+@dataclass(frozen=True)
+class ChapterPages:
+    title: str
+    pages: list[list[Line]]
+    lift: int  # how far the opener rose to take up lines that would have been stranded
+    first_folio: int
+
+
 def _font(size: int, *, weight: int = 400, optical: int = 12) -> ImageFont.FreeTypeFont:
-    font = ImageFont.truetype(str(captions.FONTS / BODY_FACE), size)
-    font.set_variation_by_axes([optical, weight])
-    return font
+    return bookpdf.pil_font(captions.FONTS / BODY_FACE, size, weight, optical)
 
 
 def break_lines(text: str, *, measure: float, size: int, indent: int) -> list[Line]:
@@ -55,8 +64,8 @@ def break_lines(text: str, *, measure: float, size: int, indent: int) -> list[Li
     """
     font = _font(size)
     words = text.split()
-    widths = [font.getlength(w) for w in words]
-    space = font.getlength(" ")
+    widths = [bookpdf.width(font, w) for w in words]
+    space = bookpdf.width(font, " ")
     count = len(words)
     best = [float("inf")] * (count + 1)
     came_from = [0] * (count + 1)
@@ -92,7 +101,12 @@ def _lines_from_breaks(
     for n, (a, b) in enumerate(stops):
         chunk = words[a:b]
         lines.append(
-            Line(chunk, font.getlength(" ".join(chunk)), b != len(words), indent if n == 0 else 0)
+            Line(
+                chunk,
+                bookpdf.width(font, " ".join(chunk)),
+                b != len(words),
+                indent if n == 0 else 0,
+            )
         )
     return lines
 
@@ -103,8 +117,8 @@ def widest_gap_if_greedy(text: str, *, measure: float, size: int) -> float:
     worst, current = 0.0, ""
     for word in text.split():
         trial = f"{current} {word}".strip()
-        if current and font.getlength(trial) > measure:
-            worst = max(worst, measure - font.getlength(current))
+        if current and bookpdf.width(font, trial) > measure:
+            worst = max(worst, measure - bookpdf.width(font, current))
             current = word
         else:
             current = trial
@@ -160,58 +174,79 @@ def set_chapter(
 
 
 # ------------------------------------------------------------------ the printed book
-def _draw_line(draw: ImageDraw.ImageDraw, line: Line, y: float, measure: float) -> None:
-    font = _font(BODY_SIZE)
-    x = float(MARGIN_X + line.indent)
-    gaps = len(line.words) - 1
-    natural = sum(font.getlength(w) for w in line.words)
-    space = font.getlength(" ")
-    if line.justify and gaps:
-        space = (measure - line.indent - natural) / gaps
-    for word in line.words:
-        draw.text((x, y), word, font=font, fill=INK)
-        x += font.getlength(word) + space
-
-
-def _chapter_pages(chapter: dict[str, Any], first_folio: int) -> list[Image.Image]:
+def lay_out(chapter: dict[str, Any], first_folio: int) -> ChapterPages:
+    """Every line of a chapter on its page. This decides the book; drawing it decides nothing."""
     measure = PAGE_W - 2 * MARGIN_X
     body_height = PAGE_H - MARGIN_TOP - MARGIN_FOOT
-    per_page = body_height // LEADING
     opener = (body_height - OPENER_DROP) // LEADING
     paragraphs = [
         break_lines(text, measure=measure, size=BODY_SIZE, indent=INDENT if n else 0)
         for n, text in enumerate(chapter["paragraphs"])
     ]
-    pages, room = set_chapter(paragraphs, per_page, opener)
-    lift = (room - opener) * LEADING
-    images = []
-    for n, lines in enumerate(pages):
-        page = Image.new("RGB", (PAGE_W, PAGE_H), PAPER)
-        draw = ImageDraw.Draw(page)
-        y = float(MARGIN_TOP)
-        if n == 0:
-            title = _font(92, weight=400, optical=48)
-            draw.text(
-                (PAGE_W / 2, MARGIN_TOP + 240 - lift / 2),
-                chapter["title"],
-                font=title,
-                fill=INK,
-                anchor="mm",
+    pages, room = set_chapter(paragraphs, body_height // LEADING, opener)
+    return ChapterPages(chapter["title"], pages, (room - opener) * LEADING, first_folio)
+
+
+def _baseline(y: float, size: int, *, optical: int = 12, middle: bool = False) -> float:
+    """Where type stands, for a line's top, or for its middle when it is centred on a point."""
+    ascent, descent = _font(size, optical=optical).getmetrics()
+    return y + ((ascent - descent) / 2 if middle else ascent)
+
+
+def _set_line(line: Line, y: float, measure: float) -> list[Placed]:
+    font = _font(BODY_SIZE)
+    x = float(MARGIN_X + line.indent)
+    gaps = len(line.words) - 1
+    space = bookpdf.width(font, " ")
+    if line.justify and gaps:
+        space = (measure - line.indent - sum(bookpdf.width(font, w) for w in line.words)) / gaps
+    baseline = _baseline(y, BODY_SIZE)
+    placed = []
+    for word in line.words:
+        placed.append(Placed(word, x, baseline, BODY_SIZE))
+        x += bookpdf.width(font, word) + space
+    return placed
+
+
+def page_items(chapter: ChapterPages, n: int) -> list[Placed]:
+    """All the type on one page of a chapter."""
+    measure = PAGE_W - 2 * MARGIN_X
+    items = []
+    y = float(MARGIN_TOP)
+    if n == 0:
+        middle = MARGIN_TOP + 240 - chapter.lift / 2
+        baseline = _baseline(middle, TITLE_SIZE, optical=TITLE_OPTICAL, middle=True)
+        items.append(
+            Placed(
+                chapter.title, PAGE_W / 2, baseline, TITLE_SIZE, optical=TITLE_OPTICAL, centred=True
             )
-            y += OPENER_DROP - lift
-        for line in lines:
-            _draw_line(draw, line, y, measure)
-            y += LEADING
-        if n:  # a chapter opener carries no page number, by convention
-            draw.text(
-                (PAGE_W / 2, PAGE_H - MARGIN_FOOT / 2),
-                str(first_folio + n),
-                font=_font(38),
-                fill=INK,
-                anchor="mm",
-            )
-        images.append(page)
-    return images
+        )
+        y += OPENER_DROP - chapter.lift
+    for line in chapter.pages[n]:
+        items += _set_line(line, y, measure)
+        y += LEADING
+    if n:  # a chapter opener carries no page number, by convention
+        baseline = _baseline(PAGE_H - MARGIN_FOOT / 2, FOLIO_SIZE, middle=True)
+        folio = str(chapter.first_folio + n)
+        items.append(Placed(folio, PAGE_W / 2, baseline, FOLIO_SIZE, centred=True))
+    return items
+
+
+def _page_image(items: list[Placed]) -> Image.Image:
+    page = Image.new("RGB", (PAGE_W, PAGE_H), PAPER)
+    draw = ImageDraw.Draw(page)
+    for item in items:
+        font = _font(item.size, weight=item.weight, optical=item.optical)
+        anchor = "ms" if item.centred else "ls"
+        draw.text(
+            (item.x, item.baseline),
+            item.text,
+            font=font,
+            fill=INK,
+            anchor=anchor,
+            features=bookpdf.SEPARATE_LETTERS,
+        )
+    return page
 
 
 def _cover(job: Job, script: dict[str, Any]) -> tuple[Image.Image, dict[str, Any] | None]:
@@ -370,16 +405,30 @@ def run(job: Job) -> Path:
             f"{job.id}: the book face cannot set {missing[:12]}; choose another face"
         )
     cover, record = _cover(job, script)
-    pages = [cover]
+    pages: list[list[Placed]] = []
     for chapter in script["chapters"]:
-        pages += _chapter_pages(chapter, len(pages))
+        laid = lay_out(chapter, len(pages) + 1)
+        pages += [page_items(laid, n) for n in range(len(laid.pages))]
     folder = job.work / "book"
     comic.empty_page_folder(folder)
-    for n, page in enumerate(pages, 1):
-        page.save(folder / f"{n:03d}.png", dpi=(300, 300))
-    final = job.work / "final.pdf"
-    pages[0].save(final, save_all=True, append_images=pages[1:], resolution=300.0)
-    _write_epub(job, script, folder / "001.png")
+    cover_page = folder / "001.png"
+    cover.save(cover_page, dpi=(bookpdf.DPI, bookpdf.DPI))
+    for n, items in enumerate(pages, 2):
+        _page_image(items).save(folder / f"{n:03d}.png", dpi=(bookpdf.DPI, bookpdf.DPI))
+    final = bookpdf.write(
+        job.work / "final.pdf",
+        pages,
+        bookpdf.Book(
+            title=script["title"],
+            author=script.get("byline") or "",
+            width=PAGE_W,
+            height=PAGE_H,
+            cover=cover_page,
+            face=captions.FONTS / BODY_FACE,
+            folder=job.work / "book.fonts",
+        ),
+    )
+    _write_epub(job, script, cover_page)
     job.write(
         "asset_manifest",
         {"schema_version": "0.1", "job_id": job.id, "assets": [record] if record else []},
@@ -395,7 +444,13 @@ def checks(job: Job) -> list[dict[str, str]]:
         first = z.infolist()[0]
         valid = first.filename == "mimetype" and first.compress_type == zipfile.ZIP_STORED
     pages = len(list((job.work / "book").glob("*.png")))
+    embedded = b"/FontFile2" in (job.work / "final.pdf").read_bytes()
     return [
+        {
+            "id": "story.pdf_type",
+            "status": "pass" if embedded else "fail",
+            "detail": "the book's type is embedded" if embedded else "a printer needs the fonts",
+        },
         {
             "id": "story.epub",
             "status": "pass" if valid else "fail",

@@ -11,7 +11,11 @@ preference:
   music: [elevenlabs, fal, local]
   sfx: [elevenlabs, local]
   transcribe: [fal]
-  song: []
+  song: [elevenlabs, fal, local]
+  lipsync: [fal]
+  separate: []                     # needs a provider that splits stems; "mac" can
+  graphics: [hyperframes]
+  search: [exa, wikipedia, openalex]
 
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:
@@ -22,7 +26,11 @@ deadlines_sec:
   music: 960
   sfx: 180
   transcribe: 960
-  song: 960
+  song: 1800
+  lipsync: 1900
+  separate: 1800
+  graphics: 1800
+  search: 60
 
 models:
   anthropic:
@@ -31,7 +39,10 @@ models:
     voice: eleven_v4_turbo            # Eleven v4 Turbo: #2 TTS arena, half v4's price. Premium: eleven_v4. VERIFY id in ElevenLabs docs.
     voice_id: JBFqnCBsd6RMkjVDRZzb   # replace with your house voice
     music: music_v2_5                 # music_v1 is deprecated, removed 2027-01-31
-    sfx: eleven_text_to_sound_v3
+    song: music_v2_5                  # takes a chunked composition plan; v1's plan shape differs
+    sfx: eleven_text_to_sound_v2      # the id the docs list. VERIFY before the first paid run
+    # A premium master cannot be better than this. Falls back to mp3_44100_128 when a plan lacks it.
+    output_format: pcm_48000
   fal:
     # Slugs: confirm with the fal MCP search_models/get_model_schema before first paid run.
     image: google/nano-banana-2.1                   # checked on fal 2026-11-06; premium = GPT Image 2.5
@@ -42,12 +53,22 @@ models:
     image_to_video: alibaba/wan-3.0-prime/image-to-video
     music: fal-ai/lyria3                            # takes a prompt only, and returns a fixed length
     transcribe: fal-ai/whisper     # swap for ElevenLabs Scribe v2 (2.2% WER) when added
+    song: minimax/music-3          # a style prompt plus lyrics with section tags. VERIFY
+    lipsync: fal-ai/sync-lipsync/v2                 # VERIFY the length limit for long lines
   mac:                             # docs/how-to/run-models-on-a-mac.md; check each licence first
     voice: mlx-community/Kokoro-82M-bf16
     image: mflux-generate-z-image-turbo
     video: notapalindrome/ltx2-mlx-av
     music: mlx-community/MiniMax-Music3-8bit
     transcribe: mlx-community/whisper-large-v3-turbo-asr-fp16
+    song: heartmula                # or ace-step; each runs in KALAINOVA_SONG_PYTHON's environment
+  spaces:                          # hosted apps, free and rate limited. Lyrics leave this machine
+    song:
+      space: mrfakename/HeartMuLa  # a community host; check its terms before releasing anything
+      api_name: /generate_music
+      lyrics_param: lyrics
+      style_param: tags
+      duration_param: max_duration_seconds
 
 prices:
   anthropic:
@@ -55,6 +76,7 @@ prices:
   elevenlabs:
     voice: {per_kchar: 0.04}       # v4 Turbo $40 / 1M chars
     music: {per_min: 0.80}
+    song: {per_min: 0.80}
     sfx: {per_min: 0.50}
   fal:
     image: {per_image: 0.15}       # ESTIMATE: Nano Banana 2.1 bills by tokens and rises with resolution
@@ -62,7 +84,49 @@ prices:
     image_to_video: {per_sec: 0.28}
     reference_to_video: {per_sec: 0.28}
     music: {per_track: 0.04}
+    song: {per_track: 0.15}        # ESTIMATE
+    lipsync: {per_min: 3.00}       # ESTIMATE
     transcribe: {per_min: 0.01}
+  exa:
+    search: {per_call: 0.01}       # ESTIMATE
+
+# What each model's terms allow, so a piece's record can say so. A summary, and it can go out of date:
+# a human reads the terms before release. Unknown models warn at QA.
+licences:
+  mac:
+    mlx-community/Kokoro-82M-bf16: {name: Apache-2.0, commercial: true}
+    mflux-generate-z-image-turbo: {name: Apache-2.0, commercial: true}
+    mlx-community/whisper-large-v3-turbo-asr-fp16: {name: MIT, commercial: true}
+    heartmula: {name: Apache-2.0, commercial: true}
+    ace-step: {name: MIT, commercial: true}
+    audio-separator: {name: MIT, commercial: true, obligations: ["Each separation model has its own licence; read the one used"]}
+    notapalindrome/ltx2-mlx-av:
+      name: LTX-2 Community
+      commercial: true
+      obligations: ["Free for an entity under $10M annual revenue; a paid licence above that", "These are community-converted weights; check them against the original licence"]
+    mlx-community/MiniMax-Music3-8bit:
+      name: MiniMax-Music3 Community
+      commercial: true
+      obligations: ["A commercial product must display MiniMax-Music3 prominently", "Written authorisation above $20M yearly revenue"]
+  spaces:
+    "*": {name: hosted app, commercial: false, obligations: ["Read the terms of the app and of the model it runs before releasing anything"]}
+  elevenlabs:
+    "*": {name: vendor terms, commercial: true, obligations: ["Confirm your plan allows commercial use"]}
+  fal:
+    "*": {name: vendor terms, commercial: true, obligations: ["Confirm the model's own terms on fal"]}
+  anthropic:
+    "*": {name: vendor terms, commercial: true}
+  hyperframes:
+    "*": {name: Apache-2.0, commercial: true}
+
+# How many attempts a shot gets. A job's brief can set takes and max_takes.
+takes:
+  always: 1                        # made regardless of how the first reads
+  most: 2                          # retakes stop here, even if a reading still misses
+
+# Words a video model reads well. Past this a model drops what comes last, so motion goes first.
+prompt_words_max:
+  mac: 80
 
 # Models that can hold a face: how each takes reference images. Only these may be pinned by a stream
 # with a character. Fields come from fal's public model pages. VERIFY against get_model_schema before
@@ -131,12 +195,20 @@ bar:
   duplicate_share_max: 0.0
   master_integrated_lkfs_max: -18
   master_true_peak_dbtp_max: -1
+  cambi_peak_max: 8.0              # the CAMBI banding index; about 5 reads as slightly annoying
+  # Songs. Candidates until enough songs carry a human verdict, so they warn and never block.
+  song_tempo_tolerance: 0.10       # how far the detected tempo may sit from the one asked for
+  song_tempo_drift_max: 0.06
+  song_words_found_min: 0.70       # lyric error rate is not used: it ran against reviewed verdicts
+  song_range_lu_min: 2.0           # less than this has no shape between sections
+  song_length_tolerance: 0.25
 
 profiles:
   short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
+  song: {aspect: "audio-only", target_lufs: -14, true_peak_dbtp_max: -1}
   story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
   # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
   film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}

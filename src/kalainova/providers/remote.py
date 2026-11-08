@@ -9,24 +9,17 @@ from __future__ import annotations
 
 import base64
 import os
-import time
 from pathlib import Path
 
 import requests
 
-from ..config import model_for, price_for, reference_spec, video_spec
+from ..config import model_for, price_for
 from .base import Provider, Result, register
 
 TIMEOUT = 120
-
-
-def _download(url: str, dst: Path) -> Path:
-    with requests.get(url, stream=True, timeout=TIMEOUT) as r:
-        r.raise_for_status()
-        with open(dst, "wb") as fh:
-            for chunk in r.iter_content(1 << 16):
-                fh.write(chunk)
-    return dst
+LOSSY_AUDIO = "mp3_44100_128"  # what every ElevenLabs plan allows
+SONG_MOST_CHUNKS = 30
+SONG_LEAST_CHUNK_MS = 3000
 
 
 # ---------------------------------------------------------------- Anthropic
@@ -107,15 +100,52 @@ class ElevenLabs(Provider):
     def _h(self) -> dict:
         return {"xi-api-key": os.environ[self.env_key], "content-type": "application/json"}
 
+    def _post(
+        self, path: str, body: dict, *, timeout: float = TIMEOUT
+    ) -> tuple[requests.Response, str]:
+        """Ask for the configured audio format, and fall back if this plan does not include it.
+
+        A premium master built on 128 kbps MP3 stems is lossless in name only, so the format used is
+        kept with the asset for QA to read.
+        """
+        wanted = model_for("elevenlabs", "output_format") or LOSSY_AUDIO
+        r = requests.post(
+            f"{self.base}/{path}?output_format={wanted}",
+            headers=self._h(),
+            json=body,
+            timeout=timeout,
+        )
+        if wanted != LOSSY_AUDIO and r.status_code in (400, 403, 422) and "output_format" in r.text:
+            wanted = LOSSY_AUDIO
+            r = requests.post(
+                f"{self.base}/{path}?output_format={wanted}",
+                headers=self._h(),
+                json=body,
+                timeout=timeout,
+            )
+        r.raise_for_status()
+        return r, wanted
+
+    @staticmethod
+    def _audio_to_wav(blob: bytes, dst: Path, fmt: str, channels: int) -> None:
+        from .. import media
+
+        source = dst.with_suffix(".src")
+        source.write_bytes(blob)
+        raw = (
+            ["-f", "s16le", "-ar", fmt.split("_")[1], "-ac", "1"] if fmt.startswith("pcm_") else []
+        )
+        media.run([*raw, "-i", str(source), "-ar", "48000", "-ac", str(channels), str(dst)])
+        source.unlink(missing_ok=True)
+
     def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw) -> Result:
         model = kw.get("model") or model_for("elevenlabs", "voice")
         voice_id = (
             voice or os.environ.get("ELEVENLABS_VOICE_ID") or model_for("elevenlabs", "voice_id")
         )
-        r = requests.post(
-            f"{self.base}/text-to-speech/{voice_id}/with-timestamps?output_format=mp3_44100_128",
-            headers=self._h(),
-            json={
+        r, fmt = self._post(
+            f"text-to-speech/{voice_id}/with-timestamps",
+            {
                 "text": text,
                 "model_id": model,
                 "voice_settings": kw.get("settings")
@@ -127,66 +157,94 @@ class ElevenLabs(Provider):
                 },
                 **{k: kw[k] for k in ("previous_text", "next_text") if kw.get(k)},
             },
-            timeout=TIMEOUT,
         )
-        r.raise_for_status()
         data = r.json()
-        mp3 = dst.with_suffix(".mp3")
-        mp3.write_bytes(base64.b64decode(data["audio_base64"]))
-        from .. import media
-
-        media.run(["-i", str(mp3), "-ar", "48000", "-ac", "1", str(dst)])
-        mp3.unlink(missing_ok=True)
+        self._audio_to_wav(base64.b64decode(data["audio_base64"]), dst, fmt, 1)
         words = chars_to_words(data.get("alignment") or data.get("normalized_alignment") or {})
         cost = len(text) / 1000 * price_for("elevenlabs", "voice").get("per_kchar", 0)
-        return Result(path=dst, cost=cost, model=model, words=words, meta={"voice_id": voice_id})
+        return Result(
+            path=dst,
+            cost=cost,
+            model=model,
+            words=words,
+            meta={"voice_id": voice_id, "audio_format": fmt},
+        )
 
     def music(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
-        r = requests.post(
-            f"{self.base}/music?output_format=mp3_44100_128",
-            headers=self._h(),
-            json={
+        r, fmt = self._post(
+            "music",
+            {
                 "prompt": prompt,
                 "music_length_ms": int(max(duration, 10.0) * 1000),  # API minimum is 10 s
                 "model_id": model_for("elevenlabs", "music"),
             },
             timeout=600,
         )
-        r.raise_for_status()
-        return self._to_wav(r.content, dst, duration, "music")
+        return self._to_wav(r.content, dst, duration, "music", fmt)
+
+    def song(
+        self,
+        lyrics: str,
+        dst: Path,
+        *,
+        style: str = "",
+        duration: float | None = None,
+        **kw,
+    ) -> Result:
+        """A song from a composition plan: one chunk per section, each with its own lines and styles."""
+        seconds = float(duration or 120)
+        plan = song_chunks(kw.get("sections") or [], style, seconds, kw.get("avoid") or "")
+        body: dict = {
+            "model_id": model_for("elevenlabs", "song") or model_for("elevenlabs", "music")
+        }
+        body.update(
+            {"composition_plan": {"chunks": plan}} if plan else {"prompt": f"{style}\n{lyrics}"}
+        )
+        r, fmt = self._post("music", body, timeout=900)
+        return self._to_wav(r.content, dst, seconds, "song", fmt)
 
     def sfx(self, prompt: str, dst: Path, *, duration: float = 1.0, **kw) -> Result:
-        r = requests.post(
-            f"{self.base}/sound-generation?output_format=mp3_44100_128",
-            headers=self._h(),
-            json={
+        r, fmt = self._post(
+            "sound-generation",
+            {
                 "text": prompt,
                 "duration_seconds": max(0.5, min(duration, 22)),
                 "prompt_influence": 0.5,
                 "model_id": model_for("elevenlabs", "sfx"),
             },
-            timeout=TIMEOUT,
         )
-        r.raise_for_status()
-        return self._to_wav(r.content, dst, duration, "sfx")
+        return self._to_wav(r.content, dst, duration, "sfx", fmt)
 
-    def _to_wav(self, blob: bytes, dst: Path, duration: float, cap: str) -> Result:
-        from .. import media
-
-        mp3 = dst.with_suffix(".mp3")
-        mp3.write_bytes(blob)
-        media.run(["-i", str(mp3), "-ar", "48000", "-ac", "2", str(dst)])
-        mp3.unlink(missing_ok=True)
+    def _to_wav(self, blob: bytes, dst: Path, duration: float, cap: str, fmt: str) -> Result:
+        self._audio_to_wav(blob, dst, fmt, 2)
         cost = duration / 60 * price_for("elevenlabs", cap).get("per_min", 0)
-        return Result(path=dst, cost=cost, model=model_for("elevenlabs", cap))
+        return Result(
+            path=dst, cost=cost, model=model_for("elevenlabs", cap), meta={"audio_format": fmt}
+        )
 
 
-def aspect_for(width: int, height: int) -> str:
-    r = width / height
-    return min(
-        ("9:16", "4:5", "1:1", "16:9", "3:4", "4:3"),
-        key=lambda a: abs(r - int(a.split(":")[0]) / int(a.split(":")[1])),
-    )
+def song_chunks(sections: list[dict], style: str, seconds: float, avoid: str = "") -> list[dict]:
+    """A composition plan: each section's time in proportion to its lines, inside the API's limits."""
+    parts = sections[:SONG_MOST_CHUNKS]
+    if not parts:
+        return []
+    weights = [max(len(s.get("lines") or []), 2) for s in parts]
+    total_ms = int(seconds * 1000)
+    chunks = []
+    for part, weight in zip(parts, weights):
+        lines = part.get("lines") or []
+        tag = f"[{str(part.get('kind', 'verse')).title()}]"
+        styles = [s for s in (style, part.get("style")) if s]
+        chunks.append(
+            {
+                "text": "\n".join([tag, *lines]),
+                "duration_ms": max(SONG_LEAST_CHUNK_MS, total_ms * weight // sum(weights)),
+                "positive_styles": styles,
+                "negative_styles": [avoid] if avoid else [],
+                "context_adherence": "high",
+            }
+        )
+    return chunks
 
 
 def chars_to_words(al: dict) -> list[dict]:
@@ -216,191 +274,3 @@ def chars_to_words(al: dict) -> list[dict]:
             {"start_sec": round(t0, 3), "end_sec": round(t1, 3), "text": cur, "confidence": 0.98}
         )
     return words
-
-
-# ---------------------------------------------------------------- fal.ai
-@register
-class Fal(Provider):
-    """Aggregator for image and video models via the fal queue API."""
-
-    name = "fal"
-    capabilities = ("image", "video", "music", "transcribe")
-    env_key = "FAL_KEY"
-
-    def price_key(self, capability: str, request: dict) -> str:
-        if capability == "video" and request.get("references"):
-            return "reference_to_video"
-        return "image_to_video" if capability == "video" and request.get("image") else capability
-
-    def reference_support(self, capability: str, model: str) -> dict:
-        return reference_spec("fal", capability, model)
-
-    def _with_references(
-        self, capability: str, model: str, prompt: str, refs: list[dict]
-    ) -> tuple[str, dict, dict]:
-        """(prompt naming each reference, payload fields, the model's spec). Refuses an unknown model."""
-        spec = reference_spec("fal", capability, model)
-        if not spec:
-            raise ValueError(f"{model} is not listed under reference_models for {capability}")
-        if spec.get("elements"):
-            return self._as_elements(spec, prompt, refs)
-        guide = [
-            f"{spec['tag'].format(n=i)} is {ref['label']}" for i, ref in enumerate(refs, start=1)
-        ]
-        urls = [self._upload(ref["path"]) for ref in refs]
-        return f"{prompt}. References: {'; '.join(guide)}.", {spec["images_param"]: urls}, spec
-
-    def _as_elements(self, spec: dict, prompt: str, refs: list[dict]) -> tuple[str, dict, dict]:
-        """Kling-style: each character is one element, with a front image and other angles."""
-        groups: dict[str, list[dict]] = {}
-        loose = []
-        for ref in refs:
-            if ref.get("group"):
-                groups.setdefault(ref["group"], []).append(ref)
-            else:
-                loose.append(ref)
-        elements = [
-            {
-                "frontal_image_url": self._upload(group[0]["path"]),
-                "reference_image_urls": [self._upload(r["path"]) for r in group[1:]],
-            }
-            for group in groups.values()
-        ]
-        guide = [f"@Element{i} is {name}" for i, name in enumerate(groups, start=1)]
-        guide += [f"@Image{i} is {r['label']}" for i, r in enumerate(loose, start=1)]
-        payload = {"elements": elements, "image_urls": [self._upload(r["path"]) for r in loose]}
-        return f"{prompt}. References: {'; '.join(guide)}.", payload, spec
-
-    def _run(self, model: str, payload: dict, timeout: float = 900) -> dict:
-        h = {"Authorization": f"Key {os.environ[self.env_key]}", "content-type": "application/json"}
-        r = requests.post(
-            f"https://queue.fal.run/{model}", headers=h, json=payload, timeout=TIMEOUT
-        )
-        r.raise_for_status()
-        sub = r.json()
-        status_url, response_url = sub["status_url"], sub["response_url"]
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            resp = requests.get(status_url, headers=h, timeout=TIMEOUT)
-            resp.raise_for_status()  # a 401/404 must fail now, not after the timeout
-            s = resp.json()
-            if s.get("status") == "COMPLETED":
-                out = requests.get(response_url, headers=h, timeout=TIMEOUT)
-                out.raise_for_status()
-                return out.json()
-            # fal statuses are IN_QUEUE / IN_PROGRESS / COMPLETED; a failed job surfaces as an error on the result fetch
-            time.sleep(3)
-        raise TimeoutError(f"fal {model} timed out")
-
-    def _upload(self, path: Path) -> str:
-        # Inline data URI works for fal inputs up to a few MB; enough for a keyframe still.
-        mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
-        return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
-
-    def image(self, prompt: str, dst: Path, *, width: int, height: int, **kw) -> Result:
-        model = kw.get("model") or model_for("fal", "image")
-        payload = {"prompt": prompt, "num_images": 1, "output_format": "png"}
-        if kw.get("size_mode") == "pixels":
-            payload["image_size"] = {"width": width, "height": height}
-        else:  # Nano Banana-family models take an aspect ratio, not pixel sizes
-            payload["aspect_ratio"] = aspect_for(width, height)
-            if model_for("fal", "image_resolution"):
-                payload["resolution"] = model_for("fal", "image_resolution")
-        refs = kw.get("references")
-        if refs:
-            payload["prompt"], fields, spec = self._with_references("image", model, prompt, refs)
-            payload.update(fields, **spec.get("extra", {}))
-        data = self._run(model, payload)
-        _download(data["images"][0]["url"], dst)
-        return Result(path=dst, cost=price_for("fal", "image").get("per_image", 0), model=model)
-
-    def video(
-        self,
-        prompt: str,
-        dst: Path,
-        *,
-        duration: float,
-        aspect: str,
-        image: Path | None = None,
-        **kw,
-    ) -> Result:
-        refs = kw.get("references")
-        if refs:
-            return self._reference_video(prompt, dst, duration, aspect, kw.get("model"), refs)
-        key = "image_to_video" if image else "video"
-        model = kw.get("model") or model_for("fal", key)
-        spec = video_spec("fal", model)
-        allowed = [int(x) for x in str(spec.get("durations") or "5,10").split(",")]
-        billed = min((d for d in allowed if d >= duration), default=max(allowed))
-        length = billed if spec.get("duration_type") == "int" else str(billed)
-        payload = {"prompt": prompt, "aspect_ratio": aspect, "duration": length}
-        payload.update(spec.get("extra", {}))
-        if image:
-            payload[spec.get("image_param", "image_url")] = self._upload(image)
-        data = self._run(model, payload, timeout=1800)
-        _download(data["video"]["url"], dst)
-        cost = billed * price_for("fal", key).get("per_sec", 0)
-        return Result(path=dst, cost=cost, model=model, meta={"billed_sec": billed})
-
-    def _reference_video(
-        self,
-        prompt: str,
-        dst: Path,
-        duration: float,
-        aspect: str,
-        model: str | None,
-        refs: list[dict],
-    ) -> Result:
-        """A clip conditioned on the locked references, with the model's own audio left off."""
-        model = model or model_for("fal", "reference_to_video")
-        text, fields, spec = self._with_references("video", model, prompt, refs)
-        allowed = [int(x) for x in str(spec.get("durations") or "5,10").split(",")]
-        billed = min((d for d in allowed if d >= duration), default=max(allowed))
-        length = billed if spec.get("duration_type") == "int" else str(billed)
-        payload = {"prompt": text, "aspect_ratio": aspect, "duration": length, **fields}
-        payload.update(spec.get("extra", {}))
-        data = self._run(model, payload, timeout=1800)
-        _download(data["video"]["url"], dst)
-        cost = billed * price_for("fal", "reference_to_video").get("per_sec", 0)
-        return Result(path=dst, cost=cost, model=model, meta={"billed_sec": billed})
-
-    def music(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
-        model = kw.get("model") or model_for("fal", "music")
-        data = self._run(model, {"prompt": prompt})
-        url = (data.get("audio_file") or data.get("audio") or {}).get("url")
-        raw = dst.with_suffix(".src")
-        _download(url, raw)
-        from .. import media
-
-        media.run(["-i", str(raw), "-ar", "48000", "-ac", "2", str(dst)])
-        raw.unlink(missing_ok=True)
-        return Result(path=dst, cost=price_for("fal", "music").get("per_track", 0), model=model)
-
-    def transcribe(self, src: Path, **kw) -> Result:
-        model = kw.get("model") or model_for("fal", "transcribe")
-        data = self._run(
-            model,
-            {
-                "audio_url": "data:audio/wav;base64," + base64.b64encode(src.read_bytes()).decode(),
-                "chunk_level": "word",
-            },
-        )
-        words = [
-            {
-                "start_sec": c["timestamp"][0],
-                "end_sec": c["timestamp"][1],
-                "text": c["text"].strip(),
-                "confidence": 0.9,
-            }
-            for c in data.get("chunks", [])
-            if c.get("timestamp")
-        ]
-        from .. import media
-
-        minutes = media.duration(src) / 60
-        return Result(
-            words=words,
-            text=data.get("text", ""),
-            model=model,
-            cost=price_for("fal", "transcribe").get("per_min", 0) * minutes,
-        )

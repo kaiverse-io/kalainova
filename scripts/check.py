@@ -35,7 +35,7 @@ STRATEGIES = {
     "downstream-sku",
 }
 EXTENSIONS_AFTER_PROOF = {"procedural", "downstream-sku"}
-KINDS = {"video", "audio", "still", "text", "comic", "story"}
+KINDS = {"video", "audio", "still", "text", "comic", "story", "song"}
 RIGHTS = {"funded-brief", "owned", "licensed"}
 RIGHTS_FOR = {
     "funded-clip": {"funded-brief"},

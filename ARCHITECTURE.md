@@ -63,7 +63,8 @@ flowchart TB
         pgen["Generated video"]:::partial
         pedit["Footage edit"]:::partial
         pexplain["Explainers"]:::planned
-        psong["Songs"]:::planned
+        psong["Songs"]:::partial
+        pwrite["Comics and books"]:::partial
     end
 
     subgraph shared["Shared media tools: owned"]
@@ -102,53 +103,83 @@ flowchart TB
     cli["__main__.py<br/>CLI"]
 
     subgraph generated["Generated path"]
-        plan["plan.py"]
+        plan["plan.py<br/>and research.py"]
         assets["assets.py"]
+        shotmake["shotmake.py<br/>takes.py, shots.py"]
         edit["edit.py"]
+    end
+
+    subgraph written["Songs and documents"]
+        writers["writers.py"]
+        songs["songs.py"]
+        comic["comic.py"]
+        story["story.py<br/>bookpdf.py"]
     end
 
     subgraph footage["Footage path"]
         stockmod["stock.py"]
         analyze["editor/analyze.py<br/>shots and scores"]
-        direct["editor/direct.py"]
+        direct["editor/direct.py<br/>choose.py"]
         notes["editor/notes.py"]
         beats["editor/beats.py"]
+        speech["editor/speech.py<br/>clips.py"]
     end
 
     subgraph finish["Shared finish"]
-        render["render.py<br/>closed op list"]
+        render["render/<br/>closed op list, step cache"]
         captions["captions.py"]
-        qa["qa.py"]
+        qa["qa.py<br/>qachecks.py, kitchecks.py"]
+        timeline["timeline.py<br/>shot sheet, cut check"]
         publish["publish/<br/>approve, publish, measure"]
     end
 
     subgraph access["Model access"]
         router["providers/router.py"]
         base["providers/base.py<br/>contract and registry"]
-        remote["providers/remote.py"]
+        remote["providers/remote.py<br/>fal.py, search.py, spaces.py"]
+        mac["providers/mac.py<br/>open models on this machine"]
         local["providers/local.py<br/>placeholders"]
+    end
+
+    subgraph after["After the cut"]
+        nle["nle.py<br/>timeline export"]
+        dub["dub.py"]
+        record["provenance.py<br/>verdicts.py"]
     end
 
     subgraph foundation["Foundation"]
         jobfs["jobfs.py<br/>job folder and ledger"]
         config["config.py<br/>config/studio.yaml"]
-        media["media.py<br/>ffmpeg and ffprobe"]
+        media["media.py, mediascan.py<br/>ffmpeg and ffprobe"]
         schemas["schemas/"]
     end
 
-    cli --> plan --> assets --> edit --> render
+    cli --> plan --> assets --> shotmake --> edit --> render
     cli --> stockmod --> analyze --> direct --> render
+    cli --> writers
+    writers --> songs --> render
+    writers --> comic
+    writers --> story
     notes --> direct
     beats --> direct
+    speech --> direct
     render --> captions
     render --> qa --> publish
+    qa --> timeline
+    render --> nle
+    render --> dub
+    qa --> record
 
     plan --> router
+    shotmake --> router
     assets --> router
     direct --> router
     qa --> router
+    songs --> router
+    dub --> router
     router --> base
     remote --> base
+    mac --> base
     local --> base
 
     router --> jobfs
@@ -171,16 +202,17 @@ flowchart LR
     saved -->|"yes"| reuse["Reuse with no charge"]
     saved -->|"no"| priced{"Priced, or job<br/>has no cap?"}
     priced -->|"no"| next["Next listed provider"]
-    priced -->|"yes"| reserve["Check the cost cap"]
+    priced -->|"yes"| reserve["Reserve the estimate<br/>on the ledger"]
     reserve -->|"over cap"| stop["Stop the job"]
     reserve -->|"within cap"| invoke["Call with a deadline<br/>to a temporary path"]
-    invoke -->|"failed"| next
-    invoke -->|"timed out"| charged["Charge the estimate"]
+    invoke -->|"failed, nothing billed"| release["Release the reservation"]
+    release --> next
+    invoke -->|"timed out, or billed<br/>then failed"| charged["Settle at the estimate<br/>or the billed amount"]
     charged --> next
     invoke -->|"file returned"| check{"File matches<br/>the request?"}
-    check -->|"no"| rejected["Charge, discard"]
+    check -->|"no"| rejected["Settle, discard"]
     rejected --> next
-    check -->|"yes"| move["Move to destination<br/>record, charge"]
+    check -->|"yes"| move["Move to destination<br/>record, settle at the real cost"]
     next -->|"none left"| fail["Job fails and<br/>names each reason"]
     next -->|"another"| priced
 ```
@@ -305,7 +337,7 @@ These change only with a version bump. A new interface waits for a second real u
 
 | Interface | In | Out | State |
 |---|---|---|---|
-| **Provider** | Request, deadline, and budget, through the router | File, cost, model, provenance | Built, including song requests. No song adapter exists yet, and requests are not typed. |
+| **Provider** | Request, deadline, and budget, through the router | File, cost, model, provenance | Built, including songs, lip sync, stem separation, graphics, and search. Each adapter is tested against a faked vendor, not a live one. Requests are not typed. |
 | **Producer** | Job bundle in a mounted folder | Files and a record, through `kalainova intake` | Partial. Intake is built. Tools run by a coding agent still need a container wrapper, and their output varies between runs. |
 | **QA check** | Any file and its format | Pass or fail, with evidence | Partial. Files the engine did not render get technical checks only, and checks are not plug-ins yet. |
 
@@ -314,7 +346,9 @@ These change only with a version bump. A new interface waits for a second real u
 - **No implicit fallback.** Only listed providers are tried.
 - **No unpriced spending.** A job with a cap refuses a call it cannot estimate.
 - **Every paid result is saved at once.** A restart reuses it.
-- **Approval binds three things:** the bytes QA checked, the asset record they were rendered from, and a human reviewer.
+- **Approval binds four things:** the bytes QA checked, the master they came with, the asset record they were rendered from, and a human reviewer.
+- **A promise of motion is kept or refused.** A shot that asked to move does not quietly become a still (ADR 0013).
+- **A fact states its source.** A finding reaches a script only when its quote is found in a saved copy of its source (ADR 0015).
 - **A tool's own report is not proof.** Outside tools get their own API keys, so their costs can be checked against vendor invoices.
 - **A model library is an implementation, not the interface.** It stays behind the provider contract with its own retries off or counted.
 
@@ -324,15 +358,16 @@ These change only with a version bump. A new interface waits for a second real u
 |---|---|
 | No publisher takes audio-only files | A song can be approved but not posted |
 | No content review on files from outside tools | A human is the only check on their content |
-| No song adapter or container runner | The contracts exist, and nothing uses them in production yet |
-| Cap checks run one call at a time | Parallel calls could overshoot the cap together, until Postgres holds the ledger (ADR 0010) |
+| Nothing added since ADR 0012 has run on a real model | Every line of `docs/studio-goal.md` is Built, none is Run or Accepted. Faked models prove the wiring, not the result |
+| Vendor slugs marked `VERIFY` in `config/studio.yaml` are unconfirmed | An adapter may need its model name or a field changed on its first real call |
+| No container runner for outside tools | The contract exists, and nothing uses it in production yet |
+| The ledger's lock holds on one machine | Parallel calls cannot overshoot here, but two machines could, until Postgres holds the ledger (ADR 0010) |
 | Files from outside tools carry no enforced references | A human compares them against the kit |
 | A kit cannot prove a face is not a real person's | A human attests at freeze and approves each piece; the vision judge is one more signal |
 | Rendered files and job records are on one machine | Only kit files can reach object storage today (ADR 0010) |
 | QA does not predict the operator's verdict | A file can pass QA and the bar and still be rejected on review. The bar measures craft defects, not taste |
-| A book PDF is page images | The EPUB holds live text; the PDF's text cannot be selected |
+| A printed book has no ligatures | Reading is unaffected, and the page images and the PDF measure the same widths. "fi" and "Th" print as separate letters |
 | No publisher takes a comic or a book | They can be approved but not posted |
-| Comic and story scripts have no LLM planner yet | An agent or a person writes the script |
 | Stereo only | No 5.1 or 7.1 mix, and an upmix from stereo is not an honest substitute |
 | SDR only | No HDR master |
 
@@ -394,17 +429,39 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     │                                       │  │          │
     │                                       │  └─▶ kitrules ◀── scripts/check.py
     │                                       └─▶ providers
-    ├─▶ plan ──────▶ consistency, prompts, providers
-    ├─▶ assets ────▶ consistency, kits, media, config, providers
+    ├─▶ production_cli ──▶ dub, nle, provenance, qa, research, shotmake, shots,
+    │                      songs, takes, timeline, verdicts, editor, config
+    ├─▶ plan ──────▶ consistency, prompts, providers, shots
+    ├─▶ research ──▶ plan, prompts, providers, config
+    ├─▶ writers ───▶ consistency, plan, prompts, providers
+    ├─▶ songs ─────▶ bar, captions, config, editor, media, providers, render, takes, writers
+    ├─▶ assets ────▶ consistency, media, shotmake, shots, soundbed, takes, config, providers
+    ├─▶ soundbed ──▶ blobstore, kits, media, shotmake
+    ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, config, providers
+    ├─▶ takes ─────▶ bar, blobstore, media, config
+    ├─▶ shots ─────▶ config
     ├─▶ edit ──────▶ config
-    ├─▶ render ────▶ bar, captions, look, motion, media
-    ├─▶ qa ────────▶ bar, comic, story, consistency, prompts, media, config, providers, publish
-    ├─▶ bar ───────▶ media, config
-    ├─▶ comic ─────▶ assets, captions, consistency, render, providers
-    ├─▶ story ─────▶ comic, captions, render, providers
-    ├─▶ publish ───▶ consistency, streams, stock
-    ├─▶ editor ────▶ media, providers
-    ├─▶ intake, stock ──▶ media
+    ├─▶ render ────▶ bar, captions, look, motion, media, mediascan
+    ├─▶ qa ────────▶ bar, comic, story, songs, research, timeline, qachecks, plan, prompts,
+    │                media, stock, config, providers, publish
+    ├─▶ qachecks ──▶ bar, consistency, kitchecks, plan, prompts, shots, timeline, config,
+    │                providers, publish
+    ├─▶ kitchecks ─▶ consistency, kits
+    ├─▶ timeline ──▶ bar, captions, media
+    ├─▶ bar ───────▶ media, mediascan, editor, config
+    ├─▶ mediascan ─▶ media
+    ├─▶ comic ─────▶ captions, consistency, render, shotmake, providers
+    ├─▶ story ─────▶ bookpdf, comic, captions, render, providers
+    ├─▶ bookpdf: fonts and PDF drawing, no engine imports
+    ├─▶ dub ───────▶ captions, media, plan, prompts, render, config, providers
+    ├─▶ nle: the cut as timeline files, from the job folder alone
+    ├─▶ provenance ▶ blobstore, takes, verdicts, config
+    ├─▶ verdicts: a person's words, from the job folder alone
+    ├─▶ publish ───▶ blobstore, consistency, streams, stock
+    ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
+    ├─▶ intake ────▶ media, render
+    ├─▶ stock
+    ├─▶ prompts, captions, look, motion, media: imported throughout, and import no stage
     └─▶ jobfs, config: the foundation, imported throughout
 ```
 
@@ -415,6 +472,9 @@ The command line. Parses arguments and calls a stage. Holds no rules.
 
 ### studio_cli
 Commands for kits, streams, canon, schedules, and requests.
+
+### production_cli
+Commands for making and judging a piece shot by shot, songs, research, and everything after a cut: takes, retakes, the shot sheet, timeline export, clips, dubbing, verdicts, provenance, and the ledger.
 
 ### kitrules
 What makes a kit legal. Stdlib only, shared by the engine and `scripts/check.py`.
@@ -435,16 +495,56 @@ Resolves a stream's kits, builds and verifies the lock, applies the fixed things
 Loads versioned prompts from `prompts/`.
 
 ### plan
-Intent to script. Loads the kits' persona and canon for a stream job.
+Intent to script. Loads the kits' persona and canon for a stream job, and only verified findings for a job with research.
+
+### research
+Sources, a private saved copy of each, and findings whose quotes are checked against those copies. A model can suggest a fact, and only a found quote lets it into a script (ADR 0015).
+
+### writers
+A brief to the script a song, a comic, or a book is made from, each held to its own schema.
+
+### shots
+What a shot says, kept apart: the still prompt, the motion prompt, continuity shared across shots, and a review of the plan before any money is spent.
+
+### takes
+Attempts at one shot, each with its own seed and readings. A reading picks among them, and a person's choice stands (ADR 0013).
+
+### shotmake
+One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A first run and a retake share this code, so they keep the same promise and the same record.
 
 ### assets
 Script to files. Every shot of a stream job carries its references and pinned model.
+
+### soundbed
+The sound under a piece: a kit's fixed file, a finished track from another job, or a bed made for it.
 
 ### edit
 Assets to an edit manifest.
 
 ### render
-Edit manifest to a closed op list, then to the file through ffmpeg.
+Edit manifest to a closed op list, then to the file through ffmpeg. A plan can be written by a model, so `spec` checks every argument and path first. `cache` keeps a step whose inputs and settings have not changed, so changing one shot re-encodes only what it touches.
+
+```
+edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
+                                                       │  for each step:
+                                                       │  spec.coerce ─▶ cache.unchanged? ─▶ keep
+                                                       ▼                        │ no
+             picture: still, cut, scale, concat, titles, captions ◀─────────────┤
+             sound:   voice, music, places, effects, loudness     ◀─────────────┤
+             export:  web file, master, thumbnail                 ◀─────────────┘
+```
+
+### songs
+Lyrics to takes of a song, readings that pick among them, a master, lyric files, and a job that cuts a video to the finished track (ADR 0014).
+
+### dub
+A piece in another language as a job of its own: its music and effects stem under new voices, and captions in the new language, with its own human gate.
+
+### nle
+The cut as files an editing system opens: FCPXML, OpenTimelineIO, and EDL.
+
+### timeline
+Looking at a piece without playing it: the first and last frame of every shot, a filmstrip over a waveform, and a check for a click or a flash at each cut.
 
 ### captions
 Word timings to captions, title and caption layout by frame shape and real font metrics, and timed-text files. Fonts are vendored in `fonts/`.
@@ -459,22 +559,37 @@ The camera on a still: sub-pixel sampling at one steady rate. Frames go to ffmpe
 A comic script to pages, a print PDF, a CBZ, and a phone scroll. Models never letter: art is generated with no words, and the engine lays out each page, places balloons where the art is calm, and letters them. Kit references travel with every panel.
 
 ### story
-A story to a typeset book and a real EPUB with live text.
+A story to a typeset book and a real EPUB with live text. Pages are laid out once, then drawn twice: as images to review, and as type to print.
+
+### bookpdf
+A book's pages as a PDF with live text in embedded fonts, at the same places as its page images. The same input gives the same bytes, because approval binds to them.
 
 ### bar
-The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels and samples, plus the readers that apply them to a job, any file, or a delivery master. Limits live in `config/studio.yaml`. It informs the human gate, and only an objective defect blocks.
+The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks.
 
 ### qa
-Automated checks before the human gate, including whether the kit lock held.
+Runs the automated checks before the human gate, for a rendered piece, a document, a song, or a file from an outside tool.
+
+### qachecks
+The checks QA runs that each ask one question: a kept promise of motion, a model's licence, the layers of a mix, the plan, the cuts, and what a vision judge saw.
+
+### kitchecks
+What QA asks of a stream job: did the record keep what the lock promised, and do the frames match the kit's references.
+
+### verdicts
+What a person said about a piece, and which readings predict it. It cannot approve or publish anything.
+
+### provenance
+How a piece was made, for whoever answers for it: each asset's model, weights, seed, terms, and hash.
 
 ### publish
 Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account.
 
 ### providers
-The router and vendor adapters. Every model call goes through the router, which refuses a file that is not what was asked for or has no picture in it. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
+The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
 
 ### editor
-The footage path: shots, scores, direction, and notes.
+The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording.
 
 ### stock
 Free-license footage with credits.
@@ -484,6 +599,9 @@ Takes a finished file from an outside tool.
 
 ### media
 ffmpeg and ffprobe helpers. Commands are argument lists, never shell strings.
+
+### mediascan
+Reading a whole file: where its picture sits, its frames one at a time, and how it bands.
 
 ### jobfs
 The job folder, schema validation, the ledger, and the private home.

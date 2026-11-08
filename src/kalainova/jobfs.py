@@ -35,12 +35,16 @@ CONTRACT_FILES = {
     "kit_lock": "kit.lock.json",
     "comic_script": "comic_script.json",
     "story": "story.json",
+    "song": "song.json",
+    "research": "research.json",
+    "takes": "takes.json",
 }
 
 
 RENDER_STAMP = "render_stamp.json"
 AUDIO_SUFFIXES = (".wav", ".m4a", ".mp3", ".flac")
 DOCUMENT_MEDIA = ("comic", "story")
+RESERVED = "reserved"
 
 
 class ContractError(RuntimeError):
@@ -116,6 +120,8 @@ class Job:
         kinds = self.job.get("media", [])
         if "video" in kinds:
             return self.work / "final.mp4"
+        if "song" in kinds:
+            return self.work / "final.wav"
         if any(kind in kinds for kind in DOCUMENT_MEDIA):
             return self.work / "final.pdf"
         for suffix in AUDIO_SUFFIXES:
@@ -145,18 +151,60 @@ class Job:
     def ledger_path(self) -> Path:
         return self.folder / "ledger.json"
 
-    def spent(self) -> float:
-        if not self.ledger_path.exists():
-            return 0.0
-        return sum(e.get("cost", 0.0) for e in json.loads(self.ledger_path.read_text()))
+    def _ledger(self) -> list[dict]:
+        return json.loads(self.ledger_path.read_text()) if self.ledger_path.exists() else []
 
-    def reserve(self, provider: str, capability: str, estimate: float) -> None:
-        """Refuse a paid call before it is made if it would cross the cap."""
+    def _write_ledger(self, entries: list[dict]) -> None:
+        tmp = self.ledger_path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+        tmp.write_text(json.dumps(entries, indent=2) + "\n")
+        # a reader sees the old ledger or the new one, never part of one
+        os.replace(tmp, self.ledger_path)
+
+    def spent(self) -> float:
+        """Money the job has settled. Reservations are not spent until they settle."""
+        return sum(e.get("cost", 0.0) for e in self._ledger() if e.get("status") != RESERVED)
+
+    def committed(self) -> float:
+        """Settled money plus every reservation still open, which is what the cap is held against."""
+        return sum(e.get("cost", 0.0) for e in self._ledger())
+
+    def reserve(self, provider: str, capability: str, estimate: float) -> str | None:
+        """Hold the estimate on the ledger before a paid call, so parallel calls cannot overshoot.
+
+        Returns the reservation to settle or release. A free call needs none.
+        """
         cap = self.job.get("cost_cap")
-        if cap is not None and estimate > 0 and self.spent() + estimate > cap:
-            raise CostCapExceeded(
-                f"{self.id}: {provider}/{capability} estimated {estimate:.4f}; spent {self.spent():.4f} of cap {cap}"
+        with self.locked():
+            held = self.committed()
+            if cap is not None and estimate > 0 and held + estimate > cap:
+                raise CostCapExceeded(
+                    f"{self.id}: {provider}/{capability} estimated {estimate:.4f}; "
+                    f"{held:.4f} already committed of cap {cap}"
+                )
+            if estimate <= 0:
+                return None
+            reservation = uuid.uuid4().hex[:12]
+            self._write_ledger(
+                [
+                    *self._ledger(),
+                    {
+                        "provider": provider,
+                        "capability": capability,
+                        "cost": round(estimate, 6),
+                        "note": "reserved before the call",
+                        "status": RESERVED,
+                        "reservation": reservation,
+                    },
+                ]
             )
+        return reservation
+
+    def release(self, reservation: str | None) -> None:
+        """Give a reservation back: the call failed and nothing was billed."""
+        if not reservation:
+            return
+        with self.locked():
+            self._write_ledger([e for e in self._ledger() if e.get("reservation") != reservation])
 
     @contextmanager
     def locked(self) -> Iterator[None]:
@@ -165,9 +213,19 @@ class Job:
             fcntl.flock(fh, fcntl.LOCK_EX)
             yield
 
-    def charge(self, provider: str, capability: str, cost: float, note: str = "") -> None:
+    def charge(
+        self,
+        provider: str,
+        capability: str,
+        cost: float,
+        note: str = "",
+        reservation: str | None = None,
+    ) -> None:
+        """Record what a call cost, settling its reservation if it had one."""
         with self.locked():
-            entries = json.loads(self.ledger_path.read_text()) if self.ledger_path.exists() else []
+            entries = [
+                e for e in self._ledger() if e.get("reservation") != reservation or not reservation
+            ]
             entries.append(
                 {
                     "provider": provider,
@@ -176,11 +234,7 @@ class Job:
                     "note": note,
                 }
             )
-            tmp = self.ledger_path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
-            tmp.write_text(json.dumps(entries, indent=2) + "\n")
-            os.replace(
-                tmp, self.ledger_path
-            )  # a reader sees the old ledger or the new one, never part of one
+            self._write_ledger(entries)
         cap = self.job.get("cost_cap")
         if cap is not None and self.spent() > cap:
             raise CostCapExceeded(
@@ -197,6 +251,33 @@ def open_job(ref: str | Path) -> Job:
         else:
             raise ContractError(f"no job.json at {ref}")
     return Job(path.resolve())
+
+
+def open_child(parent: Job, new_id: str, *, profile: str, brief: dict) -> Job:
+    """A new job made from another: the same rights, identity, and limits, and a line back to it."""
+    folder = home() / "jobs" / new_id
+    if folder.exists():
+        raise ContractError(f"{folder} already exists")
+    source = parent.job
+    data = {
+        "schema_version": "0.1",
+        "job_id": new_id,
+        "strategy": source["strategy"],
+        "media": ["video", "audio"],
+        "rights": source["rights"],
+        "distribution_identity": source.get("distribution_identity"),
+        "status": "draft",
+        "cost_cap": source.get("cost_cap"),
+        "parent_job_id": parent.id,
+        "profile": profile,
+        "brief": brief,
+    }
+    for key in ("providers", "skip_funded"):
+        if key in source:
+            data[key] = source[key]
+    folder.mkdir(parents=True)
+    (folder / "job.json").write_text(dump(data) + "\n")
+    return Job(folder)
 
 
 def dump(data: Any) -> str:

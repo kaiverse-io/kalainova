@@ -97,6 +97,62 @@
             "items": {
               "type": "string"
             }
+          },
+          "shot": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "One shot, written apart: how it starts, how it ends, and what moves between them.",
+            "properties": {
+              "size": {
+                "type": "string",
+                "description": "wide, medium, close, or a word an editor would use."
+              },
+              "first_frame": {
+                "type": "string",
+                "description": "The still picture at the start. Nothing is happening yet in this text."
+              },
+              "last_frame": {
+                "type": "string",
+                "description": "The still picture at the end."
+              },
+              "camera": {
+                "type": "string",
+                "description": "How the camera moves, and what it reveals when it stops."
+              },
+              "action": {
+                "type": "string",
+                "description": "What the subject does, start to finish."
+              },
+              "environment": {
+                "type": "string",
+                "description": "What else moves: water, smoke, cloud, crowd."
+              },
+              "sound": {
+                "type": "string",
+                "description": "What the shot sounds like, for a model that makes sound with the picture."
+              }
+            }
+          },
+          "continues": {
+            "type": "boolean",
+            "description": "This shot picks up where the last one ended, so it starts from that clip's last frame."
+          },
+          "ambience": {
+            "type": "string",
+            "description": "The sound of the place under this beat."
+          },
+          "on_camera": {
+            "type": "boolean",
+            "description": "The speaker is seen saying the line, so the clip is lip-synced to it."
+          },
+          "duration_sec": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "How long the beat runs when no voice sets its length."
+          },
+          "graphics": {
+            "type": "string",
+            "description": "A composition folder in the job, rendered as this shot instead of generated."
           }
         }
       }
@@ -128,6 +184,10 @@
           "source": {
             "type": "string",
             "minLength": 1
+          },
+          "finding": {
+            "type": "string",
+            "description": "The research finding this claim states."
           }
         }
       }
@@ -158,6 +218,31 @@
       "type": "integer",
       "minimum": 0,
       "description": "Index of the hook used in the first beat."
+    },
+    "continuity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What must stay the same across shots, described once and reused word for word.",
+      "properties": {
+        "people": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "places": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "props": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

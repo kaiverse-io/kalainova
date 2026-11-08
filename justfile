@@ -22,22 +22,36 @@ check:
 eval:
     uv run python scripts/check.py --fixtures evals/contract
 
+# Starts as exactly `just ci`; extend it with whatever "ran it like a user" means for this
+# project (start the app and hit it, a smoke run, a browser check) — never with a second set of
+# linters. AGENTS.md names this command.
+# Run before saying a task is done: `ci`, plus this project's own end-to-end checks
+verify: ci
+
 ci-lint:
     uv run ruff check .
     uv run ruff format --check .
     uv run mypy src/
-    @# import-linter >= 2.16 exits 1 on a config with no contracts; the template ships the slot
-    @# empty ("No contracts = linter passes" — see .importlinter), so run it once one exists.
-    @if grep -q '^\[importlinter:contract:' .importlinter; then uv run lint-imports; else echo "import-linter: no contracts in .importlinter yet — nothing to check"; fi
+    @just _lint-imports
     gitleaks detect --source . --verbose
     opengrep scan --config .opengrep/rules/ . --error --severity ERROR
+    @# shellcheck used to run only as a pre-commit hook, so CI (and any session without hooks
+    @# installed) never saw it. Same pinned version as the old hook; uvx fetches it from PyPI.
+    @files=$(find . -name '*.sh' -not -path './.venv/*' -not -path './.cache/*' -not -path './node_modules/*'); [ -z "$files" ] || uvx --from shellcheck-py==0.10.0.1 shellcheck $files
+    @just _ci-file-size
+    @just _ci-gate-integrity
+    @just _ci-agents-size
 
 ci-test:
     uv run pytest
 
-# Engine docs stay subject-free. A link check can join this when linkchecker is installed.
+# Engine docs stay subject-free, and every relative link in the repo's Markdown resolves.
+# lychee --offline checks local files only, so it cannot flake on someone else's site. It is
+# installed, pinned, by .devcontainer/post-create.sh and CI.
 ci-docs:
     uv run python scripts/lint_docs.py
+    @command -v lychee >/dev/null || { echo "lychee required — run .devcontainer/post-create.sh"; exit 1; }
+    lychee --offline --no-progress --exclude-path .venv --exclude-path .cache --exclude-path node_modules --exclude-path graphify-out '**/*.md'
 
 # Architecture coverage: every top-level src/kalainova/ component must have a
 # matching ARCHITECTURE.md section and a box in its Component Diagram (see AGENTS.md
@@ -97,6 +111,62 @@ ci-arch:
         sys.exit(1)
 
     print(f"Architecture coverage: all {len(components)} component(s) documented in ARCHITECTURE.md and drawn in its Component Diagram.")
+
+# import-linter >= 2.16 exits 1 on a config with no contracts; the template ships the slot empty
+# ("No contracts = linter passes" — see .importlinter), so run it once one exists. Shared by
+# ci-lint and the pre-commit hook, so the two cannot drift.
+[private]
+_lint-imports:
+    @if grep -q '^\[importlinter:contract:' .importlinter; then uv run lint-imports; else echo "import-linter: no contracts in .importlinter yet — nothing to check"; fi
+
+# Giant files invite more giant files. No hand-written Python file under src/ or tests/ may pass
+# max_file_lines. Lower it as the code base allows; raising it is a reviewed change to this file
+# (CODEOWNERS), never a quiet fix to a red build.
+max_file_lines := "500"
+
+[private]
+_ci-file-size:
+    #!/usr/bin/env python3
+    import pathlib, sys
+    limit = int("{{ max_file_lines }}")
+    over = [
+        (p, n)
+        for root in ("src", "tests")
+        for p in sorted(pathlib.Path(root).rglob("*.py"))
+        if (n := len(p.read_text(errors="replace").splitlines())) > limit
+    ]
+    for p, n in over:
+        print(f"::error file={p}::{p} has {n} lines (limit {limit}) — split it by responsibility", file=sys.stderr)
+    sys.exit(1 if over else 0)
+
+# Every session loads AGENTS.md before doing anything, so each line costs context on every task.
+# Keep it an index that points at docs/, not the docs themselves. Raising the limit is a reviewed
+# change (CODEOWNERS).
+max_agents_lines := "200"
+
+[private]
+_ci-agents-size:
+    #!/usr/bin/env python3
+    import pathlib, sys
+    limit = int("{{ max_agents_lines }}")
+    n = len(pathlib.Path("AGENTS.md").read_text().splitlines())
+    if n > limit:
+        print(f"::error file=AGENTS.md::AGENTS.md has {n} lines (limit {limit}) — move detail into docs/ and link it", file=sys.stderr)
+        sys.exit(1)
+
+# The checks an agent runs locally and the checks CI runs must be the same list. Fails when
+# .github/workflows/ci.yaml runs a `just` step that `ci` does not list, or skips one it does.
+[private]
+_ci-gate-integrity:
+    #!/usr/bin/env python3
+    import pathlib, re, sys
+    justfile = pathlib.Path("justfile").read_text()
+    wanted = re.search(r"^ci:([^\n]*)$", justfile, re.MULTILINE).group(1).split()
+    workflow = pathlib.Path(".github/workflows/ci.yaml").read_text()
+    ran = re.findall(r"^\s*run:\s*just\s+(\S+)\s*$", workflow, re.MULTILINE)
+    if ran != wanted:
+        print(f"::error::ci.yaml runs {ran} but `just ci` is {wanted} — keep them identical", file=sys.stderr)
+        sys.exit(1)
 
 # ── Dev helpers ───────────────────────────────────────────────────────────────
 

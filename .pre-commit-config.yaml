@@ -5,27 +5,36 @@ repos:
     hooks:
       - id: gitleaks
 
-  # Python linting + formatting (Astral)
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+  # Python lint, format and types — the project's own uv-locked tools and pyproject config,
+  # exactly what `just ci-lint` runs. Mirror repos (ruff-pre-commit, mirrors-mypy) pinned their
+  # own older versions and ran mypy non-strict, so a commit could pass here and fail CI.
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
+        name: ruff (uv-locked)
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
       - id: ruff-format
-
-  # Type checking
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.2
-    hooks:
+        name: ruff format (uv-locked)
+        entry: uv run ruff format
+        language: system
+        types: [python]
       - id: mypy
-        args: [--ignore-missing-imports]
-        additional_dependencies: []
+        name: mypy (uv-locked, project config)
+        entry: uv run mypy src/
+        language: system
+        types: [python]
+        pass_filenames: false
 
-  # Shell scripts
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+  # Shell scripts — same pinned shellcheck `just ci-lint` runs
+  - repo: local
     hooks:
       - id: shellcheck
+        name: shellcheck
+        entry: uvx --from shellcheck-py==0.10.0.1 shellcheck
+        language: system
+        types: [shell]
 
   # Dockerfile linting
   - repo: https://github.com/hadolint/hadolint
@@ -52,7 +61,7 @@ repos:
     hooks:
       - id: import-linter
         name: import-linter (architecture boundaries)
-        entry: uv run lint-imports
+        entry: just _lint-imports
         language: system
         types: [python]
         pass_filenames: false

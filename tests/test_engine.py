@@ -55,7 +55,7 @@ def test_resolve_falls_back_to_local(monkeypatch):
 
 def test_executor_rejects_path_escape(tmp_path):
     with pytest.raises(ContractError):
-        render._safe(tmp_path, "../../etc/passwd")
+        render.spec.safe_path(tmp_path, "../../etc/passwd")
 
 
 def test_executor_rejects_unknown_op(tmp_path, monkeypatch):

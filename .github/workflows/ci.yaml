@@ -22,7 +22,15 @@ jobs:
           enable-cache: true
 
       - name: Install just
-        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+        env:
+          # Pinned release binary, not the unpinned upstream install script piped to bash
+          # (same as chassis's own CI and post-create.sh).
+          # renovate: datasource=github-releases depName=casey/just extractVersion=^(?<version>.*)$
+          JUST_VERSION: "1.56.0"
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors \
+            "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin just
 
       - name: Install deps
         run: uv sync
@@ -60,6 +68,24 @@ jobs:
           sudo install -m 0755 /tmp/opengrep /usr/local/bin/opengrep
           opengrep --version
 
+
+      - name: Install lychee
+        env:
+          # renovate: datasource=github-releases depName=lycheeverse/lychee extractVersion=^lychee-v(?<version>.*)$
+          LYCHEE_VERSION: "0.24.2"
+        run: |
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) la=x86_64 ;;
+            aarch64|arm64) la=aarch64 ;;
+            *) echo "unsupported arch: $arch"; exit 1 ;;
+          esac
+          tmp="$(mktemp -d)"
+          curl -sSfL --retry 5 --retry-all-errors \
+            "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-${la}-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$tmp"
+          sudo install -m 0755 "$(find "$tmp" -type f -name lychee | head -1)" /usr/local/bin/lychee
+          lychee --version
 
       - name: Engine contract
         run: just ci-contract

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/research-0.1.json",
+  "title": "Research",
+  "description": "What a piece may state as fact. A finding quotes a source, and the quote is checked against a private snapshot of that source.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "question",
+    "sources",
+    "findings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "researched_at": {
+      "type": "string"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "title"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^https?://"
+          },
+          "title": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "found_by": {
+            "type": "string"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "string",
+            "description": "The text as read, in this job folder."
+          },
+          "snapshot_sha256": {
+            "type": "string"
+          },
+          "published": {
+            "type": "string"
+          },
+          "reliability": {
+            "enum": [
+              "primary",
+              "reference",
+              "secondary",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "statement",
+          "source_ids",
+          "quote"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact words from the source that support the statement."
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "usable_as": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What the research could not establish."
+    },
+    "angles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

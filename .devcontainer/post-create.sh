@@ -155,6 +155,27 @@ if ! command -v opengrep >/dev/null 2>&1; then
   fi
 fi
 
+# ── lychee (Markdown link check — `just ci-docs`) ─────────────────────────────
+if ! command -v lychee >/dev/null 2>&1; then
+  echo "→ Installing lychee …"
+  # renovate: datasource=github-releases depName=lycheeverse/lychee extractVersion=^lychee-v(?<version>.*)$
+  LYCHEE_VERSION="0.24.2"
+  ARCH=$(uname -m)
+  case "$ARCH" in arm64|aarch64) LA="aarch64" ;; x86_64) LA="x86_64" ;; *) LA="" ;; esac
+  if [ -n "$LA" ]; then
+    TMP=$(mktemp -d)
+    curl -LsSf \
+      "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-${LA}-unknown-linux-gnu.tar.gz" \
+      | tar -xz -C "$TMP" \
+      && mv "$(find "$TMP" -type f -name lychee | head -1)" "$HOME/.local/bin/lychee" \
+      && chmod +x "$HOME/.local/bin/lychee" \
+      || echo "[warn] lychee install failed — install manually from https://github.com/lycheeverse/lychee/releases"
+    rm -rf "$TMP"
+  else
+    echo "[warn] no prebuilt lychee asset for $ARCH — install manually from https://github.com/lycheeverse/lychee/releases"
+  fi
+fi
+
 # ── Claude Code CLI ────────────────────────────────────────────────────────────
 # The ~/.claude and ~/.claude.json bind mounts above bring the host's config,
 # memory, and account state, but not the binary itself — install it explicitly.

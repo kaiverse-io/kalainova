@@ -18,7 +18,7 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image, ImageDraw, ImageFont
 
-from . import assets, captions, consistency, render
+from . import captions, consistency, render, shotmake
 from .jobfs import ContractError, Job
 from .providers import router
 
@@ -335,7 +335,7 @@ def _make_art(job: Job, panel: dict[str, Any], rect: Rect, ctx: dict[str, Any]) 
     dst = job.work / "panels" / f"{panel['id']}.png"
     w, h = art_size(rect.w, rect.h)
     beat = {"text": panel["art"], "visual_cue": panel["art"], **_shot_fields(panel)}
-    refs = assets._shot_kw(ctx["resolved"], ctx["lock"], "image", beat)
+    refs = shotmake.shot_kw(ctx["resolved"], ctx["lock"], "image", beat)
     prompt = _art_prompt(ctx["resolved"], panel, ctx["style"])
     provider, res = router.generate(job, "image", "image", prompt, dst, width=w, height=h, **refs)
     record = {

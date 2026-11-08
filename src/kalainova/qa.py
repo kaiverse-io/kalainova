@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 
-from . import bar, config, consistency, media, prompts
-from .jobfs import DOCUMENT_MEDIA, ContractError, CostCapExceeded, Job
+from . import bar, config, media, prompts, qachecks, research, timeline
+from .jobfs import DOCUMENT_MEDIA, CostCapExceeded, Job
 from .providers import router
 
 
@@ -19,69 +19,11 @@ def _check(checks: list, cid: str, ok: bool, detail: str, severity: str = "fail"
 
 
 def contact_sheet(job: Job, final, em: dict) -> str | None:
-    work = job.work
-    times = [0.4] + [c.get("start_sec", 0) + 0.6 for c in em.get("cuts", [])[1:]]
-    frames = []
-    for i, t in enumerate(times[:12]):
-        f = work / f"qa_frame_{i:02d}.jpg"
-        try:
-            media.frame_at(final, min(t, em["duration_sec"] - 0.1), f)
-            frames.append(f)
-        except media.MediaError:
-            pass
-    if not frames:
-        return None
-    from PIL import Image
-
-    thumbs = [Image.open(f).resize((270, 480)) for f in frames]
-    cols = min(6, len(thumbs))
-    rows = (len(thumbs) + cols - 1) // cols
-    sheet = Image.new("RGB", (cols * 270, rows * 480), (0, 0, 0))
-    for i, im in enumerate(thumbs):
-        sheet.paste(im, ((i % cols) * 270, (i // cols) * 480))
-    out = work / "contact.jpg"
-    sheet.save(out, quality=85)
-    for f in frames:
-        f.unlink(missing_ok=True)
-    return "contact.jpg"
-
-
-def _kit_checks(job: Job, packet: dict, am: dict, sheet: str | None) -> list[dict]:
-    """A stream job proves the lock held: first from the record, then by looking at the frames."""
-    from .plan import extract_json
-
-    try:
-        locked = consistency.for_job(job)
-    except ContractError as exc:
-        return [{"id": "consistency.lock", "status": "fail", "detail": str(exc)[:500]}]
-    if not locked:
-        return []
-    resolved, lock = locked
-    checks = [{"id": "consistency.lock", "status": "pass", "detail": "kits match the job's lock"}]
-    checks += consistency.recorded_checks(resolved, lock, packet, am)
-    if am.get("kit_lock_sha256") != consistency.lock_sha256(job):
-        checks.append(
-            {"id": "consistency.manifest", "status": "fail", "detail": "assets predate this lock"}
-        )
-    unseen = {"id": "consistency.vision", "status": "warn"}
-    if not sheet:
-        return [*checks, {**unseen, "detail": "no contact sheet; a human compares the frames"}]
-    text = prompts.load("qa_consistency").format(
-        context=consistency.judge_brief(resolved, lock["cast"]),
-        script=[b["text"] for b in packet["beats"]],
+    """Every shot's first and last frame, at the piece's real shape. Whether it moved shows here."""
+    out = timeline.shot_sheet(
+        final, em.get("cuts", []), em["duration_sec"], job.work / "contact.jpg"
     )
-    images = [*consistency.judge_images(resolved, lock["cast"]), job.work / sheet]
-    try:
-        _, res = router.generate(
-            job, "llm", "llm", text, images=images, max_tokens=800, note="qa-consistency"
-        )
-        return [*checks, *consistency.judge_checks(extract_json(res.text))]
-    except CostCapExceeded:
-        raise
-    except LookupError:
-        return [*checks, {**unseen, "detail": "no vision model ready; a human compares the frames"}]
-    except Exception as exc:  # the human gate still stands, and the warning says so
-        return [*checks, {**unseen, "detail": f"vision check failed: {exc}"[:300]}]
+    return out.name if out else None
 
 
 def run_file(job: Job) -> dict:
@@ -178,6 +120,39 @@ def run_file(job: Job) -> dict:
     return report
 
 
+def run_song(job: Job) -> dict:
+    """A song: its level blocks, its readings inform, and a person listens. Bound to the exact file."""
+    from . import songs
+    from .publish import sha256_file
+
+    data, final = job.job, job.artifact()
+    checks: list[dict] = []
+    summary: dict = {}
+    if final.exists():
+        checks, summary = songs.checks(job)
+    _check(checks, "render.exists", final.exists(), final.name)
+    manifest = job.read("asset_manifest")
+    _check(
+        checks,
+        "rights.assets",
+        all(a.get("rights") in ("owned", "licensed", "funded-brief") for a in manifest["assets"]),
+        "every asset carries rights",
+    )
+    checks.extend(qachecks.licence_checks(manifest))
+    report = {
+        "schema_version": "0.1",
+        "job_id": data["job_id"],
+        "passed": all(c["status"] != "fail" for c in checks),
+        "checks": checks,
+        "artifacts": {"audio": final.name},
+        "artifacts_sha256": {"audio": sha256_file(final)} if final.exists() else {},
+    }
+    if summary:
+        report["bar"] = summary
+    job.write("qa", report)
+    return report
+
+
 def run_document(job: Job) -> dict:
     """A comic or a book: its own checks, bound to the exact file like any other piece."""
     from . import comic, story
@@ -207,6 +182,8 @@ def run_document(job: Job) -> dict:
 
 
 def run(job: Job) -> dict:
+    if "song" in job.job.get("media", []):
+        return run_song(job)
     if any(kind in job.job.get("media", []) for kind in DOCUMENT_MEDIA):
         return run_document(job)
     if not job.has("edit_manifest") or not job.read("edit_manifest").get("cuts"):
@@ -338,6 +315,11 @@ def run(job: Job) -> dict:
         f"claims without URL sources: {bad}" if bad else "all claims have URLs",
         "warn",
     )
+    checks.extend(research.claim_checks(job, packet))
+    checks.extend(qachecks.promise_checks(data, am))
+    checks.extend(qachecks.plan_checks(data, packet))
+    checks.extend(qachecks.sound_checks(prof, am))
+    checks.extend(qachecks.cut_checks(final, em))
 
     # disclosure
     synthetic = any(a.get("synthetic") for a in am["assets"])
@@ -367,9 +349,10 @@ def run(job: Job) -> dict:
         for a in am["assets"]
     )
     _check(checks, "rights.assets", rights_ok, "every asset carries rights")
+    checks.extend(qachecks.licence_checks(am))
 
     sheet = contact_sheet(job, final, em)
-    checks.extend(_kit_checks(job, packet, am, sheet))
+    checks.extend(qachecks.kit_checks(job, packet, am, sheet))
     judge = None
     try:
         if sheet:
@@ -379,12 +362,15 @@ def run(job: Job) -> dict:
                 job,
                 "llm",
                 "llm",
-                f"Script:\n{[b['text'] for b in packet['beats']]}\n\n{prompts.load('qa_rubric')}",
+                prompts.load("qa_rubric").format(
+                    shape=qachecks.shape(prof), script=qachecks.judge_script(packet)
+                ),
                 images=[job.work / sheet],
-                max_tokens=800,
+                max_tokens=1600,
                 note="qa-judge",
             )
             judge = extract_json(res.text)
+            checks.extend(qachecks.judged_shots(judge))
             _check(
                 checks,
                 "judge.verdict",

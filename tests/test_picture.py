@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from kalainova import assets, bar, edit, look, media, motion, render
+from kalainova import assets, bar, edit, look, media, mediascan, motion, render
 from kalainova.jobfs import ContractError, Job
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
@@ -169,8 +169,8 @@ def test_a_cube_file_has_every_grid_point():
 def test_a_fallback_font_is_refused():
     log = "fontselect: (No Such Font, 400, 0) -> /System/Library/Fonts/Helvetica.ttc, -1, Helvetica"
     with pytest.raises(ContractError, match="No Such Font"):
-        render.refuse_fallback_fonts(log)
-    render.refuse_fallback_fonts(
+        render.picture.refuse_fallback_fonts(log)
+    render.picture.refuse_fallback_fonts(
         "fontselect: (Inter Display SemiBold, 400, 0) -> InterDisplay-SemiBold, 0, Inter"
     )
 
@@ -303,7 +303,7 @@ def _clip(tmp_path, chain, name="s.mp4"):
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_letterbox_bars_baked_into_a_source_are_found(tmp_path):
     clip = _clip(tmp_path, "testsrc2=s=320x180:r=8,pad=320:240:0:30:black")
-    x, y, w, h = media.picture_box(clip)
+    x, y, w, h = mediascan.picture_box(clip)
     assert (x, w) == (0.0, 1.0)
     assert 30 / 240 <= y <= 34 / 240
     assert 172 / 240 <= h <= 180 / 240
@@ -312,7 +312,7 @@ def test_letterbox_bars_baked_into_a_source_are_found(tmp_path):
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_pillar_bars_baked_into_a_source_are_found(tmp_path):
     clip = _clip(tmp_path, "testsrc2=s=240x180:r=8,pad=320:180:40:0:black")
-    x, y, w, h = media.picture_box(clip)
+    x, y, w, h = mediascan.picture_box(clip)
     assert (y, h) == (0.0, 1.0)
     assert 40 / 320 <= x <= 44 / 320
     assert 232 / 320 <= w <= 240 / 320
@@ -320,14 +320,14 @@ def test_pillar_bars_baked_into_a_source_are_found(tmp_path):
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_full_picture_has_nothing_to_remove(tmp_path):
-    assert media.picture_box(_clip(tmp_path, "testsrc2=s=320x180:r=8")) == media.FULL_FRAME
+    assert mediascan.picture_box(_clip(tmp_path, "testsrc2=s=320x180:r=8")) == mediascan.FULL_FRAME
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_night_sky_is_part_of_the_picture_not_a_bar(tmp_path):
     # black above the horizon in every frame, with nothing matching below: not a letterbox
     clip = _clip(tmp_path, "testsrc2=s=320x120:r=8,pad=320:180:0:60:black")
-    assert media.picture_box(clip) == media.FULL_FRAME
+    assert mediascan.picture_box(clip) == mediascan.FULL_FRAME
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
@@ -338,7 +338,7 @@ def test_black_that_is_only_sometimes_there_is_part_of_the_picture(tmp_path):
         "testsrc2=s=320x180:r=8,drawbox=y=0:w=iw:h=40:c=black:t=fill:enable='lt(t,1.5)',"
         "drawbox=y=140:w=iw:h=40:c=black:t=fill:enable='lt(t,1.5)'",
     )
-    assert media.picture_box(clip) == media.FULL_FRAME
+    assert mediascan.picture_box(clip) == mediascan.FULL_FRAME
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
@@ -354,9 +354,9 @@ def test_a_render_crops_a_baked_in_letterbox_away(tmp_path):
         "height": 180,
         "fps": 24,
         "duration_sec": 1.0,
-        "picture_box": list(media.picture_box(source)),
+        "picture_box": list(mediascan.picture_box(source)),
     }
-    render._op_scale(work, args)
+    render.picture.op_scale(work, args)
     frame = media.gray_frame(work / "out.mp4", 0.5)
     assert frame[:3].mean() > 30 and frame[-3:].mean() > 30
 
@@ -384,7 +384,7 @@ def test_contours_in_an_eight_bit_sky_are_smoothed(tmp_path):
         ]
     )  # fmt: skip
     before = bar.banding_score(media.gray_frame(raw, 0.5))
-    render._op_scale(tmp_path, _scale_args(width=1280, height=720))
+    render.picture.op_scale(tmp_path, _scale_args(width=1280, height=720))
     final = tmp_path / "final.mp4"
     media.run(
         [
@@ -400,9 +400,9 @@ def test_contours_in_an_eight_bit_sky_are_smoothed(tmp_path):
 
 
 def test_an_enlarged_source_is_sharpened_and_a_full_size_one_is_not():
-    assert "cas=" in render._finish_after_scale((1472, 832), 1920, 1080)
-    assert render._finish_after_scale((1920, 1080), 1920, 1080) == ""
-    assert render._finish_after_scale((3840, 2160), 1920, 1080) == ""
+    assert "cas=" in render.picture._finish_after_scale((1472, 832), 1920, 1080)
+    assert render.picture._finish_after_scale((1920, 1080), 1920, 1080) == ""
+    assert render.picture._finish_after_scale((3840, 2160), 1920, 1080) == ""
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
@@ -428,7 +428,7 @@ def test_an_enlarged_soft_source_comes_out_with_more_detail(tmp_path):
             str(plain),
         ]
     )
-    render._op_scale(tmp_path, _scale_args(width=1920, height=1080))
+    render.picture.op_scale(tmp_path, _scale_args(width=1920, height=1080))
     soft = bar.detail_ratio(media.gray_frame(plain, 0.25))
     sharp = bar.detail_ratio(media.gray_frame(tmp_path / "out.mp4", 0.25))
     assert sharp > soft
@@ -461,7 +461,7 @@ def test_a_plan_refuses_a_picture_box_that_is_not_inside_the_frame(box):
         "picture_box": box,
     }
     with pytest.raises(ContractError, match="picture_box"):
-        render._coerce("scale", args, 0)
+        render.spec.coerce("scale", args, 0)
 
 
 def test_a_plan_accepts_a_box_at_the_edges_of_the_frame():
@@ -474,4 +474,4 @@ def test_a_plan_accepts_a_box_at_the_edges_of_the_frame():
         "duration_sec": 1.0,
         "picture_box": [0, 0.1, 1, 0.8],
     }
-    assert render._coerce("scale", args, 0)["picture_box"] == [0, 0.1, 1, 0.8]
+    assert render.spec.coerce("scale", args, 0)["picture_box"] == [0, 0.1, 1, 0.8]

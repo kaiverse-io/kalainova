@@ -6,7 +6,7 @@ last_reviewed: 2026-11-06
 
 # Kalainova — Agent Context
 
-Content generation engine for any subject. Video, audio, stills, and text. Stamped from `kaiverse-io/chassis` (ADR 0008). `CLAUDE.md` points here. Update this file.
+Content generation engine for any subject. Video, audio, stills, songs, and text. Stamped from `kaiverse-io/chassis` (ADR 0008). `CLAUDE.md` imports this file, and Codex reads it directly. Update here only.
 
 The current verdict and kill checks are in `docs/explanation/premortem-2026-11-05-studio.md`. Decisions are in `docs/decisions/`.
 
@@ -36,8 +36,10 @@ config/studio.yaml  model and price table; which models take references; the stu
 fonts/              vendored open fonts, so every machine sets the same type
 scripts/            the contract and docs gates (stdlib)
 evals/contract/     fixtures that must pass or fail
-tests/              pytest
+tests/              pytest; tests/boundary/ holds behaviour contracts that survive a rewrite
 docs/               how-to, explanation, reference, tutorials, decisions
+docs/feature-map.md feature to entry point to code to tests; start here to find where to change
+.mcp.json           the only MCP servers agents may use here; reviewed (CODEOWNERS)
 .agents/skills/     agent skills; .claude/skills links here
 .agents/memory/     agent memory, tracked
 ```
@@ -66,7 +68,9 @@ docs/               how-to, explanation, reference, tutorials, decisions
 
 ## How to work here
 
-- `just ci` before every push. `just fmt` to format. `just sync` after changing `pyproject.toml`.
+- `just ci` after each logical change. It is exactly what CI runs: contract, lint, types, import boundaries, shell lint, file size, gate integrity, tests, docs links, and architecture coverage. Fix what it reports rather than running a second linter.
+- `just verify` before saying a task is done. It starts as `just ci`, and this project can extend it with what "ran it like a user" means here.
+- `just fmt` to format. `just sync` after changing `pyproject.toml`.
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`.
 - Significant decisions get an ADR in `docs/decisions/`, numbered flat.
 - Coverage ratchet: `fail_under` and `--cov-fail-under` in `pyproject.toml` only rise, together.
@@ -126,7 +130,7 @@ explicitly trust this project on their machine before it does anything at all:
 
 None of the three is a substitute for the others, and none is a substitute for CI.
 Stamping a config file is necessary, never sufficient. See
-[docs/explanation/design.md](docs/explanation/design.md#harness-neutrality-whats-guaranteed-vs-whats-harness-enhanced)
+[chassis's docs/explanation/design.md](https://github.com/kaiverse-io/chassis/blob/main/docs/explanation/design.md#harness-neutrality-whats-guaranteed-vs-whats-harness-specific)
 for the full reasoning.
 
 <!-- cockpit-section:start (kept in sync with chassis's own root AGENTS.md — see justfile ci-lint) -->

@@ -18,7 +18,13 @@
       "Bash(pre-commit run *)"
     ],
     "deny": [
-      "Bash(*--no-verify*)"
+      "Bash(*--no-verify*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)"
     ]
   },
   "hooks": {

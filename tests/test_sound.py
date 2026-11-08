@@ -60,7 +60,7 @@ def _mix(tmp_path: Path, *, voice_seconds: float, total: float) -> Path:
         _tone(tmp_path / "vs.wav", voice_seconds, volume=0.4).read_bytes()
     )
     _tone(tmp_path / "m.wav", 3.0, freq=110.0, volume=0.5)
-    render._op_mix_audio(
+    render.sound.op_mix_audio(
         tmp_path,
         {
             "out": "mix.wav",
@@ -118,7 +118,7 @@ def _speech_like(path: Path, volume: float) -> None:
 def _gap(tmp_path: Path, voice_volume: float = 2.0) -> float:
     _speech_like(tmp_path / "v.wav", voice_volume)
     _swinging_bed(tmp_path / "m.wav")
-    render._op_mix_audio(
+    render.sound.op_mix_audio(
         tmp_path,
         {
             "out": "mix.wav",
@@ -126,7 +126,7 @@ def _gap(tmp_path: Path, voice_volume: float = 2.0) -> float:
             "voice": "v.wav",
             "voice_chain": False,
             "music": "m.wav",
-            "music_gain_db": render.MUSIC_UNDER_VOICE_DB,
+            "music_gain_db": render.sound.MUSIC_UNDER_VOICE_DB,
             "duck": True,
             "sfx": [],
         },
@@ -153,7 +153,7 @@ def test_the_music_is_set_against_the_voice_it_will_sit_under(tmp_path):
 
 def test_music_alone_keeps_its_own_level_and_has_no_voice_stem(tmp_path):
     _tone(tmp_path / "m.wav", 3.0, freq=110.0, volume=1.0)
-    render._op_mix_audio(
+    render.sound.op_mix_audio(
         tmp_path,
         {"out": "mix.wav", "duration_sec": 3.0, "music": "m.wav", "music_gain_db": -6.0, "sfx": []},
     )
@@ -166,7 +166,7 @@ def test_music_alone_keeps_its_own_level_and_has_no_voice_stem(tmp_path):
 def test_a_voice_alone_has_no_music_stem_and_an_effect_lands_on_its_mark(tmp_path):
     _tone(tmp_path / "v.wav", 2.0, volume=1.0)
     _tone(tmp_path / "hit.wav", 0.2, freq=1000.0, volume=1.0)
-    render._op_mix_audio(
+    render.sound.op_mix_audio(
         tmp_path,
         {
             "out": "mix.wav",
@@ -190,7 +190,7 @@ def test_a_dc_offset_in_generated_music_does_not_reach_the_mix(tmp_path):
             "-ac", "2", str(tmp_path / "m.wav"),
         ]
     )  # fmt: skip
-    render._op_mix_audio(
+    render.sound.op_mix_audio(
         tmp_path,
         {
             "out": "mix.wav",
@@ -210,7 +210,7 @@ def test_a_dc_offset_in_generated_music_does_not_reach_the_mix(tmp_path):
 def test_music_too_quiet_to_hear_misses_the_bar(tmp_path):
     _tone(tmp_path / "voice.stem.wav", 2.0, volume=0.4)
     _tone(tmp_path / "music.stem.wav", 2.0, freq=110.0, volume=0.002)
-    readings = {r.id: r for r in bar._stem_readings(tmp_path)}
+    readings = {r.id: r for r in bar.sources.stem_readings(tmp_path)}
     assert not readings["audio.music_audible"].ok
 
 

@@ -11,3 +11,15 @@ A job that states a fact carries the source next to the script. A job that cuts 
 ## Fonts
 
 `fonts/` holds Inter, Comic Neue, Bangers, Literata, and Noto Sans Devanagari, each under the SIL Open Font License 1.1. The licenses are in `licenses/fonts/`.
+
+## What this engine learned from other projects
+
+Ideas are credited in `docs/studio-goal.md` and in the module that uses them. No code from a project under AGPL or a non-commercial licence is in this repository: OpenMontage (AGPL-3.0) and AdCraft were read for ideas and nothing else.
+
+- [auto-editor](https://github.com/WyattBlue/auto-editor) (public domain): the shapes of FCPXML and OpenTimelineIO exports.
+- [video-use](https://github.com/browser-use/video-use) (MIT, browser-use): cutting speech at word boundaries, and a filmstrip with a waveform.
+- [ViMax](https://github.com/HKUDS/ViMax) (MIT, HKUDS): writing a shot as a first frame, a last frame, and motion, and choosing among candidates.
+- [ShortGPT](https://github.com/RayVentura/ShortGPT) (MIT): the flow of a translation.
+- [genblaze](https://github.com/backblaze-labs/genblaze) (MIT, Backblaze): what a record of a generated asset should hold.
+
+`src/kalainova/providers/runners/` calls [heartlib](https://github.com/HeartMuLa/heartlib) (Apache-2.0) and [ACE-Step](https://github.com/ace-step/ACE-Step-1.5) (MIT) in their own environments. Neither is vendored, and each model's weights have their own terms: see `licences:` in `config/studio.yaml`.

@@ -19,6 +19,10 @@ What stays the same (see `kalainova kit --help`, `stream --help`):
   kalainova schedule <stream> <date> "<brief>"
   kalainova request <stream> "<brief>" [--cast a,b]   a locked job for that stream
 
+Shot by shot, songs, research, and what comes after a cut (see production_cli.py):
+  kalainova shotplan|takes|take|retake|sheet|filmstrip|cutcheck|export <job> ...
+  kalainova song|song-video|research|clips|dub|verdict|signals|provenance|ledger <job> ...
+
 Editing arm (your own footage):
   uv run kalainova ingest <job> <files or folders...>   split into shots, score every shot
   uv run kalainova edit <job> "30s reel, warm, fast cuts, title: ..."   direct -> render -> qa
@@ -38,7 +42,7 @@ import shutil
 import sys
 import time
 
-from . import assets, edit, plan, qa, render, studio_cli
+from . import assets, edit, plan, production_cli, qa, render, studio_cli
 from .jobfs import REPO, ContractError, home, open_job
 
 
@@ -77,7 +81,7 @@ STAGES = {
     "assets": lambda j, f: assets.run(j, force=f),
     "edit": lambda j, f: edit.run(j, force=f),
     "compile": lambda j, f: render.compile_plan(j),
-    "render": lambda j, f: render.execute(j),
+    "render": lambda j, f: render.execute(j, cache=not f),
     "qa": lambda j, f: qa.run(j),
 }
 
@@ -120,7 +124,7 @@ def _render_edit(job) -> int:
     )
     for st in ("compile", "render", "qa"):
         t0 = time.time()
-        STAGES[st](job, True)
+        STAGES[st](job, False)
         print(f"  {st:<8} ok  {time.time() - t0:5.1f}s")
         if st == "render":
             job.set_status("rendered")
@@ -135,13 +139,16 @@ def _render_edit(job) -> int:
 
 def _print_bar(report: dict) -> None:
     if report.get("bar"):
-        print(f"studio bar {report['bar']['met']}/{report['bar']['total']}")
+        from . import bar
+
+        print(f"studio bar: {bar.summary_line(report['bar'])}")
 
 
 def _document(a) -> int:
-    from . import comic, story
+    from . import comic, story, writers
 
     job = open_job(a.job)
+    writers.ensure(job, a.cmd)
     final = (comic if a.cmd == "comic" else story).run(job)
     report = qa.run(job)
     for c in report["checks"]:
@@ -166,7 +173,7 @@ def _bar(a) -> int:
     for r in report["readings"]:
         mark = "ok  " if r["ok"] else "MISS"
         print(f"{mark} {r['id']:<30} {str(r['value'])[:26]:<28} {r['limit']}")
-    print(f"studio bar {report['met']}/{report['total']}")
+    print(f"studio bar: {bar.summary_line(report)}")
     return 0 if report["passed"] else 2
 
 
@@ -237,10 +244,13 @@ def main(argv: list[str] | None = None) -> int:
     rl.add_argument("--identity", default="stock-reels")
     rl.add_argument("--count", type=int, default=10)
     studio_cli.add_parsers(sub)
+    production_cli.add_parsers(sub)
     a = p.parse_args(argv)
 
     try:
         handled = studio_cli.dispatch(a)
+        if handled is None:
+            handled = production_cli.dispatch(a)
         if handled is not None:
             return handled
         if a.cmd == "new":

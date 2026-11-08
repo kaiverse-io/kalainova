@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from kalainova import config
-from kalainova.providers import remote
+from kalainova.providers import fal as fal_provider
 
 
 @pytest.fixture
@@ -26,10 +26,10 @@ def fal(monkeypatch, tmp_path):
         Path(dst).write_bytes(b"x")
         return dst
 
-    monkeypatch.setattr(remote.Fal, "_run", fake_run)
-    monkeypatch.setattr(remote, "_download", fake_download)
+    monkeypatch.setattr(fal_provider.Fal, "_run", fake_run)
+    monkeypatch.setattr(fal_provider, "_download", fake_download)
     monkeypatch.setenv("FAL_KEY", "test")
-    return remote.Fal(), sent, tmp_path
+    return fal_provider.Fal(), sent, tmp_path
 
 
 def test_a_still_is_requested_at_more_than_the_default_1k(fal):
@@ -64,7 +64,7 @@ def test_kling_takes_its_first_frame_under_its_own_field_name():
 
 def test_no_deprecated_or_missing_model_is_configured():
     assert config.model_for("elevenlabs", "music") == "music_v2_5"
-    assert config.model_for("elevenlabs", "sfx") == "eleven_text_to_sound_v3"
+    assert config.model_for("elevenlabs", "sfx") == "eleven_text_to_sound_v2"
     assert "fal-ai/wan/v3" not in config.model_for("fal", "image_to_video")
     assert "fal-ai/wan/v3" not in config.model_for("fal", "video")
 
