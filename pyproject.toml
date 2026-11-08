@@ -115,7 +115,7 @@ addopts = [
     "--cov=kalainova",
     "--cov-report=term-missing",
     # Keep in sync with [tool.coverage.report] fail_under (same Copier answer).
-    "--cov-fail-under=45",
+    "--cov-fail-under=80",
 ]
 
 [tool.coverage.run]
@@ -126,4 +126,4 @@ branch = true
 # Ratchet (bucket B): only increase this value, never decrease it.
 # Initial value stamped from Copier answer coverage_fail_under; raise both this
 # and --cov-fail-under in-repo together (never lower; keep the Copier answer in sync).
-fail_under = 45
+fail_under = 80

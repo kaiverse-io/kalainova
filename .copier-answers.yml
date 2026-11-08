@@ -2,7 +2,7 @@ _commit: v0.15.0
 _src_path: https://github.com/kaiverse-io/chassis
 author_email: ''
 author_name: kaiverse.io
-coverage_fail_under: 45
+coverage_fail_under: 80
 description: Content generation engine for any subject
 enable_docker_outside_of_docker: false
 enable_release_automation: false
