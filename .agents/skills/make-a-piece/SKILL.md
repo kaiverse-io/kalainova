@@ -1,6 +1,6 @@
 ---
 name: make-a-piece
-description: Take one prompt to a finished, reviewed candidate (short, intro, reel, clip, or explainer): choose a route the budget allows, plan it, make it, review and fix it, write its breakdown, and stop at the human gate. Use when the operator names only what to create and wants the rest done.
+description: Take one prompt to a finished, reviewed candidate, such as a short, intro, reel, clip, or explainer. Choose a route the budget allows, plan it, make it, review and fix it, write its breakdown, and stop at the human gate. Use when the operator names only what to create and wants the rest done.
 ---
 
 # Make a piece from one prompt

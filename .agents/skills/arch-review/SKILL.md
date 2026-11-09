@@ -1,3 +1,8 @@
+---
+name: arch-review
+description: Check ARCHITECTURE.md's claims against the current source and report every place they have drifted, which just ci-arch cannot see. Use periodically, after a change to a documented component's behaviour, or when asked to run arch-review.
+---
+
 # Arch Review
 
 > Verifies `ARCHITECTURE.md`'s claims against the actual source — the semantic-accuracy half of
