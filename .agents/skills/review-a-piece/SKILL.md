@@ -7,6 +7,7 @@ description: Check a rendered Kalainova piece by looking and listening before a 
 
 Gates catch craft faults. Reading the piece catches the rest: a balloon tail across a face, a title that swallowed an instruction, and a film cut from the wrong assets all passed every check first.
 
+0. **Compare a source with the final.** Take one frame from a source clip and the same moment from the final. Framing that differs means the engine cropped or scaled it, for example a dark edge taken for a letterbox.
 1. **Confirm what was cut.** Read `edit_manifest.json`. Do the cuts name the assets you expect, and does the duration match? A stale edit looks like a success.
 2. **Probe the inputs.** Size and frame rate of every source, with `ffprobe`. Do not blame the edit for a small source.
 3. **Run `kalainova bar <job>`, and read the numbers,** not just ok or MISS. A value far past its limit in the passing direction is a fault too. Conformance passing says little: the renderer checked its own work.

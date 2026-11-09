@@ -475,3 +475,16 @@ def test_a_plan_accepts_a_box_at_the_edges_of_the_frame():
         "picture_box": [0, 0.1, 1, 0.8],
     }
     assert render.spec.coerce("scale", args, 0)["picture_box"] == [0, 0.1, 1, 0.8]
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_a_piece_with_nothing_to_burn_in_keeps_no_second_copy_of_its_picture(tmp_path, monkeypatch):
+    job = _local_job(tmp_path, monkeypatch, captions=False)
+    packet = json.loads(job.path("script_packet").read_text())
+    for beat in packet["beats"]:
+        beat.pop("on_screen")
+    job.path("script_packet").write_text(json.dumps(packet))
+    final = _render(job)
+    assert "overlay_text" not in [s["op"] for s in job.read("render_plan")["steps"]]
+    assert final.exists()
+    assert not (job.work / "picture.ov.mp4").exists()

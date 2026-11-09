@@ -1,3 +1,8 @@
+---
+name: dev-coach
+description: Find recurring friction in recent agent work (repeated corrections, rework, low one-shot rate) and propose additions to AGENTS.md or new skills, asking before writing. Use periodically, right after a corrected mistake, or when asked to run dev-coach.
+---
+
 # Dev Coach
 
 > The chassis's coaching loop: anti-pattern detection + an AGENTS.md/skills auditor
@@ -26,9 +31,10 @@ skills — then asks before writing anything. It never edits silently.
    project. If not installed, say so and skip — don't block on it.
 
 2. **Scan recent memory for unreflected feedback.** Read every file under `.agents/memory/`
-   (the canonical, git-tracked location — check `MEMORY.md` for the index; on Claude Code
-   this is also reachable at `~/.claude/projects/<project-slug>/memory/`, a symlink
-   `post-create.sh` maintains into the same files, not a second copy). Don't filter by a
+   (the canonical, git-tracked location; `MEMORY.md` is the index). Inside the devcontainer,
+   `post-create.sh` links Claude Code's `~/.claude/projects/<project-slug>/memory/` to the same
+   files. Outside it, that folder is separate and private: read it too when it exists, but never
+   copy an operator's personal entries into `.agents/memory/`, which is public. Don't filter by a
    specific `metadata.type` — treat any memory file describing a correction, convention, or
    constraint as in scope, whatever type label it carries. For each one, check whether its
    rule already appears in `AGENTS.md` (the "Hard rules", "Forbidden patterns", or "How to

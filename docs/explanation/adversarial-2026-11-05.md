@@ -1,5 +1,7 @@
 # Adversarial premortem — 2026-11-05
 
+> Since this review, `docs/consolidation.md` has been merged into `docs/strategies.md`.
+
 Applied to `docs/consolidation.md`. Same battery as the earlier pass (premortem, steelman, assumptions, second order, red team, verdict, adversary, blind spots, reconstruction). The plan under test is the consolidated engine, not a subject.
 
 The recast that removed every sample subject landed before this pass. This pass is the correction to that recast.

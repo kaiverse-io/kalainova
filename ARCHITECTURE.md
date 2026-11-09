@@ -524,6 +524,8 @@ Assets to an edit manifest.
 ### render
 Edit manifest to a closed op list, then to the file through ffmpeg. A plan can be written by a model, so `spec` checks every argument and path first. `cache` keeps a step whose inputs and settings have not changed, so changing one shot re-encodes only what it touches.
 
+Picture steps hand each other lossless 10-bit masters, so nothing degrades between steps. The cost is hundreds of megabits a second, gigabytes for a short piece. The title pass is skipped when there is nothing to burn in, rather than writing a second copy. `cache.clean` (`kalainova clean`) deletes the picture intermediates a plan wrote, and nothing else: the final, assets, takes, and sound stems stay, and the next render remakes what was deleted.
+
 ```
 edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
                                                        │  for each step:
@@ -622,7 +624,7 @@ just ci ──► ci-contract  check.py, --fixtures   no media blobs; jobs, kits
 | Plane | Where | Role |
 |---|---|---|
 | Strategies | `docs/strategies.md` | How a piece gets made and how it can get paid. Subject-agnostic. |
-| Pipeline | `docs/pipeline.md` | Stages from intent to measure. Same spine for every medium. |
+| Pipeline | "Sequence: one piece" above | Stages from brief to measure. Same spine for every medium. |
 | Contract | `schemas/` | Job, script, assets, edit, render plan, QA, approval, publish log, measure. |
 | Jobs, kits, streams | `$KALAINOVA_HOME` | Operator data, in a private directory. This repo is public (ADR 0010). |
 | Gates | `scripts/check.py`, `scripts/lint_docs.py`, pre-commit, `.github/workflows/ci.yaml` | Media stays out of git. Jobs that violate the contract fail. Engine docs stay subject-free. |

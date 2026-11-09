@@ -1,6 +1,8 @@
 # Strategies
 
-Loops for the plan in `docs/consolidation.md`. The premortem is `docs/explanation/adversarial-2026-11-05.md`.
+One engine. The subject is an input the operator writes on a job; it is not a kind of job. Every playbook collapses to the same machine: make a piece of media, put it where a person can see it, write down what happened at 48 hours, then repeat or stop. The pieces are video, audio, stills, text, or a mix.
+
+This page is the loop for each way a piece starts. The premortem behind the ranking is `docs/explanation/adversarial-2026-11-05.md`; it reviewed this plan when it lived in a separate `consolidation.md`, since merged here.
 
 Rank, after that premortem:
 
@@ -17,6 +19,22 @@ Current operating defaults (override on the job if the brief says otherwise):
 - Score a funded source at 4 of 6 before committing.
 - Three generative tests, under a money cap, on their own identity.
 - A downstream SKU only after a measured win on the media it extends.
+
+## Rules on every peer
+
+| Rule | Why it showed up everywhere |
+|---|---|
+| Rent the models. Own the job folder, the compile path, the gate, and the log (ADR 0007). | The tools change. The record of what shipped does not. |
+| One identity per stream, one strategy per stream. | A funded post on an identity you want to keep stains it. |
+| A human publishes. An agent drafts, calls the tools, and logs. | Nobody in the playbooks got paid for an unreviewed dump. |
+| Check the first unit on a new character or format before scheduling more. A default, not a lock (ADR 0009). | The first rejection teaches the brief. The twentieth does not. |
+| One to two posts a day on that identity. | Faster reads as spam. |
+| Ten-minute hook veto. | The time goes into the hook, not the cut. |
+| Rights on the job: `funded-brief`, `owned`, or `licensed`. | A popular file is not a right. |
+| A factual line in the script has a source on the job. | Unsourced claims are how a piece gets pulled. |
+| Measure at 48 hours. Keep or kill from that number. | Views on the dashboard are the only feedback that mattered. |
+| Loudness once on the final mix when there is audio: −14 LUFS by default, true peak at or under −1 dBTP. Short picture defaults to 9:16. | These are finish settings, not a brand. |
+| No second procedural format or SKU until one job is `accepted` or `measured`. | Every early build pass ended with a schema and no file. |
 
 ## 1. Funded clip
 
@@ -125,6 +143,8 @@ A physical or digital good that **extends** a piece that already shipped. It is 
 - Cutting a broadcast, a show, or a viral clip because it is getting views, with no funded brief and no license.
 - Mixing funded posts onto an identity you want to keep as owned work.
 - A comment-to-course funnel. File the pattern as intel. Do not build it here.
+- A worked example of a subject, checked in so the repo "shows how".
+- Treating a green contract check as a shipped piece.
 
 ## Kill rules
 
@@ -136,3 +156,7 @@ A physical or digital good that **extends** a piece that already shipped. It is 
 | 14 days, zero accepted submissions | Stop the rented clipper. Pick a source or close the strategy. |
 | Generative cost above the cap | Stop rendering |
 | 14 days, zero posts on an owned or generated identity | Close the queue. One piece or drop the strategy. |
+
+## Done
+
+A job folder in the private home with a `measure.json` that records either an accepted funded submission or a public URL. Until that file exists, the engine is unproven, however many streams it can address.
