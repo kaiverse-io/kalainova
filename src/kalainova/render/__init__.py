@@ -234,7 +234,7 @@ def _titles(em: dict[str, Any], studio: bool) -> list[dict[str, Any]]:
     return titles
 
 
-def _caption_steps(em: dict[str, Any]) -> tuple[list[Step], str]:
+def _caption_steps(em: dict[str, Any], picture: str) -> tuple[list[Step], str]:
     """Caption files, and burned captions if the piece carries them. Returns the picture to use."""
     prof = em["profile"]
     steps: list[Step] = []
@@ -242,13 +242,13 @@ def _caption_steps(em: dict[str, Any]) -> tuple[list[Step], str]:
     if cues:
         steps.append({"op": "caption_files", "args": {"cues": cues, "fps": prof["fps"]}})
     if not em.get("captions"):
-        return steps, "picture.ov.mp4"
+        return steps, picture
     style = em.get("caption_style", "kinetic")
     steps.append(
         {
             "op": "burn_captions",
             "args": {
-                "input": "picture.ov.mp4",
+                "input": picture,
                 "out": "picture.cap.mp4",
                 "width": prof["width"],
                 "height": prof["height"],
@@ -276,21 +276,22 @@ def _picture_steps(job: Job, em: dict[str, Any], assets: dict[str, Any]) -> list
         "audio_inputs": parts.sounds,
         "audio_out": "orig.wav" if parts.sounds else None,
     }
+    steps = [*parts.steps, {"op": "concat", "args": join}]
+    titles, overlays = _titles(em, studio), em.get("overlays", [])
+    if not titles and not overlays:
+        # Nothing to burn in: a pass would only write a second lossless copy of the whole picture.
+        return steps
     overlay = {
         "input": "picture.mp4",
         "out": "picture.ov.mp4",
         "width": prof["width"],
         "height": prof["height"],
-        "overlays": em.get("overlays", []),
-        "titles": _titles(em, studio),
+        "overlays": overlays,
+        "titles": titles,
         "theme": "studio" if studio else "bold",
         "duration_sec": em["duration_sec"],
     }
-    return [
-        *parts.steps,
-        {"op": "concat", "args": join},
-        {"op": "overlay_text", "args": overlay},
-    ]
+    return [*steps, {"op": "overlay_text", "args": overlay}]
 
 
 def _final_step(em: dict[str, Any], am: dict[str, Any], video: str, audio: str | None) -> Step:
@@ -320,8 +321,9 @@ def _piece_steps(job: Job, em: dict[str, Any], am: dict[str, Any]) -> list[Step]
     if not em.get("cuts"):
         return _sound_only_steps(em, assets, any(x.get("synthetic") for x in am["assets"]))
     original = bool(em.get("original_audio"))
-    captions, video = _caption_steps(em)
-    steps = [*_picture_steps(job, em, assets), *captions]
+    picture = _picture_steps(job, em, assets)
+    captions, video = _caption_steps(em, picture[-1]["args"]["out"])
+    steps = [*picture, *captions]
     audio = None
     if em.get("audio") or original:
         steps += _audio_steps(em, assets, original=original)
