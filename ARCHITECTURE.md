@@ -624,7 +624,7 @@ just ci ──► ci-contract  check.py, --fixtures   no media blobs; jobs, kits
 | Plane | Where | Role |
 |---|---|---|
 | Strategies | `docs/strategies.md` | How a piece gets made and how it can get paid. Subject-agnostic. |
-| Pipeline | `docs/pipeline.md` | Stages from intent to measure. Same spine for every medium. |
+| Pipeline | "Sequence: one piece" above | Stages from brief to measure. Same spine for every medium. |
 | Contract | `schemas/` | Job, script, assets, edit, render plan, QA, approval, publish log, measure. |
 | Jobs, kits, streams | `$KALAINOVA_HOME` | Operator data, in a private directory. This repo is public (ADR 0010). |
 | Gates | `scripts/check.py`, `scripts/lint_docs.py`, pre-commit, `.github/workflows/ci.yaml` | Media stays out of git. Jobs that violate the contract fail. Engine docs stay subject-free. |

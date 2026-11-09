@@ -115,7 +115,7 @@ The engine is a single Python package that reads and writes JSON contracts, vali
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): system, component, and sequence views
 - [docs/decisions/](docs/decisions/): why it's built this way
-- [docs/studio.md](docs/studio.md): goals, model stack, and roadmap
+- [docs/studio-goal.md](docs/studio-goal.md): the goal, and what counts as done
 
 ## Responsible use
 

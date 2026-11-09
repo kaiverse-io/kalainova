@@ -1,5 +1,7 @@
 # Adversarial premortem: studio, editing arm, stock reels (2026-11-05, evening)
 
+> The plan reviewed here, `docs/studio.md`, was retired on 2026-11-09 and stays in git history. The goal now lives in `docs/studio-goal.md`, the operating loops in `docs/strategies.md`.
+
 The battery is the same one used in `docs/explanation/adversarial-2026-11-05.md`. The plan under test is the morning's 21-file contract after one day of growth. It now has a rented-model generation engine with local fallbacks (ADR 0007, merged to `main` in PR #2, though its text still says "proposed"), a keynote-grade theme (`41fb857`), an editing arm (`b662394`), and free stock reels (`64f00f6`, `kalainova reel <id> "<place>"`). In total that is +7,395 lines across 168 files since `8b59afe`. There are zero jobs besides `_template`, zero real renders and zero URLs. The day-14 proof is due 2026-11-19.
 
 ## 1. Premortem

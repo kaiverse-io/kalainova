@@ -16,7 +16,7 @@ The engine, schemas, prompts, and docs live here. Real jobs, kits, streams, and 
 
 ## What you are building
 
-A piece belongs to a stream. Read `docs/how-to/run-a-stream.md`. `docs/consolidation.md` and `docs/strategies.md` explain the peer ways a piece starts. The studio plan is `docs/studio.md`.
+A piece belongs to a stream. Read `docs/how-to/run-a-stream.md`. `docs/strategies.md` explains the peer ways a piece starts. The goal is `docs/studio-goal.md`.
 
 - **Kit.** What stays the same: face, voice, persona, places, style, music. Frozen by version.
 - **Stream.** Where it goes: one identity, one strategy, its kits, its generators, its limits.
