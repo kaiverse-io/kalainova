@@ -13,3 +13,5 @@
 - [Measure a page the way it will print](measure-a-page-the-way-it-will-print.md) — layout measured ligatures and the PDF set none, closing word gaps; only looking found it
 - [A test fixture can leak a private piece](a-test-fixture-can-leak-a-private-piece.md) — fixture wording is checked in too; grep additions for private subjects before the first push
 - [Drive a command before calling it done](drive-a-command-before-calling-it-done.md) — running the commands in order found a retake that went unused
+- [A drawn shot is not letterboxed](a-drawn-shot-is-not-letterboxed.md) — picture_box cropped a dark-edged graphics shot 1.19x and QA passed it; compare a source frame with the final
+- [Grain must reach the shadows](grain-must-reach-the-shadows.md) — overlay grain leaves near-black gradients to band; a plain low-alpha pass took banding 0.049 to 0.001
