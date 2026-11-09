@@ -8,6 +8,7 @@
 | Feature | Entry point | Code | Tests |
 |---|---|---|---|
 | Make a generated piece | `kalainova make` | `assets.py`, `edit.py`, `render/` | `tests/test_engine.py` |
+| Free the disk a render used | `kalainova clean [--dry-run]` | `render/cache.py` | `tests/test_rendercache.py` |
 | Plan review before spending | `kalainova shotplan` | `shots.py` | `tests/test_shots.py` |
 | Takes and retakes | `kalainova takes`, `take`, `retake` | `takes.py`, `shotmake.py` | `tests/test_takes.py` |
 | The motion promise | `kalainova make` | `assets.py`, `qachecks.py` | `tests/test_takes.py` |

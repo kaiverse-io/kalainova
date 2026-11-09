@@ -7,6 +7,7 @@
   uv run kalainova publish <job> <platform> [--live]
   uv run kalainova measure <job>
   uv run kalainova status <job>
+  uv run kalainova clean <job> [--dry-run]   delete what make can rebuild; the final and assets stay
   uv run kalainova bar <job or file>   hold it to the studio bar
   uv run kalainova comic <job>         lay out and letter a comic from comic_script.json
   uv run kalainova story <job>         typeset a book and an EPUB from story.json
@@ -103,6 +104,25 @@ def _make(a) -> int:
     _print_bar(report)
     print(f"spent {job.spent():.4f} of cap {job.job.get('cost_cap')}")
     return 0 if report["passed"] else 2
+
+
+def _clean(a) -> int:
+    """Free the picture chain's lossless intermediates. Rendering again makes them again."""
+    from .render import cache as render_cache
+
+    job = open_job(a.job)
+    if not job.has("render_plan"):
+        print(f"{job.id}: not rendered, nothing to clean")
+        return 0
+    files, freed = render_cache.clean(job.work, job.read("render_plan"), dry_run=a.dry_run)
+    print(
+        f"{job.id}: {len(files)} files, {'would free' if a.dry_run else 'freed'} {freed / 1e9:.2f} GB"
+    )
+    if files and not a.dry_run:
+        print(
+            "  the final, its records, every asset and take stay; `make <job> --from render` remakes these"
+        )
+    return 0
 
 
 def _render_edit(job) -> int:
@@ -215,6 +235,9 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true", help="snapshot before 48h; does not set views_48h"
     )
     sub.add_parser("status").add_argument("job")
+    cl = sub.add_parser("clean", help="delete rebuildable render intermediates")
+    cl.add_argument("job")
+    cl.add_argument("--dry-run", action="store_true")
     sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
         "job"
     )
@@ -259,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
             return _make(a)
         if a.cmd == "bar":
             return _bar(a)
+        if a.cmd == "clean":
+            return _clean(a)
         if a.cmd in ("comic", "story"):
             return _document(a)
         if a.cmd == "stage":

@@ -524,6 +524,8 @@ Assets to an edit manifest.
 ### render
 Edit manifest to a closed op list, then to the file through ffmpeg. A plan can be written by a model, so `spec` checks every argument and path first. `cache` keeps a step whose inputs and settings have not changed, so changing one shot re-encodes only what it touches.
 
+Picture steps hand each other lossless 10-bit masters, so nothing degrades between steps. The cost is hundreds of megabits a second, gigabytes for a short piece. The title pass is skipped when there is nothing to burn in, rather than writing a second copy. `cache.clean` (`kalainova clean`) deletes the picture intermediates a plan wrote, and nothing else: the final, assets, takes, and sound stems stay, and the next render remakes what was deleted.
+
 ```
 edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
                                                        │  for each step:

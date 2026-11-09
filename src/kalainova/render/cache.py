@@ -98,3 +98,36 @@ def load(work: Path) -> dict[str, str]:
 
 def save(work: Path, done: dict[str, str]) -> None:
     (work / CACHE_FILE).write_text(json.dumps(done, indent=2) + "\n")
+
+
+# The picture chain keeps lossless masters between steps, hundreds of megabits a second, so a short
+# piece holds gigabytes it needs only while it is being changed. `make` rebuilds them from the
+# assets at no cost. Sound stems stay: they are small, and a dub reuses them.
+PICTURE_OPS = frozenset({"still", "cut", "scale", "concat", "overlay_text", "burn_captions"})
+
+
+def rebuildable(work: Path, plan: dict[str, Any]) -> list[Path]:
+    """The picture intermediates a plan writes: never the deliverables, an asset, or a take."""
+    from .spec import safe_path
+
+    found = []
+    for step in plan.get("steps", []):
+        if step.get("op") in PICTURE_OPS:
+            for name in _outputs(step.get("args") or {}):
+                path = safe_path(work, name)
+                if path.is_file():
+                    found.append(path)
+    return found
+
+
+def clean(work: Path, plan: dict[str, Any], *, dry_run: bool = False) -> tuple[list[Path], int]:
+    """Delete what `rebuildable` lists. Returns the files and the bytes they held."""
+    files = rebuildable(work, plan)
+    freed = sum(p.stat().st_size for p in files)
+    if not dry_run:
+        for path in files:
+            path.unlink()
+        for folder in {p.parent for p in files}:
+            if folder != work.resolve() and not any(folder.iterdir()):
+                folder.rmdir()
+    return files, freed
