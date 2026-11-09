@@ -55,7 +55,21 @@ STATUSES = {
 }
 PROVEN = {"accepted", "measured"}
 FORMATS = {"list", "comparison", "countdown", "alert", "poll", "recap", "quote", "stat"}
-OPS = {"cut", "concat", "scale", "overlay_text", "mix_audio", "loudnorm", "burn_captions", "export"}
+# The render ops the engine runs (render/spec.py OPS). Stdlib only, so the list is written out;
+# tests/test_check_ops.py fails if the two drift apart.
+OPS = {
+    "still",
+    "cut",
+    "scale",
+    "concat",
+    "overlay_text",
+    "mix_audio",
+    "loudnorm",
+    "burn_captions",
+    "caption_files",
+    "export_audio",
+    "export",
+}
 ROLES = {"hook", "body", "payoff", "cta"}
 CUT_ROLES = ROLES | {"bed", "other"}
 LOCAL_MODELS = {"local-studio-field", "local-pad", "local-whoosh", "local-typecard"}
