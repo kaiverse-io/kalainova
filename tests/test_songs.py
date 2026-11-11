@@ -392,3 +392,18 @@ def test_only_checked_research_reaches_a_writer(tmp_path, studio):
     writers.ensure(job, "song")
     assert "CHECKED FACT" in studio.calls[0]["prompt"]
     assert "UNCHECKED CLAIM" not in studio.calls[0]["prompt"]
+
+
+def test_hearing_the_lyrics_says_how_long_the_audio_is(tmp_path, studio, monkeypatch):
+    seen = []
+    real = router.generate
+
+    def spy(job, capability, *args, **kw):
+        if capability == "transcribe":
+            seen.append(kw.get("est"))
+        return real(job, capability, *args, **kw)
+
+    monkeypatch.setattr(router, "generate", spy)
+    studio.heard = _heard()
+    songs.run(_job(tmp_path))
+    assert seen and all(e and e["duration"] > 0 for e in seen)

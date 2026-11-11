@@ -98,8 +98,9 @@ def test_a_reading_that_tracks_the_verdicts_is_named_and_one_that_does_not_is_co
     for n, (verdict, detail) in enumerate(
         [
             ("accept", 0.9),
-            ("fix", 0.8),
+            ("fix", 0.2),
             ("accept", 0.7),
+            ("accept", 0.85),
             ("reject", 0.1),
             ("reject", 0.2),
             ("reject", 0.3),
@@ -217,3 +218,8 @@ def test_the_record_is_written_with_the_job(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     _manifest(job, {"id": "v", "provider": "operator"})
     assert json.loads(provenance.write(job).read_text())["job_id"] == "p1"
+
+
+def test_only_an_accept_counts_as_acceptance():
+    assert verdicts.GOOD == {"accept"}
+    assert "fix" in verdicts.CHOICES and "fix" not in verdicts.GOOD

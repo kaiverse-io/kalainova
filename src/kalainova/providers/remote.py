@@ -90,10 +90,10 @@ class Anthropic(Provider):
 # ---------------------------------------------------------------- ElevenLabs
 @register
 class ElevenLabs(Provider):
-    """Voice with character-level timestamps, plus music and sound effects."""
+    """Voice with character-level timestamps, plus music, songs, and sound effects."""
 
     name = "elevenlabs"
-    capabilities = ("voice", "music", "sfx")
+    capabilities = ("voice", "music", "song", "sfx")
     env_key = "ELEVENLABS_API_KEY"
     base = "https://api.elevenlabs.io/v1"
 
