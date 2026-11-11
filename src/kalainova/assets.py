@@ -77,7 +77,6 @@ class _Piece:
 def _open_piece(job: Job, force: bool) -> _Piece:
     data = job.job
     brief = data.get("brief") or {}
-    budget = brief.get("max_video_beats")
     locked = consistency.for_job(job)
     resolved, lock = locked if locked else (None, {})
     return _Piece(
@@ -91,8 +90,55 @@ def _open_piece(job: Job, force: bool) -> _Piece:
         resolved=resolved,
         lock=lock,
         allow_stills=bool(brief.get("allow_stills")) or _placeholder_run(data),
-        video_budget=int(budget if budget is not None else 3),
+        video_budget=shots.video_budget(data),
     )
+
+
+def _moving_cost(piece: _Piece) -> float | None:
+    """What the moving shots should cost at the takes always made, or None if unpriced."""
+    moving = [
+        b
+        for b in piece.packet["beats"]
+        if b.get("visual_kind") == "video" and not b.get("graphics")
+    ]
+    if not moving or "video" not in piece.kinds:
+        return 0.0
+    always, _ = takes.counts(piece.brief)
+    total = 0.0
+    for beat in moving[: max(piece.video_budget, 0)]:
+        quote = router.quote(
+            piece.job,
+            "video",
+            duration=_unspoken_length(beat),
+            image=True,
+            references=bool(piece.resolved),
+        )
+        if quote is None or quote[1] is None:
+            return None
+        total += quote[1] * always
+    return total
+
+
+def _refuse_over_the_cap(piece: _Piece) -> None:
+    """Say what the moving shots cost, and refuse before any spend if the cap cannot hold it."""
+    cost = _moving_cost(piece)
+    if cost is None:
+        return
+    cap = piece.data.get("cost_cap")
+    if cost:
+        _, most = takes.counts(piece.brief)
+        print(
+            f"{piece.job.id}: moving shots: about ${cost:.2f} at the takes always made"
+            f" (a miss can ask for up to {most} takes a shot)",
+            file=sys.stderr,
+        )
+    left = None if cap is None else float(cap) - piece.job.committed()
+    if left is not None and cost > left:
+        raise ContractError(
+            f"{piece.job.id}: the moving shots are estimated at ${cost:.2f} and the job has "
+            f"${max(left, 0):.2f} left under its cap; raise cost_cap, or set brief.max_video_beats "
+            "to move fewer shots"
+        )
 
 
 def _review_the_plan(piece: _Piece) -> None:
@@ -113,6 +159,7 @@ def _review_the_plan(piece: _Piece) -> None:
         raise ContractError(
             f"{piece.job.id}: the plan cannot be made as written: " + "; ".join(refused)
         )
+    _refuse_over_the_cap(piece)
 
 
 # ------------------------------------------------------------------ voice

@@ -4,6 +4,7 @@ kalainova shotplan <job>                         what is wrong with the plan, be
 kalainova takes <job>                            every take of every shot, and how each read
 kalainova take <job> <shot> <n>                  a person's choice of take
 kalainova retake <job> <shot> ["what was wrong"]  another attempt at one shot
+kalainova bench <job> <shot> --models a,b [--takes N]  one shot on several models, side by side
 kalainova sheet <job>                            first and last frame of every shot
 kalainova filmstrip <file> <start> <end>         frames over a waveform
 kalainova cutcheck <job>                         a click or a flash at any cut
@@ -14,7 +15,7 @@ kalainova research <job> "question" [--query q]  sources, snapshots, checked fin
 kalainova research <job> --check                 hold written findings to their sources
 kalainova clips <job> [--count 3] [--open]       short pieces from a long recording
 kalainova dub <job> <language> <new id>          the piece in another language
-kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID] [--note TEXT]
+kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]] [--note TEXT]
 kalainova signals                                which readings predict a person's verdict
 kalainova provenance <job>                       how it was made, for whoever answers for it
 kalainova ledger <job> [--invoice AMOUNT]        estimated against what a vendor billed
@@ -61,6 +62,11 @@ def _shot_parsers(sub: Any) -> None:
     retake.add_argument("job")
     retake.add_argument("shot")
     retake.add_argument("note", nargs="?", default="")
+    bench = sub.add_parser("bench")
+    bench.add_argument("job")
+    bench.add_argument("shot")
+    bench.add_argument("--models", required=True, help="two or more video models, comma separated")
+    bench.add_argument("--takes", type=int, default=1, help="takes of each model (default 1)")
 
 
 def _look_parsers(sub: Any) -> None:
@@ -106,6 +112,7 @@ def _record_parsers(sub: Any) -> None:
     verdict.add_argument("verdict", choices=verdicts.CHOICES)
     verdict.add_argument("--reviewer", required=True)
     verdict.add_argument("--shot")
+    verdict.add_argument("--take", type=int, help="one take of the shot, such as a bench take")
     verdict.add_argument("--note", default="")
     sub.add_parser("signals")
     sub.add_parser("provenance").add_argument("job")
@@ -120,7 +127,7 @@ def _shotplan(a: argparse.Namespace) -> int:
     brief = data.get("brief") or {}
     found = shots.review(
         job.read("script_packet"),
-        budget=int(brief.get("max_video_beats", 3)),
+        budget=shots.video_budget(data),
         allow_stills=bool(brief.get("allow_stills")),
         wants_video="video" in data.get("media", []),
         limit=shots.word_limit(config.preference("video", data)),
@@ -140,6 +147,18 @@ def _takes(a: argparse.Namespace) -> int:
             readings = {k: v for k, v in (take.get("readings") or {}).items() if k != "readings"}
             print(f" {mark} {take['n']:>2} {state} seed {take['seed']:<11} {readings}")
     return 0
+
+
+def _bench(a: argparse.Namespace) -> int:
+    from . import bench
+
+    job = open_job(a.job)
+    found = bench.run(job, a.shot, bench.parse_models(a.models), a.takes)
+    print(found["sheet"] or "no take was made")
+    for take in found["takes"]:
+        print(f"judge it: kalainova verdict {job.id} accept|fix|reject --reviewer NAME "
+              f"--shot {a.shot} --take {take['n']}")  # fmt: skip
+    return 0 if found["takes"] and not found["failed"] else 1
 
 
 def _take(a: argparse.Namespace) -> int:
@@ -257,7 +276,7 @@ def _dub(a: argparse.Namespace) -> int:
 
 def _verdict(a: argparse.Namespace) -> int:
     entry = verdicts.record(
-        open_job(a.job), a.verdict, reviewer=a.reviewer, shot=a.shot, note=a.note
+        open_job(a.job), a.verdict, reviewer=a.reviewer, shot=a.shot, note=a.note, take=a.take
     )
     print(json.dumps(entry, ensure_ascii=False))
     return 0
@@ -295,6 +314,7 @@ def _ledger(a: argparse.Namespace) -> int:
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "shotplan": _shotplan,
     "takes": _takes,
+    "bench": _bench,
     "take": _take,
     "retake": _retake,
     "sheet": _sheet,

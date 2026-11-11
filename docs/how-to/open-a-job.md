@@ -20,7 +20,8 @@ The operator opens a job on their own machine, because the brief, the master, an
 4. Write the subject, the brief, and any source notes inside that job folder only.
 5. If there is a script, add `script_packet.json` with a source for every factual line.
 6. Run `python3 scripts/check.py --jobs "$KALAINOVA_HOME/jobs"`.
-7. Run `uv run kalainova make $KALAINOVA_HOME/jobs/<id>` and look at the result. Veto the hook in ten minutes. A human approves, publishes, and submits.
-8. At 48 hours, write `measure.json` and set `status` to `accepted` (funded, tracking) or `measured`.
+7. On a moving-picture profile every shot moves unless `brief.max_video_beats` asks for fewer, and `make` prints what the moving shots should cost and refuses before any call if the cap cannot hold it. To compare models on one shot first, see `docs/how-to/bench-models.md`.
+8. Run `uv run kalainova make $KALAINOVA_HOME/jobs/<id>` and look at the result. Veto the hook in ten minutes. A human approves, publishes, and submits.
+9. At 48 hours, write `measure.json` and set `status` to `accepted` (funded, tracking) or `measured`.
 
 Media files stay on disk. Never commit them.

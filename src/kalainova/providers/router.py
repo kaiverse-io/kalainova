@@ -83,6 +83,19 @@ def available(job: Job, capability: str) -> bool:
     return bool(_usable(capability, config.preference(capability, job.job))[0])
 
 
+def quote(
+    job: Job, capability: str, *, only: list[str] | None = None, **est
+) -> tuple[str, float | None] | None:
+    """What the first ready provider would charge for one call, without making it.
+
+    None when no provider is ready. The estimate is None when that provider has no price for it.
+    """
+    usable, _ = _usable(capability, only or config.preference(capability, job.job))
+    if not usable:
+        return None
+    return usable[0].name, usable[0].estimate(capability, **est)
+
+
 def _deadline(capability: str) -> float:
     return float((config.studio().get("deadlines_sec") or {}).get(capability, DEFAULT_DEADLINE_SEC))
 
