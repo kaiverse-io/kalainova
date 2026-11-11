@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .. import media
 from ..jobfs import Job
 from ..providers import router
 
@@ -35,7 +36,14 @@ def transcript(job: Job, source: Path) -> list[Word] | None:
     if not router.available(job, "transcribe"):
         return None
     try:
-        _, res = router.generate(job, "transcribe", "transcribe", source, note="transcript")
+        _, res = router.generate(
+            job,
+            "transcribe",
+            "transcribe",
+            source,
+            est={"duration": media.duration(source)},
+            note="transcript",
+        )
     except (router.ProviderError, OSError) as exc:
         print(f"{job.id}: no transcript of {source.name}: {exc}")
         return None

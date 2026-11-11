@@ -78,7 +78,14 @@ def _heard(job: Job, path: Path) -> list[dict[str, Any]] | None:
     if not router.available(job, "transcribe"):
         return None
     try:
-        _, res = router.generate(job, "transcribe", "transcribe", path, note="lyrics")
+        _, res = router.generate(
+            job,
+            "transcribe",
+            "transcribe",
+            path,
+            est={"duration": media.duration(path)},
+            note="lyrics",
+        )
     except (router.ProviderError, OSError) as exc:
         print(f"{job.id}: could not hear the lyrics: {exc}")
         return None

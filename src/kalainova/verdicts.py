@@ -17,7 +17,7 @@ from .jobfs import ContractError, Job
 
 VERDICTS_FILE = "verdicts.jsonl"
 CHOICES = ("accept", "fix", "reject")
-GOOD = {"accept", "fix"}
+GOOD = {"accept"}
 ENOUGH_OF_EACH = 3  # with fewer than this on either side, any separation is luck
 SEPARATES_AT = 0.8
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")

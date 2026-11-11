@@ -10,6 +10,7 @@ from fakes import EVERY, make_job, needs_ffmpeg
 from kalainova import media, qa, render
 from kalainova.editor import analyze, clips, direct, speech
 from kalainova.jobfs import ContractError
+from kalainova.providers import router
 
 
 def _words(*items):
@@ -232,3 +233,21 @@ def test_a_recording_with_no_words_found_falls_back_to_its_silences(tmp_path, st
     em = job.read("edit_manifest")
     assert len(em["cuts"]) == 2, "the silence detector still cuts the dead air"
     assert not em.get("closed_captions")
+
+
+@needs_ffmpeg
+def test_a_transcript_call_says_how_long_the_source_is(tmp_path, studio, monkeypatch):
+    seen = []
+    real = router.generate
+
+    def spy(job, capability, *args, **kw):
+        seen.append(kw.get("est"))
+        return real(job, capability, *args, **kw)
+
+    monkeypatch.setattr(router, "generate", spy)
+    job = make_job(tmp_path)
+    source = job.work / "talk.wav"
+    media.run(["-f", "lavfi", "-i", "sine=f=220:d=2", str(source)])
+    studio.heard = _words((0.1, 0.5, "Hello."))
+    speech.transcript(job, source)
+    assert seen[0]["duration"] == pytest.approx(2.0, abs=0.2)

@@ -220,6 +220,13 @@ def generate(
         if estimate is None and cap is not None:
             errors.append(f"{p.name}: no price for {capability}, and this job has a cost cap")
             continue
+        if not estimate and not p.free and cap is not None:
+            # A priced call that estimates to nothing would go out unseen by the cap.
+            errors.append(
+                f"{p.name}: the estimate for {capability} is zero, and this job has a cost cap; "
+                "the caller must say how much it is asking for"
+            )
+            continue
         reservation = job.reserve(p.name, capability, estimate or 0.0)
         call_args = list(args)
         attempt = None
@@ -232,7 +239,7 @@ def generate(
             res = _call(
                 getattr(p, fn_name), tuple(call_args), call_kw, None if p.self_timed else limit
             )
-        except ProviderTimeout as exc:
+        except TimeoutError as exc:  # ours, or an adapter's own wait: either may have been billed
             job.charge(
                 p.name,
                 capability,

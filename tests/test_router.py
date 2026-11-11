@@ -65,6 +65,31 @@ class Placeholder(Flaky):
     placeholder = True
 
 
+class Priced(Flaky):
+    """A paid transcriber: its price is per minute, so an estimate with no duration is zero."""
+
+    name = "priced"
+    capabilities = ("transcribe",)
+    calls = 0
+    fails = None
+
+    def transcribe(self, src, **kw):
+        type(self).calls += 1
+        return base.Result(model="priced-1", words=[], cost=1.0)
+
+
+class Impatient(Flaky):
+    """An adapter that gives up waiting on its own and raises a bare TimeoutError."""
+
+    name = "impatient"
+    calls = 0
+    fails = None
+
+    def image(self, prompt, dst, **kw):
+        type(self).calls += 1
+        raise TimeoutError("the model did not answer")
+
+
 class Hung(Flaky):
     name = "hung"
     calls = 0
@@ -81,6 +106,8 @@ PRICES = {
     "flaky": {"image": {"per_image": 1.0}, "llm": {"input_per_mtok": 1.0}},
     "backup": {"image": {"per_image": 1.0}},
     "hung": {"image": {"per_image": 1.0}},
+    "impatient": {"image": {"per_image": 1.0}},
+    "priced": {"transcribe": {"per_min": 0.5}},
 }
 
 
@@ -88,7 +115,7 @@ PRICES = {
 def providers(monkeypatch, tmp_path):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     base.names()
-    for cls in (Flaky, Backup, Placeholder, Hung):
+    for cls in (Flaky, Backup, Placeholder, Hung, Impatient, Priced):
         cls.calls = 0
         cls.fails = None
         cls.wrong_size = cls.corrupt = cls.blank = False
@@ -114,7 +141,12 @@ def job_with(tmp_path, order, cap=None):
                 "distribution_identity": "t",
                 "status": "draft",
                 "cost_cap": cap,
-                "providers": {"image": order, "video": order, "llm": order},
+                "providers": {
+                    "image": order,
+                    "video": order,
+                    "llm": order,
+                    "transcribe": order,
+                },
             }
         )
     )
@@ -295,3 +327,61 @@ def test_parallel_charges_all_reach_the_ledger(tmp_path):
         t.join()
     assert not errors
     assert job.spent() == 200.0
+
+
+def test_every_provider_on_the_preference_list_declares_the_capability():
+    from kalainova import config
+
+    base.names()
+    table = yaml_preference(config.REPO / "config" / "studio.yaml")
+    for capability, listed in table.items():
+        for name in listed:
+            assert capability in base.get(name).capabilities, (
+                f"{name} is listed for {capability} but does not declare it, "
+                "so the router would skip it"
+            )
+
+
+def yaml_preference(path):
+    import yaml
+
+    return yaml.safe_load(path.read_text())["preference"]
+
+
+def transcribe(job, **kw):
+    return router.generate(job, "transcribe", "transcribe", job.work / "a.wav", **kw)
+
+
+def test_a_capped_job_refuses_a_priced_call_that_estimates_to_zero(tmp_path):
+    job = job_with(tmp_path, ["priced"], cap=5.0)
+    with pytest.raises(router.ProviderError, match="estimate.*zero"):
+        transcribe(job)
+    assert Priced.calls == 0
+    assert job.spent() == 0
+
+
+def test_a_capped_job_makes_the_same_call_once_it_says_how_long_it_is(tmp_path):
+    job = job_with(tmp_path, ["priced"], cap=5.0)
+    assert transcribe(job, est={"duration": 120.0})[0].name == "priced"
+    assert job.spent() == 1.0
+
+
+def test_an_uncapped_job_still_makes_a_call_that_estimates_to_zero(tmp_path):
+    job = job_with(tmp_path, ["priced"], cap=None)
+    assert transcribe(job)[0].name == "priced"
+    assert Priced.calls == 1
+
+
+def test_a_free_provider_with_a_zero_estimate_is_still_used_under_a_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(Priced, "free", True)
+    job = job_with(tmp_path, ["priced"], cap=5.0)
+    assert transcribe(job)[0].name == "priced"
+    assert Priced.calls == 1
+
+
+def test_a_bare_timeout_from_an_adapter_is_charged_and_the_next_provider_is_used(tmp_path):
+    job = job_with(tmp_path, ["impatient", "backup"])
+    p, _ = image(job)
+    assert p.name == "backup"
+    assert Impatient.calls == 1
+    assert job.spent() == 2.0  # the timed-out call may have been billed
