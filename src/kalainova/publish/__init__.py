@@ -23,6 +23,8 @@ from .. import config, consistency, preproduction, streams
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
 from ..providers import base as providers
+from . import labels
+from .aggregator import upload_post as _upload_post
 
 
 def _now() -> str:
@@ -249,7 +251,9 @@ def _log(job: Job, entry: dict) -> None:
     job.write("publish_log", log)
 
 
-def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
+def publish(
+    job: Job, platform: str, *, dry_run: bool = True, publish_at: str | None = None
+) -> dict:
     stream = _stream_of(job)
     if _is_restricted(stream):
         raise ContractError(
@@ -297,13 +301,20 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
                 f"{job.id}: the stock credit would not survive {platform}'s {limit}-character caption; shorten it"
             )
     caption = caption[:limit]
+    synthetic = labels.is_synthetic(job)
+    if platform != "youtube":
+        labels.aggregator_fields(platform, synthetic)  # refuses a platform with no label field
+    when = labels.parse_publish_at(platform, publish_at)
     entry = {
         "platform": platform,
         "identity": identity,
         "at": _now(),
         "dry_run": dry_run,
         "title": appr["title"],
+        "ai_label": synthetic,
     }
+    if when:
+        entry["scheduled_for"] = when
     if dry_run:
         entry["status"] = "dry_run"
     elif final.suffix != ".mp4":
@@ -323,10 +334,14 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
                         job.work / "thumb.jpg",
                         appr.get("privacy", "public"),
                         identity if stream else None,
+                        synthetic=synthetic,
+                        publish_at=when,
                     )
                 )
             else:
-                entry.update(_upload_post(final, platform, appr["title"], caption, handle))
+                entry.update(
+                    _upload_post(final, platform, appr["title"], caption, handle, synthetic)
+                )
         except Exception as exc:
             entry.update(status="failed", error=str(exc)[:500])
             _log(job, entry)
@@ -367,7 +382,15 @@ def _youtube_token(identity: str | None = None) -> str:
 
 
 def _youtube_upload(
-    path: Path, title: str, description: str, thumb: Path, privacy: str, identity: str | None = None
+    path: Path,
+    title: str,
+    description: str,
+    thumb: Path,
+    privacy: str,
+    identity: str | None = None,
+    *,
+    synthetic: bool = True,
+    publish_at: str | None = None,
 ) -> dict:
     tok = _youtube_token(identity)
     meta = {
@@ -375,9 +398,12 @@ def _youtube_upload(
         "status": {
             "privacyStatus": privacy,
             "selfDeclaredMadeForKids": False,
-            "containsSyntheticMedia": True,
+            "containsSyntheticMedia": synthetic,
         },
     }
+    if publish_at:  # YouTube holds a private upload and makes it public at this time
+        meta["status"]["privacyStatus"] = "private"
+        meta["status"]["publishAt"] = publish_at
     init = requests.post(
         "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
         headers={
@@ -406,44 +432,6 @@ def _youtube_upload(
         if not thumb_r.ok:  # custom thumbnails need a verified channel; the upload itself stands
             pass
     return {"status": "posted", "post_id": vid, "url": f"https://youtube.com/shorts/{vid}"}
-
-
-# ------------------------------------------------------------- Upload-Post (aggregator)
-def _upload_post(
-    path: Path, platform: str, title: str, caption: str, handle: str | None = None
-) -> dict:
-    """Upload-Post REST API. Verify field names against docs.upload-post.com before first live post;
-    for TikTok, confirm the aggregator's app has passed TikTok's audit or posts land private.
-
-    The engine cannot yet set each platform's AI-content label through this aggregator, so synthetic
-    media is refused here until UPLOAD_POST_AI_LABEL_FIELD names the verified request field."""
-    label_field = os.environ.get("UPLOAD_POST_AI_LABEL_FIELD")
-    if not label_field:
-        raise ContractError(
-            "synthetic media needs an AI label; set UPLOAD_POST_AI_LABEL_FIELD after checking the aggregator docs"
-        )
-    key = os.environ.get("UPLOAD_POST_API_KEY")
-    user = handle or os.environ.get("UPLOAD_POST_USER")
-    if not key or not user:
-        raise ContractError(
-            "set UPLOAD_POST_API_KEY and UPLOAD_POST_USER (the profile name in Upload-Post)"
-        )
-    with open(path, "rb") as fh:
-        r = requests.post(
-            "https://api.upload-post.com/api/upload",
-            headers={"Authorization": f"Apikey {key}"},
-            data={
-                "user": user,
-                "platform[]": platform,
-                "title": title,
-                "description": caption,
-                label_field: "true",
-            },
-            files={"video": (path.name, fh, "video/mp4")},
-            timeout=3600,
-        )
-    r.raise_for_status()
-    return {"status": "posted", "response": r.json()}
 
 
 # ------------------------------------------------------------- Measure

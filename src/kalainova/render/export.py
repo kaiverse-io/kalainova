@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import media
+from . import cover
 from .spec import safe_path
 
 
@@ -98,19 +99,17 @@ def _write_web_file(work: Path, a: dict[str, Any], vf: list[str], af: list[str],
     return out
 
 
-def _write_thumbnail(work: Path, out: Path, thumbnail: str) -> None:
-    media.run(
-        [
-            "-ss",
-            "0.9",
-            "-i",
-            str(out),
-            "-frames:v",
-            "1",
-            "-q:v",
-            "2",
-            str(safe_path(work, thumbnail)),
-        ]
+def _write_thumbnail(work: Path, out: Path, a: dict[str, Any]) -> None:
+    """The cover: the sharpest clean frame, or the time or file the brief names."""
+    given = a.get("cover_file")
+    cover.write(
+        out,
+        safe_path(work, a["thumbnail"]),
+        safe_path(work, a["thumbnail_square"]) if a.get("thumbnail_square") else None,
+        duration=a.get("duration_sec") or 0.0,
+        edge_sec=max(a.get("fade_in_sec") or 0.0, a.get("fade_out_sec") or 0.0),
+        at=a.get("cover_at_sec"),
+        file=safe_path(work, given) if given else None,
     )
 
 
@@ -129,6 +128,6 @@ def op_export(work: Path, a: dict[str, Any]) -> None:
     if a.get("master"):
         _write_master(work, a, vf, af, note)
     if a.get("thumbnail"):
-        _write_thumbnail(work, out, a["thumbnail"])
+        _write_thumbnail(work, out, a)
     if a.get("audio_only") and a.get("audio"):
         _write_audio_only(work, a)
