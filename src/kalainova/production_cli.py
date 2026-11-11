@@ -5,7 +5,8 @@ kalainova takes <job>                            every take of every shot, and h
 kalainova take <job> <shot> <n>                  a person's choice of take
 kalainova retake <job> <shot> ["what was wrong"]  another attempt at one shot
 kalainova bench <job> <shot> --models a,b [--takes N]  one shot on several models, side by side
-kalainova sheet <job>                            first and last frame of every shot
+kalainova sheet <job> [--motion|--cuts]          first and last frame, or --motion, or --cuts
+kalainova findings <job>                         what the last look at the piece in motion found
 kalainova filmstrip <file> <start> <end>         frames over a waveform
 kalainova cutcheck <job>                         a click or a flash at any cut
 kalainova export <job> [--to fcpxml|otio|edl]    the cut for an editing system
@@ -71,7 +72,12 @@ def _shot_parsers(sub: Any) -> None:
 
 
 def _look_parsers(sub: Any) -> None:
-    sub.add_parser("sheet").add_argument("job")
+    sheet = sub.add_parser("sheet")
+    sheet.add_argument("job")
+    kind = sheet.add_mutually_exclusive_group()
+    kind.add_argument("--motion", action="store_true", help="frames across the whole of each shot")
+    kind.add_argument("--cuts", action="store_true", help="frames either side of each cut")
+    sub.add_parser("findings").add_argument("job")
     strip = sub.add_parser("filmstrip")
     strip.add_argument("file")
     strip.add_argument("start", type=float)
@@ -133,6 +139,7 @@ def _shotplan(a: argparse.Namespace) -> int:
         allow_stills=bool(brief.get("allow_stills")),
         wants_video="video" in data.get("media", []),
         limit=shots.word_limit(config.preference("video", data)),
+        character_max_sec=shots.character_ceiling(data),
     )
     for problem in found:
         print(f"[{problem['status']}] {problem['id']}: {problem['detail']}")
@@ -184,10 +191,31 @@ def _retake(a: argparse.Namespace) -> int:
 def _sheet(a: argparse.Namespace) -> int:
     job = open_job(a.job)
     em = job.read("edit_manifest")
-    dst = job.work / "shots.jpg"
-    made = timeline.shot_sheet(job.artifact(), em.get("cuts", []), em["duration_sec"], dst)
+    cuts, final = em.get("cuts", []), job.artifact()
+    if a.motion:
+        made = timeline.motion_sheet(final, cuts, em["duration_sec"], job.work / "motion.jpg")
+    elif a.cuts:
+        report = timeline.cut_report(final, cuts)
+        made = timeline.cut_sheet(final, report, job.work / "cuts.jpg")
+        for entry in report:
+            print(
+                f"cut at {entry['at_sec']}s: click x{entry['click_ratio']}, flash {entry['flash']}"
+            )
+    else:
+        made = timeline.shot_sheet(final, cuts, em["duration_sec"], job.work / "shots.jpg")
     print(made or "no picture to read")
     return 0 if made else 1
+
+
+def _findings(a: argparse.Namespace) -> int:
+    job = open_job(a.job)
+    found = takes.findings(job)
+    for item in found["shots"]:
+        print(f"{item['id']}: {', '.join(item['problems']) or 'other'}: {item['note']}")
+    for cut in found.get("cuts", []):
+        print(f"cut at {cut['at_sec']}s: {cut['note']}")
+    print(f"{len(found['shots'])} shots with findings ({found['source']})")
+    return 0
 
 
 def _filmstrip(a: argparse.Namespace) -> int:
@@ -325,6 +353,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "take": _take,
     "retake": _retake,
     "sheet": _sheet,
+    "findings": _findings,
     "filmstrip": _filmstrip,
     "cutcheck": _cutcheck,
     "export": _export,

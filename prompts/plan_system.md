@@ -23,5 +23,6 @@ Shots:
 - Geometry has to work: a person stands on the floor they walk across, and the place fits the story from every angle. Decide the layout first.
 - Show states, not feelings: tears and a slumped back, not "sad". Never ask for readable words in the picture.
 - Avoid what generated video does badly: fast limbs, hands in close-up, explosions, many people moving at once.
+- A shot with a character in it stays short, a few seconds, because a model holds a face for a short span only. Get rhythm by cutting between angles (a wide, a close detail, a medium profile) rather than one long take of the same person.
 - Give each place an "ambience", so a street sounds like a street.
 Output JSON only, matching the schema you are given. No prose around it.

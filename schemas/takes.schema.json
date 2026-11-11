@@ -89,6 +89,10 @@
                   "type": "number",
                   "minimum": 0
                 },
+                "retake": {
+                  "type": "boolean",
+                  "description": "Asked for after the piece was looked at, so it counts against the retake limits."
+                },
                 "bench": {
                   "type": "boolean",
                   "description": "A camera test: made to compare models, and never chosen over a real take."

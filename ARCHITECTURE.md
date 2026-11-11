@@ -523,7 +523,7 @@ A camera test: one shot made on several models from the same start frame, prompt
 ```
 
 ### shotmake
-One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A first run and a retake share this code, so they keep the same promise and the same record.
+One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A first run and a retake share this code, so they keep the same promise and the same record. A retake is refused past the take limits (`takes.check_retake`), and with no note it reads that shot's finding from `findings.json`.
 
 ### assets
 Script to files. Every shot of a stream job carries its references and pinned model.
@@ -559,7 +559,7 @@ A piece in another language as a job of its own: its music and effects stem unde
 The cut as files an editing system opens: FCPXML, OpenTimelineIO, and EDL.
 
 ### timeline
-Looking at a piece without playing it: the first and last frame of every shot, a filmstrip over a waveform, and a check for a click or a flash at each cut.
+Looking at a piece without playing it: the first and last frame of every shot, a motion strip of frames across each shot, a cut strip of frames either side of each join, a filmstrip over a waveform, and a check for a click or a flash at each cut.
 
 ### captions
 Word timings to captions, title and caption layout by frame shape and real font metrics, and timed-text files. Fonts are vendored in `fonts/`.
@@ -586,7 +586,7 @@ The studio bar: what "finished" means, as numbers a tool computes. Pure signals 
 Runs the automated checks before the human gate, for a rendered piece, a document, a song, or a file from an outside tool.
 
 ### qachecks
-The checks QA runs that each ask one question: a kept promise of motion, a model's licence, the layers of a mix, the plan, the cuts, and what a vision judge saw.
+The checks QA runs that each ask one question: a kept promise of motion, a model's licence, the layers of a mix, the plan, the cuts, what a vision judge saw (it is sent the shot sheet and the motion strip, and its faults are kept as findings), and burned text or a face outside a profile's safe zone.
 
 ### kitchecks
 What QA asks of a stream job: did the record keep what the lock promised, and do the frames match the kit's references.

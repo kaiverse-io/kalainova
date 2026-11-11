@@ -187,6 +187,7 @@ def take_clip(
             assess=takes.assess_clip,
             prompt=prompt,
             note=note,
+            extra={"retake": True},
         )
     else:
         takes.make_until_good(
@@ -281,6 +282,10 @@ def retake(job: Job, bid: str, note: str = "") -> Fields:
     beat = next((b for b in packet["beats"] if b["id"] == bid), None)
     if not beat:
         raise ContractError(f"{job.id}: no beat {bid}")
+    takes.check_retake(job, bid, data.get("brief") or {})
+    if not note:
+        found = takes.finding_for(job, bid)
+        note = str((found or {}).get("suggested_prompt_change") or (found or {}).get("note") or "")
     manifest = job.read("asset_manifest")
     span = next(s["end_sec"] - s["start_sec"] for s in manifest["timeline"] if s["beat_id"] == bid)
     locked = consistency.for_job(job)

@@ -33,6 +33,13 @@ CLICK_CONTEXT_SEC = 0.25
 CLICK_RATIO = 12.0  # how far a step at a cut stands above the sound around it to read as a click
 FLASH_LEVELS = 40.0  # one frame this far from both neighbours is a flash
 SILENCE_DB = -45.0
+MOTION_FRAMES = (
+    7  # frames per shot in a motion strip: enough to see a limb change, small enough to read
+)
+MOTION_PORTRAIT_WIDTH = 150
+MOTION_LANDSCAPE_WIDTH = 260
+CUT_STEP_SEC = 0.2  # how far from the join the outer frames of a cut strip sit
+CUT_GAP = 14
 
 
 def _label_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -111,6 +118,95 @@ def shot_sheet(path: Path, cuts: list[dict[str, Any]], duration: float, dst: Pat
         if label:
             draw.text((8, y + 6), label, fill=(255, 255, 255), font=font, stroke_width=2,
                       stroke_fill=(0, 0, 0))  # fmt: skip
+    sheet.save(dst, quality=85)
+    return dst
+
+
+def frame_times(start: float, end: float, frames: int) -> list[float]:
+    """Moments evenly spaced across a shot, in time order, kept off its first and last instant."""
+    inner = max(end - start - 2 * MARGIN_SEC, 0.0)
+    if frames <= 1 or inner <= 0.0:
+        return [round((start + end) / 2, 3)] * max(frames, 1)
+    lo = start + MARGIN_SEC
+    return [round(lo + inner * i / (frames - 1), 3) for i in range(frames)]
+
+
+def motion_sheet(
+    path: Path,
+    cuts: list[dict[str, Any]],
+    duration: float,
+    dst: Path,
+    *,
+    frames: int = MOTION_FRAMES,
+) -> Path | None:
+    """One row per shot with frames across its whole length, so warping and flicker show."""
+    info = media.summarize(path)
+    if "width" not in info:
+        return None
+    width = MOTION_PORTRAIT_WIDTH if info["height"] > info["width"] else MOTION_LANDSCAPE_WIDTH
+    spans = _spans(cuts, duration) or [("", 0.0, duration)]
+    rows = []
+    for label, a, b in spans:
+        found = [_frame(path, t, width) for t in frame_times(a, b, frames)]
+        if any(found):
+            rows.append((label, found))
+    if not rows:
+        return None
+    height = next(f.height for _, found in rows for f in found if f)
+    gap = 3
+    sheet = Image.new(
+        "RGB", (width * frames + gap * (frames - 1), (height + gap) * len(rows)), (0, 0, 0)
+    )
+    draw = ImageDraw.Draw(sheet)
+    font = _label_font(max(width // 10, 11))
+    for r, (label, found) in enumerate(rows):
+        y = r * (height + gap)
+        for i, frame in enumerate(found):
+            if frame:
+                sheet.paste(frame, (i * (width + gap), y))
+        if label:
+            draw.text((6, y + 4), label, fill=(255, 255, 255), font=font, stroke_width=2,
+                      stroke_fill=(0, 0, 0))  # fmt: skip
+    sheet.save(dst, quality=85)
+    return dst
+
+
+def cut_sheet(path: Path, report: list[dict[str, Any]], dst: Path) -> Path | None:
+    """One row per cut: two frames before the join and two after, with what the cut check found."""
+    info = media.summarize(path)
+    if "width" not in info or not report:
+        return None
+    rate = float(info.get("fps") or 24.0)
+    width = MOTION_PORTRAIT_WIDTH if info["height"] > info["width"] else MOTION_LANDSCAPE_WIDTH
+    rows = []
+    for entry in report:
+        at = float(entry["at_sec"])
+        offsets = (-CUT_STEP_SEC, -1.0 / rate, 0.0, CUT_STEP_SEC)
+        found = [_frame(path, at + k, width) for k in offsets]
+        if any(found):
+            rows.append((entry, found))
+    if not rows:
+        return None
+    height = next(f.height for _, found in rows for f in found if f)
+    label_h = 22
+    sheet = Image.new(
+        "RGB", (width * 4 + 3 * 3 + CUT_GAP, (height + label_h + 4) * len(rows)), (16, 16, 18)
+    )
+    draw = ImageDraw.Draw(sheet)
+    font = _label_font(14)
+    for r, (entry, found) in enumerate(rows):
+        y = r * (height + label_h + 4)
+        flagged = bool(entry.get("flagged"))
+        flags = [n for n, on in (("click", entry.get("click_ratio", 0) > CLICK_RATIO),
+                                 ("flash", entry.get("flash"))) if on]  # fmt: skip
+        text = f"cut at {entry['at_sec']:.2f}s, click x{entry.get('click_ratio', 0)}"
+        text += f", FLAGGED: {', '.join(flags)}" if flagged else ", clean"
+        color = (255, 120, 120) if flagged else (232, 232, 232)
+        draw.text((6, y + 3), text, fill=color, font=font)
+        for i, frame in enumerate(found):
+            x = i * (width + 3) + (CUT_GAP if i >= 2 else 0)
+            if frame:
+                sheet.paste(frame, (x, y + label_h))
     sheet.save(dst, quality=85)
     return dst
 

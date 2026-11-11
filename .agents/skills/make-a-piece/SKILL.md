@@ -52,7 +52,19 @@ The operator says what to make. Everything else is yours until the gate. Ask at 
 1. Run `uv run kalainova make <job>`. Read every line that is not a pass.
 2. Review with the `review-a-piece` skill, including comparing a source frame with the same moment in the final.
 3. Fix at the root and re-run from the earliest stage that changed. Use `--from assets --force` when the shots changed; drawn shots take seconds, generated ones cost money.
-4. Repeat until QA passes and your own look finds nothing you can fix. Stop after three rounds, and report what remains. Never weaken a gate, a limit, or a kit to pass.
+4. Repeat until QA passes and your own look finds nothing you can fix. Never weaken a gate, a limit, or a kit to pass.
+
+### The director loop
+
+The engine records and refuses. You direct, by looking. With no model key the judge does not run, so the looking is yours.
+
+1. Make the piece, then open `kalainova sheet <job> --motion` and `kalainova sheet <job> --cuts` (`motion.jpg`, `cuts.jpg` in the job's work folder). The `review-a-piece` skill says what to look for.
+2. Write what you found to `findings.json`, in the shape of `schemas/findings.schema.json`, and check it with `kalainova findings <job>`. One entry per shot with a fault: the shot id, what is wrong, and one sentence to add to the prompt.
+3. Retake only the shots with findings: `kalainova retake <job> <shot>`. With no note it uses that shot's suggested change.
+4. Render again from `edit`, and look again. That is one round.
+5. Stop at the first of: the engine refusing a retake (the per-shot and per-job limits are in the command, and `brief.max_retakes` is the operator's to raise), the job's cap, or two rounds. Then hand the piece over with the open findings listed.
+
+You never approve, never raise a cap or a retake limit, and never edit a kit. Findings never block approval; they inform the person who decides.
 
 ## 7. Hand over
 

@@ -155,6 +155,7 @@ def _review_the_plan(piece: _Piece) -> None:
         wants_video="video" in piece.kinds,
         style=shotmake.style(piece.data),
         limit=shots.word_limit(config.preference("video", piece.data)),
+        character_max_sec=shots.character_ceiling(piece.data),
     )
     for problem in found:
         if problem["status"] == "warn":
@@ -253,7 +254,7 @@ def _join_voice(piece: _Piece, lines: _Narration, opening_ms: int) -> None:
 
 
 def _unspoken_length(beat: Fields) -> float:
-    return float(beat.get("duration_sec") or max(2.0, len(beat["text"].split()) / 2.6))
+    return shots.beat_length(beat)
 
 
 def _make_voice(piece: _Piece) -> float:

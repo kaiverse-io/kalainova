@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/findings-0.1.json",
+  "title": "Findings",
+  "description": "What a look at a piece in motion found, shot by shot, written by the vision judge or by the agent doing the looking. A retake reads its note from here. Nothing in it blocks approval.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "source",
+    "shots"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "enum": [
+        "judge",
+        "agent"
+      ],
+      "description": "Who looked."
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Which pass of look and retake this is."
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "problems",
+          "note"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "warping",
+                "flicker",
+                "object_changes",
+                "action_missing",
+                "geometry",
+                "mismatch",
+                "other"
+              ]
+            }
+          },
+          "note": {
+            "type": "string",
+            "description": "What is wrong, in plain words."
+          },
+          "suggested_prompt_change": {
+            "type": "string",
+            "description": "What to say to the model on the retake."
+          }
+        }
+      }
+    },
+    "cuts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "at_sec",
+          "note"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "at_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
