@@ -83,6 +83,21 @@ def available(job: Job, capability: str) -> bool:
     return bool(_usable(capability, config.preference(capability, job.job))[0])
 
 
+def refuse_too_long(job: Job, capability: str, seconds: float) -> None:
+    """Before any spend: a model's stated longest output is a limit, and a longer ask is not made."""
+    first = first_usable(job, capability)
+    if not first:
+        return
+    name = first.name
+    model = config.model_for(name, capability)
+    most = config.audio_spec(name, model).get("max_sec")
+    if most and seconds > float(most):
+        raise ProviderError(
+            f"{job.id}: {model} makes at most {float(most):g}s and the piece asks for "
+            f"{seconds:g}s; shorten it or list a model that makes longer tracks"
+        )
+
+
 def first_usable(job: Job, capability: str) -> base.Provider | None:
     """The provider a call would try first, or None when none is ready."""
     usable, _ = _usable(capability, config.preference(capability, job.job))

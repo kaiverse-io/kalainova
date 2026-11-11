@@ -52,7 +52,30 @@
       "type": "boolean"
     },
     "byline": {
-      "type": "string"
+      "type": "string",
+      "description": "The artist name on release files."
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What release files carry beyond the title and byline.",
+      "properties": {
+        "album": {
+          "type": "string"
+        },
+        "year": {
+          "type": "integer",
+          "minimum": 1900
+        },
+        "track": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cover": {
+          "type": "string",
+          "description": "A square image in the job folder, at least 3000 px a side."
+        }
+      }
     },
     "sections": {
       "type": "array",

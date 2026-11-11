@@ -550,7 +550,7 @@ edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
 ```
 
 ### songs
-Lyrics to takes of a song, readings that pick among them, a master, lyric files, and a job that cuts a video to the finished track (ADR 0014).
+Lyrics to takes of a song, readings that pick among them, a master, lyric files, release files for a distributor (`render/release.py`: WAV, FLAC and MP3 with tags, cover and lyrics), optional stems through a `separate` provider, a refusal before spending when a song asks for more than the model states it can make (`router.refuse_too_long`), and a job that cuts a video to the finished track (ADR 0014).
 
 ### dub
 A piece in another language as a job of its own: its music and effects stem under new voices, and captions in the new language, with its own human gate.

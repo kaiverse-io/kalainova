@@ -15,6 +15,7 @@
 | Every shot moves by default | `kalainova make`, `shotplan` | `shots.py`, `plan.py`, `assets.py` | `tests/test_moving_by_default.py` |
 | The motion promise | `kalainova make` | `assets.py`, `shotmake.py`, `qachecks.py` | `tests/test_takes.py`, `tests/test_vendor_payloads.py` |
 | Songs | `kalainova song`, `song-video` | `songs.py`, `bar/song.py` | `tests/test_songs.py` |
+| Song release files, stems, length check | `kalainova song` | `render/release.py`, `providers/fal.py` (`separate`), `providers/router.py` (`refuse_too_long`) | `tests/test_song_release.py`, `tests/test_fal_stems.py` |
 | Scripts from a brief | `kalainova song`, `comic`, `story` | `writers.py` | `tests/test_songs.py` |
 | Research with checked quotes | `kalainova research` | `research.py`, `providers/search.py` | `tests/test_research.py` |
 | Shot sheet, filmstrip, cut check | `kalainova sheet`, `filmstrip`, `cutcheck` | `timeline.py` | `tests/test_timeline.py` |

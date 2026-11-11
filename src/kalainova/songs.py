@@ -22,6 +22,7 @@ from .bar import song as musicbar
 from .bar.readings import summarise
 from .jobfs import ContractError, Job, open_child
 from .providers import router
+from .render import release
 
 Song = dict[str, Any]
 Cue = dict[str, Any]
@@ -276,7 +277,16 @@ def _stems(job: Job, final: Path) -> dict[str, str]:
         return {}
     vocals, rest = job.work / "vocals.wav", job.work / "instrumental.wav"
     try:
-        router.generate(job, "separate", "separate", final, vocals, rest, note="stems")
+        router.generate(
+            job,
+            "separate",
+            "separate",
+            final,
+            vocals,
+            rest,
+            est={"duration": media.duration(final)},
+            note="stems",
+        )
     except (router.ProviderError, OSError) as exc:
         print(f"{job.id}: no stems: {exc}")
         return {}
@@ -290,12 +300,16 @@ def run(job: Job) -> Path:
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))
     brief = job.job.get("brief") or {}
+    router.refuse_too_long(
+        job, "song", float(song.get("duration_sec") or brief.get("duration_sec") or 120)
+    )
     take = _generate(job, song, brief)
     take_file = job.work / take["file"]
     final = _finish(job, take_file, song)
     cues, timing = timed_lines(final, song, _heard(job, take_file))
     _write_lyric_files(job, song, cues)
     stems = _stems(job, final)
+    released = release.for_job(job, song, lyrics_text(song))
     job.write(
         "asset_manifest",
         {
@@ -319,6 +333,7 @@ def run(job: Job) -> Path:
                         **takes.provider_meta(take),
                         "lyric_timing": timing,
                         **({"stems": stems} if stems else {}),
+                        "release": released,
                     },
                 }
             ],
