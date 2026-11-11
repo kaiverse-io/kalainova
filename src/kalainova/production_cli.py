@@ -17,6 +17,7 @@ kalainova clips <job> [--count 3] [--open]       short pieces from a long record
 kalainova dub <job> <language> <new id>          the piece in another language
 kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]] [--note TEXT]
 kalainova signals                                which readings predict a person's verdict
+kalainova review-set                             every verdict beside its readings
 kalainova provenance <job>                       how it was made, for whoever answers for it
 kalainova ledger <job> [--invoice AMOUNT]        estimated against what a vendor billed
 """
@@ -115,6 +116,7 @@ def _record_parsers(sub: Any) -> None:
     verdict.add_argument("--take", type=int, help="one take of the shot, such as a bench take")
     verdict.add_argument("--note", default="")
     sub.add_parser("signals")
+    sub.add_parser("review-set")
     sub.add_parser("provenance").add_argument("job")
     ledger = sub.add_parser("ledger")
     ledger.add_argument("job")
@@ -293,6 +295,11 @@ def _signals(a: argparse.Namespace) -> int:
     return 0
 
 
+def _review_set(a: argparse.Namespace) -> int:
+    print(verdicts.review_set(home() / "jobs"))
+    return 0
+
+
 def _provenance(a: argparse.Namespace) -> int:
     print(provenance.write(open_job(a.job)))
     return 0
@@ -328,6 +335,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "dub": _dub,
     "verdict": _verdict,
     "signals": _signals,
+    "review-set": _review_set,
     "provenance": _provenance,
     "ledger": _ledger,
 }

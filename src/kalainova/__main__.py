@@ -11,7 +11,7 @@
   uv run kalainova bar <job or file>   hold it to the studio bar
   uv run kalainova comic <job>         lay out and letter a comic from comic_script.json
   uv run kalainova story <job>         typeset a book and an EPUB from story.json
-  uv run kalainova providers
+  uv run kalainova providers [--check <provider> --job <job> [--capability x] [--spend]]
   uv run kalainova intake <job> <file> --record <record.json>   a finished file from an outside tool
 
 What stays the same (see `kalainova kit --help`, `stream --help`):
@@ -243,7 +243,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("story", help="typeset a book and an EPUB from story.json").add_argument("job")
     sub.add_parser("bar", help="hold a job or any file to the studio bar").add_argument("target")
-    sub.add_parser("providers")
+    pv = sub.add_parser("providers", help="what is ready; --check makes one real, paid call each")
+    pv.add_argument("--check", metavar="PROVIDER", help="prove an adapter against the live service")
+    pv.add_argument(
+        "--job", help="with --check: a job with a cost_cap, so the ledger holds the spend"
+    )
+    pv.add_argument("--capability", help="with --check: one capability only")
+    pv.add_argument("--spend", action="store_true", help="with --check: yes, make the paid calls")
     ig = sub.add_parser("ingest")
     ig.add_argument("job")
     ig.add_argument("inputs", nargs="+")
@@ -396,7 +402,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {'x' if job.has(k) else ' '} {v}")
             return 0
         if a.cmd == "providers":
-            from .providers import base
+            from .providers import base, check
+
+            if a.check:
+                return check.cli(a.check, a.job, a.capability, a.spend)
 
             for name in base.names():
                 pr = base.get(name)

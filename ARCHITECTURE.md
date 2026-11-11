@@ -219,6 +219,8 @@ flowchart LR
 
 A bug in an adapter is raised and does not count as a provider failure. Only listed providers are tried. `local` is listed in `config/studio.yaml`, so a run with no keys still works, and `approve` refuses what it makes.
 
+`providers/check.py` is not on that path. `kalainova providers --check --spend` calls it by hand: it sends one smallest call per capability through `router.generate` under a job's cost cap, so the ledger records it, and reports reached, schema matched, and charge against estimate. It refuses under automation and never runs in CI or the tests.
+
 ## Sequence: one piece
 
 ```mermaid
@@ -457,7 +459,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ dub ───────▶ captions, media, plan, prompts, render, config, providers
     ├─▶ nle: the cut as timeline files, from the job folder alone
     ├─▶ provenance ▶ blobstore, takes, verdicts, config
-    ├─▶ verdicts: a person's words, from the job folder alone
+    ├─▶ verdicts ──▶ bar, media, jobfs
     ├─▶ publish ───▶ blobstore, consistency, streams, stock
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
     ├─▶ intake ────▶ media, render
@@ -590,7 +592,7 @@ The checks QA runs that each ask one question: a kept promise of motion, a model
 What QA asks of a stream job: did the record keep what the lock promised, and do the frames match the kit's references.
 
 ### verdicts
-What a person said about a piece, and which readings predict it. It cannot approve or publish anything.
+What a person said about a piece or one shot, and which readings predict it. `review-set` lists each verdict beside its readings, including a shot's own source clip, and says "not enough yet" below three of each side. It reads the bar's `generated_shot_motion` and cannot approve or publish anything.
 
 ### provenance
 How a piece was made, for whoever answers for it: each asset's model, weights, seed, terms, and hash.
