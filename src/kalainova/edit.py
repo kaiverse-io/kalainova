@@ -85,6 +85,25 @@ def frame_rate_for(profile_fps: float, sources: list[float]) -> float:
     return profile_fps
 
 
+def _caption_style(opts: dict, data: dict, studio: bool, mezzanine: bool) -> str:
+    """Film profiles burn nothing. A brief that asks for kinetic captions gets them drawn."""
+    if mezzanine:
+        return "none"
+    if "caption_style" in opts:
+        return str(opts["caption_style"])
+    if (data.get("brief") or {}).get("captions") == "kinetic":
+        return "drawn"
+    return "studio" if studio else "kinetic"
+
+
+def _zone(prof: dict, opts: dict, data: dict) -> dict:
+    """The profile's safe zone, carried into the manifest only when drawn captions will read it."""
+    style = _caption_style(
+        opts, data, opts.get("theme", "studio") == "studio", prof.get("delivery") == "mezzanine"
+    )
+    return {"safe_zone": prof["safe_zone"]} if style == "drawn" and prof.get("safe_zone") else {}
+
+
 def run(job: Job, *, force: bool = False) -> dict:
     cut_from = hashlib.sha256(job.path("asset_manifest").read_bytes()).hexdigest()
     if job.has("edit_manifest") and not force:
@@ -221,12 +240,11 @@ def run(job: Job, *, force: bool = False) -> dict:
             "target_lufs": float(prof.get("target_lufs", -14)),
             "true_peak_dbtp_max": float(prof.get("true_peak_dbtp_max", -1)),
             "delivery": prof.get("delivery", "web"),
+            **_zone(prof, opts, data),
         },
         "theme": theme,
         "transition": opts.get("transition", "cut"),
-        "caption_style": "none"
-        if mezzanine
-        else opts.get("caption_style", "studio" if studio else "kinetic"),
+        "caption_style": _caption_style(opts, data, studio, mezzanine),
         "cuts": cuts,
         "captions": captions,
         "closed_captions": closed,

@@ -29,12 +29,14 @@ class HyperFrames(Provider):
     def graphics(self, folder: Path, dst: Path, **kw: Any) -> Result:
         npx = shutil.which("npx") or "npx"
         render_format = FORMATS.get(dst.suffix.lower(), "mp4")
+        rate = ["--fps", f"{float(kw['fps']):g}"] if kw.get("fps") else []
         # an argument list built here, never a shell string
         proc = subprocess.run(  # noqa: S603
             [
                 npx, "--yes", "hyperframes", "render",
                 "--format", render_format,
                 "--output", str(dst.resolve()),
+                *rate,
             ],
             cwd=folder,
             capture_output=True,

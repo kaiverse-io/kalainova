@@ -181,6 +181,28 @@ def _caption_anchors(path: Path) -> list[float]:
     ]
 
 
+def _drawn_caption_check(path: Path, zone: Fields) -> list[Fields]:
+    """Drawn caption boxes against the band and the right margin they were laid out for."""
+    if not path.exists():
+        return []
+    boxes = json.loads(path.read_text()).get("boxes") or []
+    low, high = zone["caption_y"]
+    floor = float(zone.get("caption_floor", high))
+    edge = 1 - float(zone["right_margin"])
+    off = [
+        b
+        for b in boxes
+        if b["top"] < low - 0.005 or b["bottom"] > floor + 0.005 or b["right"] > edge + 0.005
+    ]
+    detail = (
+        f"{len(off)} of {len(boxes)} drawn caption cards leave the band {low}-{high}"
+        f" or the right margin, where interface overlays cover them"
+        if off
+        else "drawn captions sit in the band and margin the interface overlays leave clear"
+    )
+    return [{"id": "safe_zone.drawn", "status": "warn" if off else "pass", "detail": detail}]
+
+
 def safe_zone_checks(job: Job, profile: str) -> list[Fields]:
     """Burned text, and a face where a detector has recorded one, against the interface overlays a
     short vertical player puts over the frame. Warns only."""
@@ -203,6 +225,7 @@ def safe_zone_checks(job: Job, profile: str) -> list[Fields]:
         out.append(
             {"id": "safe_zone.captions", "status": "warn" if off else "pass", "detail": detail}
         )
+    out.extend(_drawn_caption_check(job.work / "captions.drawn.json", zone))
     faces = job.work / "face_centres.json"
     if faces.exists():
         centres = json.loads(faces.read_text())

@@ -244,19 +244,20 @@ def _caption_steps(em: dict[str, Any], picture: str) -> tuple[list[Step], str]:
     if not em.get("captions"):
         return steps, picture
     style = em.get("caption_style", "kinetic")
-    steps.append(
-        {
-            "op": "burn_captions",
-            "args": {
-                "input": picture,
-                "out": "picture.cap.mp4",
-                "width": prof["width"],
-                "height": prof["height"],
-                "style": style if style != "none" else "plain",
-                "captions": em["captions"],
-            },
-        }
-    )
+    args: dict[str, Any] = {
+        "input": picture,
+        "out": "picture.cap.mp4",
+        "width": prof["width"],
+        "height": prof["height"],
+        "style": style if style != "none" else "plain",
+        "captions": em["captions"],
+    }
+    if style == "drawn":
+        zone = prof.get("safe_zone") or {}
+        args["fps"] = prof["fps"]
+        if zone:
+            args["zone"] = [*zone["caption_y"], zone["right_margin"]]
+    steps.append({"op": "burn_captions", "args": args})
     return steps, "picture.cap.mp4"
 
 

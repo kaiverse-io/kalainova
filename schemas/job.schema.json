@@ -117,6 +117,10 @@
       "description": "Operator intent. The subject lives here, only in the job folder.",
       "additionalProperties": true,
       "properties": {
+        "captions": {
+          "enum": ["kinetic"],
+          "description": "kinetic: word-timed captions drawn as a transparent layer by the graphics provider, inside the profile's safe_zone. Absent: the engine's own caption style. Film profiles burn nothing either way."
+        },
         "subject": {
           "type": "string"
         },
