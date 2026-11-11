@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import config, consistency, media, shotmake, shots, soundbed, takes
+from . import config, consistency, media, preproduction, shotmake, shots, soundbed, takes
 from .jobfs import ContractError, Job
 from .providers import router
 
@@ -51,6 +51,7 @@ class _Piece:
     timeline: list[Fields] = field(default_factory=list)
     breaks: list[Fields] = field(default_factory=list)
     kit_voices: dict[str, str] = field(default_factory=dict)
+    sketch: list[Fields] = field(default_factory=list)
 
     @property
     def has_sound(self) -> bool:
@@ -88,45 +89,9 @@ def _open_piece(job: Job, force: bool) -> _Piece:
     )
 
 
-def _moving_cost(piece: _Piece) -> float | None:
-    """What the moving shots should cost at the takes always made, or None if unpriced."""
-    moving = [
-        b
-        for b in piece.packet["beats"]
-        if b.get("visual_kind") == "video" and not b.get("graphics")
-    ]
-    if not moving or "video" not in piece.kinds:
-        return 0.0
-    always, _ = takes.counts(piece.brief)
-    total = 0.0
-    for beat in moving[: max(piece.video_budget, 0)]:
-        quote = router.quote(
-            piece.job,
-            "video",
-            duration=_unspoken_length(beat),
-            image=True,
-            references=bool(piece.resolved),
-        )
-        if quote is None or quote[1] is None:
-            return None
-        total += quote[1] * always
-        if beat.get("on_camera"):
-            sync = router.quote(piece.job, "lipsync", duration=_unspoken_length(beat))
-            if sync is not None and sync[1] is None:
-                return None
-            total += sync[1] if sync and sync[1] else 0.0
-        kw = shotmake.shot_kw(piece.resolved, piece.lock, "video", beat)
-        if shotmake.end_frame_used(piece.job, beat, kw):
-            end = router.quote(piece.job, "image")
-            if end is None or end[1] is None:
-                return None
-            total += end[1]
-    return total
-
-
 def _refuse_over_the_cap(piece: _Piece) -> None:
     """Say what the moving shots cost, and refuse before any spend if the cap cannot hold it."""
-    cost = _moving_cost(piece)
+    cost = preproduction.total_of(preproduction.moving_quotes(piece))
     if cost is None:
         return
     cap = piece.data.get("cost_cap")
@@ -146,7 +111,7 @@ def _refuse_over_the_cap(piece: _Piece) -> None:
         )
 
 
-def _review_the_plan(piece: _Piece) -> None:
+def _review_the_plan(piece: _Piece, *, hold_to_the_cap: bool = True) -> None:
     """Warn about what can be made badly, and refuse what cannot be made, before any spend."""
     found = shots.review(
         piece.packet,
@@ -164,7 +129,8 @@ def _review_the_plan(piece: _Piece) -> None:
         raise ContractError(
             f"{piece.job.id}: the plan cannot be made as written: " + "; ".join(refused)
         )
-    _refuse_over_the_cap(piece)
+    if hold_to_the_cap:
+        _refuse_over_the_cap(piece)
 
 
 # ------------------------------------------------------------------ voice
@@ -252,8 +218,7 @@ def _join_voice(piece: _Piece, lines: _Narration, opening_ms: int) -> None:
     )
 
 
-def _unspoken_length(beat: Fields) -> float:
-    return float(beat.get("duration_sec") or max(2.0, len(beat["text"].split()) / 2.6))
+_unspoken_length = preproduction.estimated_length
 
 
 def _make_voice(piece: _Piece) -> float:
@@ -423,6 +388,50 @@ def _make_pictures(piece: _Piece) -> None:
         previous = _moving_shot(piece, beat, still, prompt, span)
 
 
+def _sketch_pictures(piece: _Piece) -> None:
+    """The animatic's pictures: each shot's first frame, made once for the full run to reuse.
+
+    No clip is asked for. A shot that carries on from the one before holds that shot's frame, since
+    the frame it will really start on does not exist until the clip does. A drawn card comes later.
+    """
+    held: str | None = None
+    for i, beat in enumerate(piece.packet["beats"]):
+        row: Fields = {"beat_id": beat["id"]}
+        piece.sketch.append(row)
+        if not piece.kinds & {"video", "still"} or beat.get("graphics"):
+            held = None
+            continue
+        if beat.get("continues") and held:
+            row["still"] = held
+            continue
+        prompt = shotmake.picture_prompt(piece.resolved, piece.packet, beat, piece.data)
+        _new_still(piece, i, beat, prompt, piece.job.work / "beats" / f"{beat['id']}.still.png")
+        held = row["still"] = f"beats/{beat['id']}.still.png"
+
+
+def _run_animatic(job: Job, force: bool) -> Fields:
+    """Voice and stills, and the price of the video still to come. Writes no asset manifest."""
+    (job.work / "beats").mkdir(exist_ok=True)
+    piece = _open_piece(job, force)
+    beats = piece.packet["beats"]
+    _review_the_plan(piece, hold_to_the_cap=False)
+    if piece.resolved:
+        consistency.check_script(job, piece.resolved, piece.packet, piece.lock.get("cast", []))
+    total = _make_voice(piece)
+    _sketch_pictures(piece)
+    if piece.has_sound and piece.brief.get("track"):
+        soundbed.track_from_job(job, piece.brief["track"], total, piece.add, piece.data)
+    return {
+        "beats": beats,
+        "timeline": piece.timeline,
+        "shots": piece.sketch,
+        "sound": [a["path"] for a in piece.assets if a.get("role") in ("voice", "music")],
+        "total": total,
+        "quotes": preproduction.moving_quotes(piece, [piece.span(i) for i in range(len(beats))]),
+        "profile": piece.prof,
+    }
+
+
 # ------------------------------------------------------------------ sound
 def _make_places(piece: _Piece) -> None:
     if not piece.has_sound:
@@ -469,10 +478,14 @@ def _write_manifest(piece: _Piece, total: float) -> Fields:
     return manifest
 
 
-def run(job: Job, *, force: bool = False) -> Fields:
+def run(job: Job, *, force: bool = False, animatic: bool = False) -> Fields:
+    """Make the assets. With animatic, only the voice and the stills, and no video is asked for."""
+    if animatic:
+        return _run_animatic(job, force)
     if job.has("asset_manifest") and not force:
         found: Fields = job.read("asset_manifest")
         return found
+    preproduction.require_review(job)
     (job.work / "beats").mkdir(exist_ok=True)
     if force:
         takes.forget(job)

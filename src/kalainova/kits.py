@@ -184,7 +184,11 @@ def load(root: Path, kit_id: str, version: int) -> Kit:
     """A frozen version, refused if it was edited after freezing."""
     path = _dir(root, kit_id) / f"v{version}" / "kit.json"
     if not path.exists():
-        raise ContractError(f"kit {kit_id}@{version} does not exist")
+        raise ContractError(
+            f"kit {kit_id}@{version} does not exist. A character is drafted, looked at on a sheet "
+            f"(`kalainova look {kit_id}`), picked from by a person, and frozen by a person "
+            f"(`kalainova kit freeze {kit_id} --by NAME`); a stream pins only a frozen version"
+        )
     kit: Kit = json.loads(path.read_text())
     validate("kit", kit, str(path))
     bad = kitrules.frozen_problems(kit)

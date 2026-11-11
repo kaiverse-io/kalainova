@@ -19,7 +19,7 @@ from pathlib import Path
 
 import requests
 
-from .. import config, consistency, streams
+from .. import config, consistency, preproduction, streams
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
 from ..providers import base as providers
@@ -203,6 +203,7 @@ def approve(
     if not reviewer.strip():
         raise ContractError(f"{job.id}: approval needs the reviewer's name")
     final = job.artifact()
+    preproduction.refuse_animatic(job, final)
     _qa_bound(job, final)
     _not_placeholder(job)
     stream = _stream_of(job)
@@ -258,6 +259,7 @@ def publish(job: Job, platform: str, *, dry_run: bool = True) -> dict:
     if platform not in appr["platforms"]:
         raise ContractError(f"{job.id}: {platform} not in approved platforms {appr['platforms']}")
     final = job.artifact()
+    preproduction.refuse_animatic(job, final)
     if sha256_file(final) != appr["artifact_sha256"]:
         raise ContractError(
             f"{job.id}: {final.name} changed after approval; re-run QA and approval"

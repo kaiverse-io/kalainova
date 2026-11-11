@@ -9,6 +9,8 @@
 |---|---|---|---|
 | Make a generated piece | `kalainova make` | `assets.py`, `edit.py`, `render/` | `tests/test_engine.py` |
 | Free the disk a render used | `kalainova clean [--dry-run]` | `render/cache.py` | `tests/test_rendercache.py` |
+| Rough cut before video is paid for, and a gate on video | `kalainova animatic`, `verdict --animatic`, `brief.animatic_gate` | `preproduction.py`, `assets.py`, `verdicts.py`, `publish/__init__.py` | `tests/test_preproduction.py` |
+| Look sheet for a kit's candidate references | `kalainova look` | `lookdev.py`, `studio_cli.py` | `tests/test_preproduction.py` |
 | Plan review before spending | `kalainova shotplan` | `shots.py` | `tests/test_shots.py` |
 | Takes and retakes | `kalainova takes`, `take`, `retake` | `takes.py`, `shotmake.py` | `tests/test_takes.py` |
 | Compare models on one shot | `kalainova bench`, `verdict --take` | `bench.py`, `takes.py`, `timeline.py`, `verdicts.py` | `tests/test_bench.py` |

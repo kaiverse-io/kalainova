@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/animatic-0.1.json",
+  "title": "Animatic",
+  "description": "A rough cut of stills and temporary sound, made before any video is paid for. It is a sketch for review and can never be approved or published.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "is_animatic",
+    "built_at",
+    "file",
+    "sha256",
+    "duration_sec",
+    "shots"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "is_animatic": {
+      "const": true
+    },
+    "built_at": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string",
+      "pattern": "^animatic"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "duration_sec": {
+      "type": "number",
+      "minimum": 0
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "beat_id",
+          "start_sec",
+          "end_sec",
+          "moves"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": {
+            "type": "string"
+          },
+          "still": {
+            "type": "string",
+            "description": "The first frame the full run reuses, relative to the job's work folder."
+          },
+          "start_sec": {
+            "type": "number"
+          },
+          "end_sec": {
+            "type": "number"
+          },
+          "moves": {
+            "type": "boolean",
+            "description": "Asked to move, so a clip is still to be paid for."
+          },
+          "estimate_usd": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "unpriced_shots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "video_estimate_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "cost_cap": {
+      "type": "number"
+    },
+    "committed_usd": {
+      "type": "number",
+      "minimum": 0
+    }
+  }
+}

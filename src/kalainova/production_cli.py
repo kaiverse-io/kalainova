@@ -1,5 +1,6 @@
 """CLI for making and judging a piece shot by shot.
 
+kalainova animatic <job>                         a rough cut, before any video is paid for
 kalainova shotplan <job>                         what is wrong with the plan, before any spend
 kalainova takes <job>                            every take of every shot, and how each read
 kalainova take <job> <shot> <n>                  a person's choice of take
@@ -15,7 +16,7 @@ kalainova research <job> "question" [--query q]  sources, snapshots, checked fin
 kalainova research <job> --check                 hold written findings to their sources
 kalainova clips <job> [--count 3] [--open]       short pieces from a long recording
 kalainova dub <job> <language> <new id>          the piece in another language
-kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]] [--note TEXT]
+kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]|--animatic]
 kalainova signals                                which readings predict a person's verdict
 kalainova review-set                             every verdict beside its readings
 kalainova provenance <job>                       how it was made, for whoever answers for it
@@ -31,8 +32,10 @@ from pathlib import Path
 from typing import Any
 
 from . import (
+    assets,
     config,
     nle,
+    preproduction,
     provenance,
     qa,
     research,
@@ -47,6 +50,7 @@ from .jobfs import ContractError, Job, home, open_job
 
 def add_parsers(sub: Any) -> None:
     _shot_parsers(sub)
+    sub.add_parser("animatic", help="a rough cut, before any video is paid for").add_argument("job")
     _look_parsers(sub)
     _make_parsers(sub)
     _record_parsers(sub)
@@ -114,6 +118,7 @@ def _record_parsers(sub: Any) -> None:
     verdict.add_argument("--reviewer", required=True)
     verdict.add_argument("--shot")
     verdict.add_argument("--take", type=int, help="one take of the shot, such as a bench take")
+    verdict.add_argument("--animatic", action="store_true", help="on the rough cut as a whole")
     verdict.add_argument("--note", default="")
     sub.add_parser("signals")
     sub.add_parser("review-set")
@@ -276,9 +281,28 @@ def _dub(a: argparse.Namespace) -> int:
     return _print_qa(child, child.artifact())
 
 
+def _animatic(a: argparse.Namespace) -> int:
+    job = open_job(a.job)
+    made = assets.run(job, animatic=True)
+    record = preproduction.write_record(job, made, preproduction.render(job, made))
+    print(job.work / record["file"])
+    for line in preproduction.cost_lines(record, job.job.get("cost_cap"), job.committed()):
+        print(line)
+    print(
+        f"watch it, then: kalainova verdict {job.id} accept|fix|reject --animatic --reviewer NAME"
+    )
+    return 0
+
+
 def _verdict(a: argparse.Namespace) -> int:
     entry = verdicts.record(
-        open_job(a.job), a.verdict, reviewer=a.reviewer, shot=a.shot, note=a.note, take=a.take
+        open_job(a.job),
+        a.verdict,
+        reviewer=a.reviewer,
+        shot=a.shot,
+        note=a.note,
+        take=a.take,
+        animatic=a.animatic,
     )
     print(json.dumps(entry, ensure_ascii=False))
     return 0
@@ -319,6 +343,7 @@ def _ledger(a: argparse.Namespace) -> int:
 
 
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
+    "animatic": _animatic,
     "shotplan": _shotplan,
     "takes": _takes,
     "bench": _bench,
