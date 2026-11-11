@@ -15,16 +15,25 @@ from pathlib import Path
 from typing import Any
 
 CACHE_FILE = ".render_cache.json"
-OUTPUT_KEYS = {"out", "audio_out", "thumbnail", "audio_only", "master", "delivery"}
+OUTPUT_KEYS = {
+    "out",
+    "audio_out",
+    "thumbnail",
+    "thumbnail_square",
+    "audio_only",
+    "master",
+    "delivery",
+}
 INPUT_LIST_KEYS = {"inputs", "audio_inputs"}
 INPUT_ENTRY_KEYS = {"sfx", "ambience"}
-INPUT_KEYS = {"source", "input", "video", "audio", "voice", "music"}
+INPUT_KEYS = {"source", "input", "video", "audio", "voice", "music", "cover_file"}
 ENGINE_FILES = (
     "render/__init__.py",
     "render/spec.py",
     "render/picture.py",
     "render/sound.py",
     "render/export.py",
+    "render/cover.py",
     "render/cache.py",
     "bar/sound.py",  # the mix sets music against the voice with this measure
     "media.py",

@@ -57,6 +57,12 @@
           "title": {
             "type": "string"
           },
+          "ai_label": {
+            "type": "boolean"
+          },
+          "scheduled_for": {
+            "type": "string"
+          },
           "response": {},
           "error": {
             "type": "string"

@@ -229,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     pb.add_argument("job")
     pb.add_argument("platform")
     pb.add_argument("--live", action="store_true")
+    pb.add_argument("--at", default=None, help="UTC time to go public; platforms that can hold it")
     ms = sub.add_parser("measure")
     ms.add_argument("job")
     ms.add_argument(
@@ -387,7 +388,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if a.cmd == "publish":
             print(
-                json.dumps(pub.publish(open_job(a.job), a.platform, dry_run=not a.live), indent=2)
+                json.dumps(
+                    pub.publish(open_job(a.job), a.platform, dry_run=not a.live, publish_at=a.at),
+                    indent=2,
+                )
             )
             return 0
         if a.cmd == "measure":
