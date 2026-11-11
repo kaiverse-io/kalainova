@@ -219,5 +219,11 @@ def measure_job(work: Path, em: dict[str, Any], am: dict[str, Any]) -> dict[str,
     readings += [asdict(r) for r in sources.stem_readings(work)]
     master = work / "final.master.mov"
     if master.exists():
-        readings += measure_master(master, target_fps=float(em["profile"]["fps"]))
+        prof = em["profile"]
+        readings += measure_master(
+            master,
+            target_fps=float(prof["fps"]),
+            target_lufs=float(prof["target_lufs"]),
+            true_peak_dbtp_max=float(prof["true_peak_dbtp_max"]),
+        )
     return summarise(readings)

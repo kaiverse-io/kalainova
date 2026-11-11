@@ -92,6 +92,9 @@ prices:
 
 # What each model's terms allow, so a piece's record can say so. A summary, and it can go out of date:
 # a human reads the terms before release. Unknown models warn at QA.
+# retention is optional: what the vendor does with the inputs it is sent (kept, used for training, how
+# long). Fill it only from the vendor's current terms, and leave "unknown" until someone has read them.
+# Models on this machine send nothing out.
 licences:
   mac:
     mlx-community/Kokoro-82M-bf16: {name: Apache-2.0, commercial: true}
@@ -109,15 +112,15 @@ licences:
       commercial: true
       obligations: ["A commercial product must display MiniMax-Music3 prominently", "Written authorisation above $20M yearly revenue"]
   spaces:
-    "*": {name: hosted app, commercial: false, obligations: ["Read the terms of the app and of the model it runs before releasing anything"]}
+    "*": {name: hosted app, commercial: false, retention: unknown, obligations: ["Read the terms of the app and of the model it runs before releasing anything"]}
   elevenlabs:
-    "*": {name: vendor terms, commercial: true, obligations: ["Confirm your plan allows commercial use"]}
+    "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm your plan allows commercial use"]}
   fal:
-    "*": {name: vendor terms, commercial: true, obligations: ["Confirm the model's own terms on fal"]}
+    "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm the model's own terms on fal"]}
   anthropic:
-    "*": {name: vendor terms, commercial: true}
+    "*": {name: vendor terms, commercial: true, retention: unknown}
   hyperframes:
-    "*": {name: Apache-2.0, commercial: true}
+    "*": {name: Apache-2.0, commercial: true, retention: "none: renders on this machine"}
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
 takes:
@@ -193,8 +196,7 @@ bar:
   moving_share_min: 0.6
   shot_motion_min: 0.05            # share of a generated clip that moves, with the camera's pan and zoom taken out
   duplicate_share_max: 0.0
-  master_integrated_lkfs_max: -18
-  master_true_peak_dbtp_max: -1
+  master_lufs_tolerance: 1.0       # how far a master's integrated loudness may sit from its profile's target
   cambi_peak_max: 8.0              # the CAMBI banding index; about 5 reads as slightly annoying
   # Songs. Candidates until enough songs carry a human verdict, so they warn and never block.
   song_tempo_tolerance: 0.10       # how far the detected tempo may sit from the one asked for
