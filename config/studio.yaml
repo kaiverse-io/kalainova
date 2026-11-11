@@ -189,10 +189,12 @@ video_models:
     alibaba/wan-3.0-prime/text-to-video: *wan
     fal-ai/kling-video/v3/pro/image-to-video:
       image_param: start_image_url
+      end_image_param: end_image_url   # VERIFY against the live schema; one page lists tail_image_url
       durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
       extra: {generate_audio: false}
     bytedance/seedance-2.5/image-to-video:
       image_param: image_url
+      end_image_param: end_image_url   # VERIFY against the live schema
       durations: "4,5,6,8,10,12,15"
       extra: {generate_audio: false}
 

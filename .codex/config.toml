@@ -23,5 +23,7 @@
 # project-local config." A repo can never pre-trust itself — same shape as Claude
 # Code's permissions.allow needing the workspace-trust dialog accepted first.
 # Stamping this file is necessary, never sufficient.
-approval_policy = "untrusted"
+# approval_policy = "untrusted" was removed: newer Codex releases refuse to start with it
+# ("no longer supported; remove this setting"). Codex now uses its own default, which asks
+# before anything outside the sandbox. sandbox_mode below still pins the filesystem scope.
 sandbox_mode = "workspace-write"

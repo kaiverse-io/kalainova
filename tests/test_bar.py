@@ -331,7 +331,9 @@ def test_only_the_part_of_a_clip_the_edit_uses_is_read(tmp_path):
     am = {"assets": [{"id": "c", "kind": "video", "path": "clip.mp4", "synthetic": True}]}
 
     def read(**cut) -> float:
-        return bar.sources._generated_shots(tmp_path, {"cuts": [{"source": "c", **cut}]}, am)["c"]
+        return bar.sources.generated_shot_motion(tmp_path, {"cuts": [{"source": "c", **cut}]}, am)[
+            "c"
+        ]
 
     # compared with each other, because an encoder build moves the moving part's reading
     whole_clip = read()

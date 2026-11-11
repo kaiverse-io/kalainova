@@ -27,12 +27,6 @@ def _pause(text: str) -> float:
     return PAUSE_AFTER.get(text.rstrip()[-1:], PAUSE_DEFAULT)
 
 
-def _placeholder_run(data: Fields) -> bool:
-    """No real model would make the pictures, so nothing here can be approved anyway."""
-    usable, _ = router._usable("image", config.preference("image", data))
-    return bool(usable) and usable[0].placeholder
-
-
 def _can_narrate(brief: Fields) -> bool:
     return brief.get("narration", True) is not False
 
@@ -89,7 +83,7 @@ def _open_piece(job: Job, force: bool) -> _Piece:
         kinds=set(data.get("media", [])),
         resolved=resolved,
         lock=lock,
-        allow_stills=bool(brief.get("allow_stills")) or _placeholder_run(data),
+        allow_stills=bool(brief.get("allow_stills")),
         video_budget=shots.video_budget(data),
     )
 
@@ -116,6 +110,17 @@ def _moving_cost(piece: _Piece) -> float | None:
         if quote is None or quote[1] is None:
             return None
         total += quote[1] * always
+        if beat.get("on_camera"):
+            sync = router.quote(piece.job, "lipsync", duration=_unspoken_length(beat))
+            if sync is not None and sync[1] is None:
+                return None
+            total += sync[1] if sync and sync[1] else 0.0
+        kw = shotmake.shot_kw(piece.resolved, piece.lock, "video", beat)
+        if shotmake.end_frame_used(piece.job, beat, kw):
+            end = router.quote(piece.job, "image")
+            if end is None or end[1] is None:
+                return None
+            total += end[1]
     return total
 
 
@@ -345,6 +350,10 @@ def _film_shot(
         clip,
     )
     piece.video_budget -= 1
+    broken = shotmake.motion_break(piece.job, beat["id"], take, piece.allow_stills)
+    if broken:
+        piece.breaks.append(broken)
+        print(f"{piece.job.id}: {beat['id']}: {broken['reason']}", file=sys.stderr)
     synced = (
         shotmake.lip_sync(piece.job, beat, clip, span, piece.gen) if beat.get("on_camera") else None
     )
@@ -361,6 +370,7 @@ def _film_shot(
         provenance={
             **(shotmake.kit_refs(kw) or {}),
             **takes.provider_meta(take),
+            **({"end_frame": take["end_frame"]} if take.get("end_frame") else {}),
             **(synced or {}),
         },
         prompt=take.get("prompt"),

@@ -86,6 +86,12 @@ class Fal(Provider):
             request = {**request, "model": model_for("fal", capability)}
         return super().estimate(capability, **request)
 
+    def takes_end_image(self, capability: str, model: str | None = None) -> bool:
+        if capability != "video":
+            return False
+        spec = video_spec("fal", model or model_for("fal", "image_to_video"))
+        return bool(spec.get("end_image_param"))
+
     def reference_support(self, capability: str, model: str) -> Fields:
         return reference_spec("fal", capability, model)
 
@@ -229,12 +235,16 @@ class Fal(Provider):
         payload.update(spec.get("extra", {}))
         if image and not refs:
             payload[spec.get("image_param", "image_url")] = self._upload(image)
+        end = kw.get("end_image")
+        end_used = bool(end and not refs and spec.get("end_image_param"))
+        if end is not None and end_used:
+            payload[spec["end_image_param"]] = self._upload(end)
         if seed is not None:
             payload["seed"] = seed
         data = self._run(model, payload, timeout=1800)
         cost = billed * price_for("fal", key, model).get("per_sec", 0)
         self._fetch(data["video"]["url"], dst, cost)
-        meta = {"billed_sec": billed, **_seed_of(data, seed)}
+        meta = {"billed_sec": billed, "end_frame_sent": end_used, **_seed_of(data, seed)}
         return Result(path=dst, cost=cost, model=model, meta=meta)
 
     def lipsync(self, video: Path, audio: Path, dst: Path, **kw: Any) -> Result:
