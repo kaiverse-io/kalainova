@@ -306,7 +306,7 @@ def check_approval(path: Path, data: dict) -> None:
     if qa.get("passed") is not True:
         fail(f"{rel(path)}: approval exists but qa.json did not pass")
     hashes = qa.get("artifacts_sha256") or {}
-    checked = hashes.get("video") or hashes.get("audio")
+    checked = hashes.get("video") or hashes.get("audio") or hashes.get("document")
     if checked != data.get("artifact_sha256"):
         fail(f"{rel(path)}: approved sha256 is not the file QA checked")
     manifest_path = path.parent / "asset_manifest.json"
@@ -334,6 +334,8 @@ def check_approval(path: Path, data: dict) -> None:
         or stamp.get("artifact_sha256") != checked
     ):
         fail(f"{rel(path)}: approved file was not rendered from this asset_manifest.json")
+    if stamp.get("master_sha256") != data.get("master_sha256"):
+        fail(f"{rel(path)}: approval does not cover the master the render stamp names")
 
 
 # ------------------------------------------------------------------ kits and streams

@@ -73,6 +73,8 @@ uv run kalainova approve jobs/<id> --reviewer <you> --platforms youtube
 uv run kalainova publish jobs/<id> youtube --live
 ```
 
+`approve` refuses an empty reviewer name, a placeholder, and a manifest that names a provider or model the router never called (`generations.jsonl` is the router's record). It also refuses a model whose terms do not allow commercial use, unless the job's brief sets `draft` for a piece that will not be released.
+
 The job records exact kit versions in `kit.lock.json`. If a reference changes on disk, or a kit version is edited, the engine stops.
 
 ## 5. Keep the story straight

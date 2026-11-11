@@ -19,9 +19,10 @@ from pathlib import Path
 
 import requests
 
-from .. import consistency, streams
+from .. import config, consistency, streams
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
+from ..providers import base as providers
 
 
 def _now() -> str:
@@ -79,6 +80,62 @@ def placeholder_assets(manifest: dict) -> list[str]:
     ]
 
 
+# Provenance labels for files that no model made. They have no generation row and no licence row.
+_NOT_A_MODEL = {"operator", "kit", "chained", "clip", "track"}
+
+
+def _is_placeholder_provider(name: str) -> bool:
+    """The provider class says its output is not a result, whatever the model string claims."""
+    try:
+        return bool(providers.get(name).placeholder)
+    except KeyError:
+        return False
+
+
+def _generation_rows(job: Job) -> list[dict]:
+    """The router's own record. A row labelled as intake was supplied by a caller, so it is no proof."""
+    path = job.folder / "generations.jsonl"
+    rows = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+    return [r for r in rows if r.get("source") != "intake" and not r.get("meta", {}).get("intake")]
+
+
+def _made_by_models(job: Job, manifest: dict) -> None:
+    """The manifest may not name a provider or model the router never called, or one whose terms
+    forbid commercial use. A draft job (brief.draft) may carry the second."""
+    draft = bool((job.job.get("brief") or {}).get("draft"))
+    rows = _generation_rows(job) if (job.folder / "generations.jsonl").exists() else None
+    unbacked: list[str] = []
+    limited: list[str] = []
+    for asset in manifest.get("assets", []):
+        provider = str(asset.get("provider") or "")
+        if not provider or provider in _NOT_A_MODEL:
+            continue
+        if _is_placeholder_provider(provider):
+            raise ContractError(
+                f"{job.id}: placeholder; {provider} made {asset.get('id', '?')}. "
+                "Render again with the paid models"
+            )
+        model = str(asset.get("model") or "")
+        if rows is not None and not any(
+            r.get("provider") == provider
+            and str(r.get("model", "")).split(":")[0] == model.split(":")[0]
+            for r in rows
+        ):
+            unbacked.append(f"{asset.get('id', '?')} ({provider}/{model})")
+        if config.licence_for(provider, model.split(":")[0]).get("commercial") is False:
+            limited.append(f"{asset.get('id', '?')} ({provider}/{model})")
+    if unbacked:
+        raise ContractError(
+            f"{job.id}: the manifest names models the router never called: {unbacked}. "
+            "Render again, or take the file in with intake and mark it so"
+        )
+    if limited and not draft:
+        raise ContractError(
+            f"{job.id}: terms do not allow commercial use of {limited}; "
+            "use another model, or set brief.draft for a piece that will not be released"
+        )
+
+
 def _not_placeholder(job: Job) -> None:
     if not job.has("asset_manifest"):
         raise ContractError(
@@ -89,6 +146,7 @@ def _not_placeholder(job: Job) -> None:
         raise ContractError(
             f"{job.id}: placeholder; the local provider made {local}. Render again with the paid models"
         )
+    _made_by_models(job, job.read("asset_manifest"))
     made_from = job.read_stamp()
     final = job.artifact()
     if (
@@ -142,6 +200,8 @@ def _daily_limit(job: Job, stream: dict) -> None:
 def approve(
     job: Job, reviewer: str, *, platforms: list[str], notes: str = "", privacy: str = "public"
 ) -> dict:
+    if not reviewer.strip():
+        raise ContractError(f"{job.id}: approval needs the reviewer's name")
     final = job.artifact()
     _qa_bound(job, final)
     _not_placeholder(job)

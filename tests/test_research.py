@@ -296,3 +296,30 @@ def test_a_page_that_will_not_load_is_an_error_the_caller_sees(monkeypatch):
     _serving(monkeypatch, Page(status=404))
     with pytest.raises(OSError, match="404"):
         research.fetch_text("https://example.org/gone")
+
+
+def test_a_page_that_arrives_in_small_chunks_is_read_up_to_the_limit(monkeypatch):
+    page = b"<p>" + b"filler words. " * 400 + b"the quote lives in a later chunk</p>"
+
+    class Reply:
+        headers = {"content-type": "text/html"}
+        encoding = "utf-8"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, size):
+            for i in range(0, len(page), 1000):
+                yield page[i : i + 1000]
+
+    monkeypatch.setattr(research.requests, "get", lambda *a, **k: Reply())
+    assert "the quote lives in a later chunk" in research.fetch_text("https://example.test/a")
+    monkeypatch.setattr(research, "MOST_BYTES", 2500)
+    text = research.fetch_text("https://example.test/a")
+    assert "filler" in text and "later chunk" not in text

@@ -68,7 +68,12 @@ def fetch_text(url: str) -> str:
         kind = reply.headers.get("content-type", "text/html").lower()
         if not any(t in kind for t in TEXT_TYPES):
             return ""
-        blob = next(reply.iter_content(MOST_BYTES), b"")
+        blob = b""
+        for chunk in reply.iter_content(8192):
+            blob += chunk
+            if len(blob) >= MOST_BYTES:
+                blob = blob[:MOST_BYTES]
+                break
     text = blob.decode(reply.encoding or "utf-8", errors="replace")
     return text if "text/plain" in kind else page_text(text)
 
