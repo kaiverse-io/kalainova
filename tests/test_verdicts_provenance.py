@@ -64,7 +64,7 @@ def test_a_reading_right_at_the_limit_counts_as_separating(auc, says):
 def test_plenty_of_one_verdict_and_few_of_the_other_is_still_too_few(monkeypatch, tmp_path):
     points = [(1.0, "accept")] * 5 + [(0.0, "reject")]
     monkeypatch.setattr(verdicts, "_gather", lambda root: {"a.reading": points})
-    assert verdicts.signals(tmp_path)[0]["reads"] == "too few verdicts"
+    assert verdicts.signals(tmp_path)[0]["reads"] == verdicts.NOT_ENOUGH
 
 
 def _reading(rid, value):
@@ -116,7 +116,7 @@ def test_a_reading_with_too_few_verdicts_says_nothing_yet(tmp_path, monkeypatch)
     _piece(tmp_path, monkeypatch, "p0", "accept", 0.9)
     _piece(tmp_path, monkeypatch, "p1", "reject", 0.1)
     rows = {r["signal"]: r for r in verdicts.signals(tmp_path / "jobs")}
-    assert rows["picture.detail"]["reads"] == "too few verdicts"
+    assert rows["picture.detail"]["reads"] == verdicts.NOT_ENOUGH
 
 
 def test_a_shot_verdict_is_held_against_the_take_the_piece_used(tmp_path, monkeypatch):

@@ -26,9 +26,15 @@ def moving_share(em: dict[str, Any], am: dict[str, Any]) -> float:
     return moving / total if total else 0.0
 
 
-def _generated_shots(work: Path, em: dict[str, Any], am: dict[str, Any]) -> dict[str, float]:
-    """What moves in each generated clip, over the part of it the edit uses."""
-    clips = {a["id"]: a for a in am["assets"] if a["kind"] == "video" and a.get("synthetic")}
+def generated_shot_motion(
+    work: Path, em: dict[str, Any], am: dict[str, Any], only: str | None = None
+) -> dict[str, float]:
+    """What moves in each generated clip, over the part of it the edit uses. `only` names one."""
+    clips = {
+        a["id"]: a
+        for a in am["assets"]
+        if a["kind"] == "video" and a.get("synthetic") and only in (None, a["id"])
+    }
     read = {}
     for cut in em.get("cuts", []):
         clip = clips.get(cut["source"])
@@ -59,7 +65,7 @@ def lossy_sources(am: dict[str, Any]) -> list[str]:
 
 def _shot_motion_readings(work: Path, em: dict[str, Any], am: dict[str, Any]) -> list[Reading]:
     """A generated clip that barely moves is a defect. In real footage, a quiet shot is a choice."""
-    shots = _generated_shots(work, em, am)
+    shots = generated_shot_motion(work, em, am)
     if not shots:
         return []
     least = min(shots, key=lambda s: shots[s])

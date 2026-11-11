@@ -109,18 +109,57 @@ def _shot_points(
     return points
 
 
-def _gather(jobs_root: Path) -> dict[str, list[tuple[float, str]]]:
-    gathered: dict[str, list[tuple[float, str]]] = {}
+def _source_points(folder: Path, shot: str, verdict: str) -> dict[str, tuple[float, str]]:
+    """What the edit's own source clip for this shot reads, so a shot verdict meets its picture.
+
+    It is a different reading from the piece's `source.shot_motion`, which is only the weakest shot:
+    pairing both under one name would let a piece verdict and a shot verdict contradict each other.
+    """
+    from . import bar, media
+
+    job = Job(folder)
+    if not (job.has("edit_manifest") and job.has("asset_manifest")):
+        return {}
+    try:
+        moved = bar.sources.generated_shot_motion(
+            job.work,
+            _json(job.path("edit_manifest")),
+            _json(job.path("asset_manifest")),
+            only=f"{shot}.video",
+        )
+    except (media.MediaError, OSError, KeyError, ValueError):
+        return {}  # the media is gone or unreadable: leave the sample out rather than guess
+    return {"shot.source_motion": (moved[f"{shot}.video"], verdict)} if moved else {}
+
+
+def samples(jobs_root: Path) -> list[dict[str, Any]]:
+    """Every reading paired with every verdict it can be held against, one row each."""
+    rows: list[dict[str, Any]] = []
     for folder in sorted(p for p in jobs_root.iterdir() if p.is_dir()):
         for entry in load(folder):
             shot = entry.get("shot")
-            found = (
-                _shot_points(folder, shot, entry["verdict"], entry.get("take"))
-                if shot
-                else _piece_points(folder, entry["verdict"])
-            )
-            for signal, point in found.items():
-                gathered.setdefault(signal, []).append(point)
+            if shot:
+                found = _shot_points(folder, shot, entry["verdict"], entry.get("take"))
+                found.update(_source_points(folder, shot, entry["verdict"]))
+            else:
+                found = _piece_points(folder, entry["verdict"])
+            for signal, (value, verdict) in found.items():
+                rows.append(
+                    {
+                        "job": folder.name,
+                        "shot": shot or "",
+                        "reading": signal,
+                        "value": value,
+                        "verdict": verdict,
+                    }
+                )
+    return rows
+
+
+def _gather(jobs_root: Path) -> dict[str, list[tuple[float, str]]]:
+    gathered: dict[str, list[tuple[float, str]]] = {}
+    for row in samples(jobs_root):
+        gathered.setdefault(row["reading"], []).append((row["value"], row["verdict"]))
     return gathered
 
 
@@ -132,9 +171,12 @@ def separation(good: list[float], bad: list[float]) -> float:
     return wins / (len(good) * len(bad))
 
 
+NOT_ENOUGH = "not enough yet"
+
+
 def _verdict_on(auc: float, enough: bool) -> str:
     if not enough:
-        return "too few verdicts"
+        return NOT_ENOUGH
     if auc >= SEPARATES_AT:
         return "higher is better"
     if auc <= 1 - SEPARATES_AT:
@@ -160,3 +202,21 @@ def signals(jobs_root: Path) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def review_set(jobs_root: Path) -> str:
+    """The set as one table, then what each reading can honestly say about it."""
+    rows = samples(jobs_root)
+    if not rows:
+        return "no verdicts yet, so nothing can be said"
+    lines = [f"{'job':<20} {'shot':<8} {'reading':<28} {'value':>9}  verdict"]
+    lines += [
+        f"{r['job']:<20} {r['shot'] or '-':<8} {r['reading']:<28} "
+        f"{r['value']:>9.4g}  {r['verdict']}"
+        for r in rows
+    ]
+    lines += ["", f"{'reading':<28} accept  not  separation  says"]
+    for s in signals(jobs_root):
+        shown = "" if s["reads"] == NOT_ENOUGH else str(s["separation"])
+        lines.append(f"{s['signal']:<28} {s['good']:>6}  {s['bad']:>3}  {shown:>10}  {s['reads']}")
+    return "\n".join(lines)

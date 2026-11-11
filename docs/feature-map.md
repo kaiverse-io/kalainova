@@ -27,6 +27,8 @@
 | Kits, streams, locks | `kalainova kit`, `stream`, `request` | `kits.py`, `streams.py`, `consistency.py` | `tests/test_kits.py`, `tests/test_kit_jobs.py` |
 | The studio bar | `kalainova bar` | `bar/` | `tests/test_bar.py` |
 | Verdicts and signals | `kalainova verdict`, `signals` | `verdicts.py` | `tests/test_verdicts_provenance.py` |
+| The review set | `kalainova review-set` | `verdicts.py`, `bar/sources.py` | `tests/test_review_set.py` |
+| Live adapter check (opt-in, paid) | `kalainova providers --check` | `providers/check.py` | `tests/test_provider_check.py` |
 | Chain of title | `kalainova provenance`, `ledger` | `provenance.py` | `tests/test_verdicts_provenance.py` |
 | Approval and publishing | `kalainova approve`, `publish` | `publish/` | `tests/test_engine.py`, `tests/test_gate_master.py` |
 | Reservations and the ledger | every paid call | `jobfs.py`, `providers/router.py` | `tests/test_ledger.py`, `tests/test_router.py` |
