@@ -106,6 +106,10 @@ class Provider:
         """How this provider's model takes reference images. Empty means it cannot hold a face."""
         return {}
 
+    def takes_end_image(self, capability: str, model: str | None = None) -> bool:
+        """Whether this provider's model can be given a last frame as an image."""
+        return False
+
     # Each capability is a method. Unimplemented ones raise.
     def llm(
         self,

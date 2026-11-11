@@ -83,6 +83,12 @@ def available(job: Job, capability: str) -> bool:
     return bool(_usable(capability, config.preference(capability, job.job))[0])
 
 
+def first_usable(job: Job, capability: str) -> base.Provider | None:
+    """The provider a call would try first, or None when none is ready."""
+    usable, _ = _usable(capability, config.preference(capability, job.job))
+    return usable[0] if usable else None
+
+
 def quote(
     job: Job, capability: str, *, only: list[str] | None = None, **est
 ) -> tuple[str, float | None] | None:

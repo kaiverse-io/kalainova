@@ -74,3 +74,20 @@ def test_lyria_gets_only_the_fields_it_accepts(fal, monkeypatch):
     monkeypatch.setattr("kalainova.media.run", lambda *a, **k: None)
     provider.music("a bed", tmp / "m.wav", duration=30.0)
     assert set(sent["payload"]) == {"prompt"}
+
+
+def test_an_end_frame_goes_in_the_models_own_field(fal):
+    provider, sent, tmp = fal
+    still, end = tmp / "s.png", tmp / "e.png"
+    still.write_bytes(b"s")
+    end.write_bytes(b"e")
+    uploads = []
+    provider._upload = lambda path: uploads.append(path) or f"https://x/{path.name}"
+    kling = "fal-ai/kling-video/v3/pro/image-to-video"
+    provider.video(
+        "p", tmp / "a.mp4", duration=5, aspect="9:16", image=still, end_image=end, model=kling
+    )
+    assert sent["payload"]["end_image_url"] == "https://x/e.png"
+    assert sent["payload"]["start_image_url"] == "https://x/s.png"
+    provider.video("p", tmp / "b.mp4", duration=5, aspect="9:16", image=still, end_image=end)
+    assert "end_image_url" not in sent["payload"], "the default model has no end frame field"

@@ -20,9 +20,7 @@ def promise_checks(data: Fields, am: Fields) -> list[Fields]:
     breaks = am.get("promise_breaks") or []
     if not breaks:
         return []
-    from .publish import placeholder_assets
-
-    forgiven = (data.get("brief") or {}).get("allow_stills") or placeholder_assets(am)
+    forgiven = (data.get("brief") or {}).get("allow_stills")
     named = ", ".join(b["beat_id"] for b in breaks)
     return [
         {

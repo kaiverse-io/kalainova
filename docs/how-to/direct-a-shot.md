@@ -38,7 +38,8 @@ In `script_packet.json`, describe what must stay the same once, and name it from
 - Name what else moves. Water and cloud freeze unless asked to move.
 - Decide the layout first. A person has to stand on the floor they walk across.
 - Set `continues: true` on a shot that picks up where the last one ended. It starts from that clip's last frame.
-- Set `on_camera: true` and a `speaker` when someone is seen saying the line. The clip is lip-synced to it.
+- Set `on_camera: true` and a `speaker` when someone is seen saying the line. The clip is lip-synced to it, with the line padded to the clip's length. The clip as it was before the sync is kept beside it as `.presync.mp4`.
+- `last_frame` is sent as a picture to a model that takes an end frame (`end_image_param` in `config/studio.yaml`). Other models are not told it, and the shot's record says it was not used.
 - Set `graphics` to a composition folder in the job for a chart or a diagram, which should be drawn and not generated.
 
 Check the plan before spending anything:
