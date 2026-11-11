@@ -56,6 +56,11 @@ def reference_spec(provider: str, capability: str, model: str) -> dict:
     return dict(table.get(model) or {})
 
 
+def audio_spec(provider: str, model: str) -> dict:
+    """What a song or music model states about itself (its longest output, its field names)."""
+    return dict((studio().get("audio_models", {}).get(provider, {})).get(model) or {})
+
+
 def video_spec(provider: str, model: str) -> dict:
     """How a plain video model takes its inputs, or {} if it is not listed."""
     return dict((studio().get("video_models", {}).get(provider, {})).get(model) or {})

@@ -16,7 +16,7 @@ from typing import Any
 import requests
 
 from .. import media
-from ..config import model_for, price_for, reference_spec, video_spec
+from ..config import audio_spec, model_for, price_for, reference_spec, video_spec
 from .base import BilledError, Provider, Result, register
 
 TIMEOUT = 120
@@ -64,7 +64,7 @@ class Fal(Provider):
     """Aggregator for image and video models via the fal queue API."""
 
     name = "fal"
-    capabilities = ("image", "video", "music", "song", "transcribe", "lipsync")
+    capabilities = ("image", "video", "music", "song", "transcribe", "lipsync", "separate")
     env_key = "FAL_KEY"
 
     def price_key(self, capability: str, request: Fields) -> str:
@@ -82,6 +82,8 @@ class Fal(Provider):
                     **request,
                     "duration": float(_billed_length(spec, request["duration"])[0]),
                 }
+        if capability in ("song", "separate") and not request.get("model"):
+            request = {**request, "model": model_for("fal", capability)}
         return super().estimate(capability, **request)
 
     def reference_support(self, capability: str, model: str) -> Fields:
@@ -252,13 +254,43 @@ class Fal(Provider):
         self, lyrics: str, dst: Path, *, style: str = "", duration: float | None = None, **kw: Any
     ) -> Result:
         model = kw.get("model") or model_for("fal", "song")
-        payload: Fields = {"prompt": style, "lyrics": lyrics}
+        spec = audio_spec("fal", model)
+        payload: Fields = {spec.get("style_field", "prompt"): style, "lyrics": lyrics}
+        if kw.get("instrumental") and spec.get("instrumental_lyrics"):
+            payload["lyrics"] = spec["instrumental_lyrics"]
         if duration:
             payload["duration"] = int(duration)
         data = self._run(model, payload, timeout=900)
-        cost = price_for("fal", "song").get("per_track", 0)
+        row = price_for("fal", "song", model)
+        cost = row.get("per_track", 0) + (duration or 0) * row.get("per_sec", 0)
         self._fetch_audio(_audio_url(data), dst, cost)
         return Result(path=dst, cost=cost, model=model, meta=_seed_of(data, kw.get("seed")))
+
+    def separate(self, src: Path, vocals: Path, rest: Path, **kw: Any) -> Result:
+        """Vocals, and everything else mixed back together from the model's other stems."""
+        model = kw.get("model") or model_for("fal", "separate")
+        payload: Fields = {
+            "audio_url": self._upload(src),
+            "model": "htdemucs",  # four stems; the six-stem model splits the rest further
+            "output_format": "wav",
+        }
+        data = self._run(model, payload, timeout=1800)
+        cost = media.duration(src) * price_for("fal", "separate", model).get("per_sec", 0)
+        names = [n for n in ("drums", "bass", "other") if (data.get(n) or {}).get("url")]
+        if not (data.get("vocals") or {}).get("url") or not names:
+            raise BilledError(cost, "fal finished but returned no stems")
+        self._fetch(data["vocals"]["url"], vocals, cost)
+        parts = []
+        for name in names:
+            part = rest.with_name(f"{rest.stem}.{name}.wav")
+            self._fetch(data[name]["url"], part, cost)
+            parts.append(part)
+        args = [arg for part in parts for arg in ("-i", str(part))]
+        mix = f"amix=inputs={len(parts)}:normalize=0"
+        media.run([*args, "-filter_complex", mix, "-ar", "48000", "-ac", "2", str(rest)])
+        for part in parts:
+            part.unlink(missing_ok=True)
+        return Result(path=vocals, cost=cost, model=model)
 
     def music(self, prompt: str, dst: Path, *, duration: float, **kw: Any) -> Result:
         model = kw.get("model") or model_for("fal", "music")
