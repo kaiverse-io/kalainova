@@ -93,12 +93,12 @@ def word_limit(names: list[str]) -> int | None:
     return min(limits) if limits else None
 
 
-def _what_moves(beat: Beat, shot: dict[str, Any]) -> str:
+def _what_moves(beat: Beat, shot: dict[str, Any], end_in_text: bool) -> str:
     motion = [shot.get("camera"), shot.get("action"), shot.get("environment")]
     if not any(motion):
         return _joined([str(beat.get("visual_cue") or beat["text"])])
     text = _joined(motion)
-    if shot.get("last_frame"):
+    if end_in_text and shot.get("last_frame"):
         return f"{text} It ends on this: {str(shot['last_frame']).rstrip('.')}."
     return text
 
@@ -111,10 +111,14 @@ def motion_prompt(
     has_start_image: bool,
     limit: int | None = None,
     with_sound: bool = False,
+    end_in_text: bool = False,
 ) -> str:
-    """What moves, first. With no start image, the model also needs the picture, after that."""
+    """What moves, first. With no start image, the model also needs the picture, after that.
+
+    A last frame is a picture, so it is sent as one to a model that takes it. Words about it would
+    only be a guess, so they are written only when asked for."""
     shot = beat.get("shot") or {}
-    text = _what_moves(beat, shot)
+    text = _what_moves(beat, shot, end_in_text)
     if not has_start_image:
         text = f"{text} {still_prompt(packet, beat, style)}"
     text = re.sub(r"\s{2,}", " ", STILL_WORDS.sub("", text))

@@ -44,6 +44,10 @@ class Studio(base.Provider):
     heard: list[dict] = []
     hits: list[dict] = []
     silent_song = False
+    end_image = False  # a model that takes the last frame as a picture
+
+    def takes_end_image(self, capability, model=None):
+        return Studio.end_image and capability == "video"
 
     @classmethod
     def reset(cls) -> None:
@@ -54,6 +58,7 @@ class Studio(base.Provider):
         cls.heard = []
         cls.hits = []
         cls.silent_song = False
+        cls.end_image = False
 
     def _log(self, capability: str, **kw) -> None:
         Studio.calls.append({"capability": capability, **kw})
@@ -74,7 +79,14 @@ class Studio(base.Provider):
 
     def video(self, prompt, dst, *, duration, aspect, image=None, **kw):
         n = sum(1 for c in Studio.calls if c["capability"] == "video")
-        self._log("video", prompt=prompt, image=image, seed=kw.get("seed"), duration=duration)
+        self._log(
+            "video",
+            prompt=prompt,
+            image=image,
+            seed=kw.get("seed"),
+            duration=duration,
+            end_image=kw.get("end_image"),
+        )
         if Studio.fail_video:
             raise RuntimeError("the model is down")
         # Bars have detail and never change: frozen, and still a picture.
@@ -129,7 +141,9 @@ class Studio(base.Provider):
 
     def lipsync(self, video, audio, dst, **kw):
         self._log("lipsync", video=video, audio=audio)
-        shutil.copyfile(video, dst)
+        # like the vendor's cut_off: the shorter input sets the length
+        shortest = min(media.duration(video), media.duration(audio))
+        media.run(["-i", str(video), "-t", f"{shortest:.3f}", "-c", "copy", str(dst)])
         return base.Result(path=dst, model="fake-lipsync")
 
     def separate(self, src, vocals, rest, **kw):

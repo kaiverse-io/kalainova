@@ -6,6 +6,7 @@ follow the same promise and the same record.
 
 from __future__ import annotations
 
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -96,6 +97,34 @@ def graphics_shot(job: Job, beat: Fields, span: float, add: Add, gen: Gen, data:
     return clip
 
 
+def end_frame_used(job: Job, beat: Fields, clip_kw: Fields) -> bool:
+    """Whether this shot has a last frame and the model that will run it can be given one."""
+    if not (beat.get("shot") or {}).get("last_frame") or clip_kw.get("references"):
+        return False
+    first = router.first_usable(job, "video")
+    return bool(first and first.takes_end_image("video", clip_kw.get("model")))
+
+
+def _end_still(job: Job, beat: Fields, prof: Fields, data: Fields, gen: Gen) -> Path:
+    """The picture a shot ends on, made once and reused while it stands."""
+    dst = job.work / "beats" / f"{beat['id']}.end.png"
+    if dst.exists():
+        return dst
+    text = str(beat["shot"]["last_frame"]).rstrip(".")
+    gen(
+        "image",
+        "image",
+        f"{text}. {style(data)}",
+        dst,
+        width=int(prof.get("width", 1080)),
+        height=int(prof.get("height", 1920)),
+        title=text,
+        palette=0,
+        style=(data.get("edit") or {}).get("theme", "studio"),
+    )
+    return dst
+
+
 def take_clip(
     job: Job,
     packet: Fields,
@@ -115,6 +144,7 @@ def take_clip(
     brief = data.get("brief") or {}
     wants_sound = bool(brief.get("clip_audio"))
     names = config.preference("video", data)
+    end = _end_still(job, beat, prof, data, gen) if end_frame_used(job, beat, clip_kw) else None
     prompt = (
         fallback_prompt
         if clip_kw and not beat.get("shot")
@@ -141,6 +171,7 @@ def take_clip(
             image=still,
             seed=seed,
             audio=wants_sound,
+            **({"end_image": end} if end else {}),
             est={"duration": span, "image": True, "references": bool(clip_kw)},
             **clip_kw,
         )
@@ -167,16 +198,28 @@ def take_clip(
             assess=takes.assess_clip,
             prompt=prompt,
         )
-    return takes.place(job, beat["id"], clip)
+    taken = takes.place(job, beat["id"], clip)
+    if (beat.get("shot") or {}).get("last_frame"):
+        taken["end_frame"] = "sent as an image" if end else "not used: the model takes none"
+    return taken
 
 
 def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Fields:
-    """Match the speaker's mouth to their line. The picture is replaced, and the line stays."""
+    """Match the speaker's mouth to their line. The picture is replaced, and the line stays.
+
+    The vendor cuts to the shorter input, and a line is shorter than its shot by the pause after it.
+    So the line is padded with silence to the clip's length first, and the clip as it was before the
+    sync is kept beside the synced one."""
     line = job.work / "beats" / f"{beat['id']}.voice.wav"
+    length = media.duration(clip)
+    padded = line.with_suffix(".padded.wav")
+    media.run(["-i", str(line), "-af", "apad", "-t", f"{length:.3f}", str(padded)])
     synced = clip.with_suffix(".synced.mp4")
-    _, res = gen("lipsync", "lipsync", clip, line, synced, est={"duration": span})
+    before = clip.with_name(f"{beat['id']}.video.presync.mp4")
+    _, res = gen("lipsync", "lipsync", clip, padded, synced, est={"duration": length})
+    shutil.copyfile(clip, before)
     synced.replace(clip)
-    return {"lipsync_model": res.model}
+    return {"lipsync_model": res.model, "presync_path": f"beats/{before.name}"}
 
 
 def clip_ambience(
@@ -259,11 +302,38 @@ def retake(job: Job, bid: str, note: str = "") -> Fields:
     return take
 
 
+MOTION_REASON = "no take moved enough"
+
+
+def motion_break(job: Job, bid: str, take: Fields, allow_stills: bool) -> Fields | None:
+    """A shot whose chosen take did not pass the motion reading broke its promise, unless a person
+    accepted stills or chose that take. The failing clip stays on disk for a person to look at."""
+    if take.get("ok") or allow_stills:
+        return None
+    entry = takes.load(job)["shots"].get(bid) or {}
+    if entry.get("chosen_by") == "human":
+        return None
+    reading = (take.get("readings") or {}).get("shot_motion")
+    return {"beat_id": bid, "reason": f"{MOTION_REASON} (take {take['n']} read {reading})"}
+
+
 def apply_chosen(job: Job, bid: str) -> Fields:
     """Make the chosen take the one the piece uses, and say so in its record."""
     clip = job.work / "beats" / f"{bid}.video.mp4"
     take = takes.place(job, bid, clip)
     manifest = job.read("asset_manifest")
+    allowed = bool((job.job.get("brief") or {}).get("allow_stills"))
+    breaks = [
+        b
+        for b in manifest.get("promise_breaks") or []
+        if not (b["beat_id"] == bid and str(b["reason"]).startswith(MOTION_REASON))
+    ]
+    broken = motion_break(job, bid, take, allowed)
+    breaks += [broken] if broken else []
+    if breaks:
+        manifest["promise_breaks"] = breaks
+    else:
+        manifest.pop("promise_breaks", None)
     for asset in manifest["assets"]:
         if asset["id"] == f"{bid}.video":
             kit = {k: v for k, v in (asset.get("provenance") or {}).items() if k == "kit_refs"}

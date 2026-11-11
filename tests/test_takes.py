@@ -162,6 +162,51 @@ def test_a_shot_that_asked_to_move_stops_the_job_when_it_cannot(tmp_path, studio
         assets.run(job)
 
 
+def test_a_shot_where_every_take_is_frozen_breaks_its_promise_and_fails_qa(tmp_path, studio):
+    studio.frozen_takes = 99
+    job = make_job(tmp_path, beats=[_moving_beat()])
+    manifest = assets.run(job)
+    assert manifest["promise_breaks"][0]["beat_id"] == "b1"
+    assert (job.work / _shot(job)["takes"][0]["file"]).is_file(), (
+        "the failing clip is kept to look at"
+    )
+    edit.run(job)
+    render.compile_plan(job)
+    render.execute(job)
+    report = qa.run(job)
+    assert "delivery.motion_promise" in {c["id"] for c in report["checks"] if c["status"] == "fail"}
+
+
+def test_the_same_with_stills_accepted_passes_with_a_warning(tmp_path, studio):
+    studio.frozen_takes = 99
+    job = make_job(
+        tmp_path,
+        beats=[_moving_beat()],
+        brief={"subject": "a test", "max_video_beats": 9, "allow_stills": True},
+    )
+    manifest = assets.run(job)
+    assert not manifest.get("promise_breaks")
+    edit.run(job)
+    render.compile_plan(job)
+    render.execute(job)
+    report = qa.run(job)
+    assert not [
+        c
+        for c in report["checks"]
+        if c["id"] == "delivery.motion_promise" and c["status"] == "fail"
+    ]
+
+
+def test_a_placeholder_run_no_longer_forgives_a_missing_clip(tmp_path, studio):
+    studio.fail_video = True
+    job = make_job(tmp_path, beats=[_moving_beat()])
+    data = job.job
+    data["providers"]["image"] = ["local"]
+    job.write("job", data)
+    with pytest.raises(ContractError, match="asked to move"):
+        assets.run(job)
+
+
 def test_a_person_can_accept_a_still_and_the_record_says_so(tmp_path, studio):
     studio.fail_video = True
     job = make_job(
@@ -228,6 +273,49 @@ def test_a_line_said_on_camera_is_lip_synced_to_its_own_voice(tmp_path, studio):
     assert sync["audio"].name.startswith(".") or "b1.voice" in sync["audio"].name
     asset = next(a for a in manifest["assets"] if a["id"] == "b1.video")
     assert asset["provenance"]["lipsync_model"] == "fake-lipsync"
+
+
+def test_a_line_shorter_than_its_clip_is_padded_so_the_shot_keeps_its_length(tmp_path, studio):
+    job = make_job(tmp_path, beats=[_moving_beat(on_camera=True, speaker="her")])
+    manifest = assets.run(job)
+    sync = next(c for c in studio.calls if c["capability"] == "lipsync")
+    asset = next(a for a in manifest["assets"] if a["id"] == "b1.video")
+    before = job.work / asset["provenance"]["presync_path"]
+    assert media.duration(sync["audio"]) == pytest.approx(media.duration(before), abs=0.1)
+    assert media.duration(job.work / "beats" / "b1.video.mp4") == pytest.approx(
+        media.duration(before), abs=0.1
+    )
+    assert "hold_last_frame" not in str(edit.run(job)["cuts"])
+
+
+def test_the_clip_before_lip_sync_is_kept_beside_the_synced_one(tmp_path, studio):
+    job = make_job(tmp_path, beats=[_moving_beat(on_camera=True, speaker="her")])
+    manifest = assets.run(job)
+    asset = next(a for a in manifest["assets"] if a["id"] == "b1.video")
+    assert (job.work / asset["provenance"]["presync_path"]).is_file()
+
+
+# ---- the end frame ---------------------------------------------------------------------
+def test_a_model_that_takes_an_end_frame_gets_it_as_a_picture(tmp_path, studio):
+    studio.end_image = True
+    shot = {"action": "He turns", "last_frame": "an empty chair"}
+    job = make_job(tmp_path, beats=[_moving_beat(shot=shot)])
+    manifest = assets.run(job)
+    clip = next(c for c in studio.calls if c["capability"] == "video")
+    assert clip["end_image"].name == "b1.end.png" and clip["end_image"].is_file()
+    assert "ends on" not in clip["prompt"]
+    asset = next(a for a in manifest["assets"] if a["id"] == "b1.video")
+    assert asset["provenance"]["end_frame"] == "sent as an image"
+
+
+def test_a_model_without_an_end_frame_field_is_not_told_one_in_words(tmp_path, studio):
+    shot = {"action": "He turns", "last_frame": "an empty chair"}
+    job = make_job(tmp_path, beats=[_moving_beat(shot=shot)])
+    manifest = assets.run(job)
+    clip = next(c for c in studio.calls if c["capability"] == "video")
+    assert clip["end_image"] is None and "ends on" not in clip["prompt"]
+    asset = next(a for a in manifest["assets"] if a["id"] == "b1.video")
+    assert asset["provenance"]["end_frame"].startswith("not used")
 
 
 def test_a_place_with_an_ambience_cue_gets_its_own_sound_in_the_mix(tmp_path, studio):
