@@ -1,6 +1,7 @@
 """CLI for making and judging a piece shot by shot.
 
 kalainova animatic <job>                         a rough cut, before any video is paid for
+kalainova card <job> <beat> --kind title|quote|stat ...  a drawn card for a beat's graphics folder
 kalainova shotplan <job>                         what is wrong with the plan, before any spend
 kalainova takes <job>                            every take of every shot, and how each read
 kalainova take <job> <shot> <n>                  a person's choice of take
@@ -47,14 +48,28 @@ from . import (
     verdicts,
 )
 from .jobfs import ContractError, Job, home, open_job
+from .render import drawn
 
 
 def add_parsers(sub: Any) -> None:
     _shot_parsers(sub)
     sub.add_parser("animatic", help="a rough cut, before any video is paid for").add_argument("job")
+    _card_parser(sub)
     _look_parsers(sub)
     _make_parsers(sub)
     _record_parsers(sub)
+
+
+def _card_parser(sub: Any) -> None:
+    card = sub.add_parser("card", help="write a title, quote or stat card for a beat")
+    card.add_argument("job")
+    card.add_argument("beat")
+    card.add_argument("--kind", required=True, choices=drawn.CARD_KINDS)
+    card.add_argument("--text", default="", help="title or quote text")
+    card.add_argument("--sub", default="", help="a line under a title, or who said a quote")
+    card.add_argument("--value", default="", help="a stat's number, such as 42 or 3.5%%")
+    card.add_argument("--label", default="", help="what a stat counts")
+    card.add_argument("--seconds", type=float, help="default: the beat's length plus one second")
 
 
 def _shot_parsers(sub: Any) -> None:
@@ -321,6 +336,30 @@ def _dub(a: argparse.Namespace) -> int:
     return _print_qa(child, child.artifact())
 
 
+def _card(a: argparse.Namespace) -> int:
+    job = open_job(a.job)
+    beat = next((b for b in job.read("script_packet")["beats"] if b["id"] == a.beat), None)
+    if beat is None:
+        raise ContractError(f"{job.id}: no beat {a.beat}")
+    seconds = a.seconds or float(beat.get("duration_sec") or 0) + 1.0
+    if seconds <= 1.0:
+        raise ContractError("the beat has no length: pass --seconds")
+    prof = config.profile(job.job.get("profile") or "short-9x16")
+    fields = {"text": a.text, "sub": a.sub, "value": a.value, "label": a.label}
+    out = drawn.write_card(
+        job.folder / "graphics" / a.beat,
+        a.kind,
+        fields,
+        int(prof.get("width", 1080)),
+        int(prof.get("height", 1920)),
+        seconds,
+        float(prof.get("fps", 30)),
+    )
+    print(out)
+    print(f'set "graphics": "graphics/{a.beat}" on beat {a.beat} to render it as that shot')
+    return 0
+
+
 def _animatic(a: argparse.Namespace) -> int:
     job = open_job(a.job)
     made = assets.run(job, animatic=True)
@@ -384,6 +423,7 @@ def _ledger(a: argparse.Namespace) -> int:
 
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "animatic": _animatic,
+    "card": _card,
     "shotplan": _shotplan,
     "takes": _takes,
     "bench": _bench,

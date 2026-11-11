@@ -557,6 +557,8 @@ Assets to an edit manifest.
 ### render
 Edit manifest to a closed op list, then to the file through ffmpeg. A plan can be written by a model, so `spec` checks every argument and path first. `cache` keeps a step whose inputs and settings have not changed, so changing one shot re-encodes only what it touches.
 
+Kinetic captions (`brief.captions: kinetic`) take a different route inside `burn_captions`: `drawn` writes a transparent HyperFrames page from the same word timings, renders it alone to a WebM with alpha, and lays it over the graded picture with ffmpeg, so the grade path is untouched. The page keeps its type inside the profile's `safe_zone`, and the boxes it placed go to `captions.drawn.json` for the QA warning. `drawn` also writes the title, quote and stat card compositions (`kalainova card`). Film profiles never reach it: they burn nothing.
+
 The export step picks the cover (`cover`): the sharpest clean frame across the piece, clear of the fades, or the time or file a brief names, plus a square cut around the most detailed part.
 
 Picture steps hand each other lossless 10-bit masters, so nothing degrades between steps. The cost is hundreds of megabits a second, gigabytes for a short piece. The title pass is skipped when there is nothing to burn in, rather than writing a second copy. `cache.clean` (`kalainova clean`) deletes the picture intermediates a plan wrote, and nothing else: the final, assets, takes, and sound stems stay, and the next render remakes what was deleted.

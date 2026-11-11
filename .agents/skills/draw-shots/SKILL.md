@@ -17,6 +17,12 @@ Each beat's `graphics` field names a composition folder in the job. The engine r
 4. Animate type with one paused GSAP timeline, registered last. Emit only the tweens a beat uses, so no two tweens share an element's property.
 5. If you scaffold with `npx hyperframes init`, pass `--skip-skills`. Without it, init installs skills globally on the operator's machine.
 
+## Cards and kinetic captions from the engine
+
+- **Cards.** `kalainova card <job> <beat> --kind title|quote|stat --text ... [--sub ...]` (a stat takes `--value` and `--label`) writes a format-only composition into `graphics/<beat>/`, sized to the profile and one second longer than the beat. Then set `"graphics": "graphics/<beat>"` on the beat. A stat's number counts up to its value. Write the words yourself; the engine ships none.
+- **Kinetic captions.** `brief.captions: kinetic` on a job draws the piece's word-timed captions as a transparent layer (WebM with alpha) and lays it over the graded picture. It uses the same word timings as the other caption styles, and keeps the type inside the profile's `safe_zone` (the caption band and the right margin in `config/studio.yaml`). Film profiles ignore it: they keep sidecar files and burn nothing. `edit.caption_style` still overrides it.
+- QA warns (`safe_zone.drawn`) if a drawn card leaves the band. The layer's boxes are in `work/captions.drawn.json`.
+
 ## Rules the bar will hold you to
 
 - **Every frame moves.** Keep a slow camera move, drift, or particles running under every hold, end titles included.

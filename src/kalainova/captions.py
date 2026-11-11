@@ -1,7 +1,7 @@
 """ASS subtitle builders for libass: kinetic word captions, hook card, beat titles.
 
-This is the ffmpeg-native caption renderer. A browser overlay renderer
-(Remotion / HyperFrames) can replace it behind the same burn_captions op.
+This is the ffmpeg-native caption renderer. A brief that asks for `captions: kinetic` is drawn by
+the graphics provider instead (render/drawn.py), behind the same burn_captions op.
 """
 
 from __future__ import annotations

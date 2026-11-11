@@ -24,6 +24,7 @@
 | Shot sheet, filmstrip, cut check | `kalainova sheet`, `filmstrip`, `cutcheck` | `timeline.py` | `tests/test_timeline.py` |
 | Review in motion: motion strip, cut strip, findings, retake limits | `kalainova sheet --motion`, `sheet --cuts`, `findings`, `retake` | `timeline.py`, `qa.py`, `qachecks.py`, `takes.py`, `shotmake.py` | `tests/test_motion_review.py` |
 | Character shot ceiling, overlay safe zone | `kalainova shotplan`, `make` | `shots.py`, `qachecks.py`, `config/studio.yaml` (`character_shot_max_sec`, `safe_zone`) | `tests/test_motion_review.py` |
+| Kinetic captions drawn as a transparent layer; title, quote and stat cards | `brief.captions: kinetic`, `kalainova card` | `render/drawn.py`, `render/picture.py` (`op_burn_captions`), `edit.py`, `qachecks.py`, `providers/hyperframes.py` | `tests/test_drawn.py` |
 | Timeline export | `kalainova export` | `nle.py` | `tests/test_nle.py` |
 | Footage edit | `kalainova ingest`, `edit`, `revise` | `editor/` | `tests/test_editor.py` |
 | Word-level speech cuts | `kalainova edit` | `editor/speech.py` | `tests/test_speech_clips.py` |

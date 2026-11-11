@@ -62,6 +62,10 @@
             "web",
             "mezzanine"
           ]
+        },
+        "safe_zone": {
+          "type": "object",
+          "description": "Where interface overlays leave room, as fractions of the frame. Present only when drawn captions read it."
         }
       }
     },
@@ -317,6 +321,7 @@
       "enum": [
         "studio",
         "kinetic",
+        "drawn",
         "plain",
         "none"
       ]

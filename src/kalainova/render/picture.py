@@ -16,6 +16,7 @@ import numpy.typing as npt
 from .. import captions as ass
 from .. import look, media, motion
 from ..jobfs import ContractError
+from . import drawn
 from .spec import safe_path
 
 Arr = npt.NDArray[Any]
@@ -327,6 +328,9 @@ def _burn(work: Path, src: Path, out: Path, graph: list[str]) -> None:
 def op_burn_captions(work: Path, a: dict[str, Any]) -> None:
     src, out = safe_path(work, a["input"]), safe_path(work, a["out"])
     caps, width, height = a["captions"], a["width"], a["height"]
+    if a.get("style") == "drawn":
+        drawn.burn_drawn_captions(work, src, out, a)
+        return
     if a.get("style") == "studio":
         text, report = ass.studio_captions(
             caps, width, height, _caption_levels(src, caps, width, height)
