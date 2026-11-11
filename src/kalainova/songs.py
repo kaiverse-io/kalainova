@@ -11,7 +11,6 @@ from __future__ import annotations
 import difflib
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +19,7 @@ import numpy as np
 from . import captions, config, media, render, takes, writers
 from .bar import song as musicbar
 from .bar.readings import summarise
-from .jobfs import ContractError, Job, open_child
+from .jobfs import ContractError, Job
 from .providers import router
 from .render import release
 
@@ -401,94 +400,40 @@ def _heard_of_chosen(job: Job) -> list[dict[str, Any]] | None:
 
 
 # ------------------------------------------------------------------ a video for it
-def _shots_for(
-    song: Song, cues: list[Cue], length: float, grid: list[float]
-) -> list[dict[str, Any]]:
-    """One shot per lyric line, starting on the beat. An instrumental stretch gets its own."""
-    spans: list[dict[str, Any]] = []
-    at = 0.0
-    for cue in cues:
-        start = _nearest(grid, float(cue["start_sec"]))
-        if start - at > 1.0:
-            spans.append({"start": at, "end": start, "text": ""})
-            at = start
-        if spans and start <= at and spans[-1]["text"]:
-            spans[-1]["text"] += f" / {cue['text']}"
-            continue
-        spans.append({"start": at, "end": start, "text": cue["text"]})
-        at = start
-    spans.append(
-        {"start": at, "end": length, "text": spans[-1]["text"] if spans else song["title"]}
-    )
-    return [s for s in spans if s["end"] - s["start"] > 0.2]
-
-
-def _nearest(grid: list[float], at: float) -> float:
-    return min(grid, key=lambda b: abs(b - at)) if grid else at
-
-
-def _visual_for(song: Song, line: str) -> str:
-    for section in song["sections"]:
-        if line.split(" / ")[0] in (section.get("lines") or []):
-            return str(section.get("visual") or line or song["style"])
-    return str(song["style"])
-
-
-def _beats_for_spans(
-    song: Song, spans: list[dict[str, Any]], still_only: bool
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": f"s{n:02d}",
-            "role": "hook" if n == 0 else ("payoff" if n == len(spans) - 1 else "body"),
-            "text": span["text"] or song["title"],
-            "visual_cue": _visual_for(song, span["text"]),
-            "visual_kind": "still" if still_only else "video",
-            "duration_sec": round(span["end"] - span["start"], 3),
-        }
-        for n, span in enumerate(spans)
-    ]
-
-
 def video_job(
-    job: Job, new_id: str, *, profile: str = "landscape", still_only: bool = False
+    job: Job,
+    new_id: str,
+    *,
+    profile: str = "landscape",
+    still_only: bool = False,
+    excerpt: dict[str, Any] | None = None,
+    phrase_bars: int | None = None,
 ) -> Path:
-    """Open a job that cuts a video to this song: every shot on a beat, the lyrics as captions."""
-    from .editor import beats as beat_tools
+    """Open a job that cuts a video to this song: every shot on a beat, the lyrics as captions.
+
+    With few or no lyric lines the cuts come from the music's bars and phrases. An excerpt is
+    {"length": seconds, "start": seconds or None}; no start means the strongest stretch."""
+    from .editor import musicvideo
 
     song = job.read("song")
     final = job.artifact()
     if not final.exists():
         raise ContractError(f"{job.id}: make the song first")
     manifest = job.read("asset_manifest")
-    words = list(manifest.get("words") or [])
     cues = [
         {"start_sec": c["start_sec"], "end_sec": c["end_sec"], "text": c["text"]}
         for c in timed_lines(final, song, _heard_of_chosen(job))[0]
     ]
-    length = media.duration(final)
-    grid = [float(b) for b in beat_tools.beat_grid(final, length)["beats"]]
-    spans = _shots_for(song, cues, length, grid)
-    source = job.job
-    brief = {
-        "subject": (source.get("brief") or {}).get("subject", song["title"]),
-        "narration": False,
-        "track": "track.wav",
-        "track_model": manifest["assets"][0].get("model", "a finished track"),
-        "words": words,
-        "max_video_beats": 0 if still_only else len(spans),
-        "visual_style": (source.get("brief") or {}).get("visual_style", ""),
-    }
-    child = open_child(job, new_id, profile=profile, brief=brief)
-    shutil.copyfile(final, child.work / "track.wav")
-    child.write(
-        "script_packet",
-        {
-            "schema_version": "0.1",
-            "job_id": new_id,
-            "title": song["title"],
-            "beats": _beats_for_spans(song, spans, still_only),
-            **({"publish": song["publish"]} if song.get("publish") else {}),
-        },
+    return musicvideo.build(
+        job,
+        new_id,
+        song=song,
+        cues=cues,
+        words=list(manifest.get("words") or []),
+        final=final,
+        manifest=manifest,
+        profile=profile,
+        still_only=still_only,
+        excerpt=excerpt,
+        phrase_bars=phrase_bars,
     )
-    return child.folder

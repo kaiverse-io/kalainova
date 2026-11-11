@@ -376,6 +376,7 @@ def run(job: Job) -> dict:
     sheet = contact_sheet(job, final, em)
     motion, cut_strip = motion_sheets(job, final, em)
     checks.extend(qachecks.safe_zone_checks(job, data.get("profile") or "short-9x16"))
+    checks.extend(qachecks.cuts_on_beat_checks(job, em))
     checks.extend(qachecks.kit_checks(job, packet, am, sheet))
     judge = None
     try:

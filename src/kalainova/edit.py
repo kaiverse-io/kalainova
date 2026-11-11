@@ -103,6 +103,8 @@ def run(job: Job, *, force: bool = False) -> dict:
     mezzanine = prof.get("delivery") == "mezzanine"
     wants_captions = opts.get("captions", True) and not mezzanine
 
+    # a video cut to music lands each picture on the bar, so it leads the sound by nothing
+    lead = 0.0 if (data.get("brief") or {}).get("music_cuts") else PICTURE_LEAD_SEC
     cuts = []
     for i, span in enumerate(am["timeline"]):
         bid = span["beat_id"]
@@ -118,14 +120,14 @@ def run(job: Job, *, force: bool = False) -> dict:
             "out_sec": dur,
             "role": beat["role"],
             # the picture changes just before the words do, the way a line is cut in a film
-            "start_sec": max(span["start_sec"] - (PICTURE_LEAD_SEC if i else 0.0), 0.0),
+            "start_sec": max(span["start_sec"] - (lead if i else 0.0), 0.0),
             "grade": opts.get("grade", "natural"),
         }
         if src["kind"] == "still":
             cut["motion"] = (STUDIO_MOTIONS if studio else MOTIONS)[i % len(MOTIONS)]
         # A shot runs to where the next one starts, which is earlier than the next line's first word.
         next_start = (
-            am["timeline"][i + 1]["start_sec"] - PICTURE_LEAD_SEC
+            am["timeline"][i + 1]["start_sec"] - lead
             if i + 1 < len(am["timeline"])
             else span["end_sec"]
         )

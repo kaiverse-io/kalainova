@@ -12,7 +12,7 @@ kalainova filmstrip <file> <start> <end>         frames over a waveform
 kalainova cutcheck <job>                         a click or a flash at any cut
 kalainova export <job> [--to fcpxml|otio|edl]    the cut for an editing system
 kalainova song <job>                             lyrics to takes to a master
-kalainova song-video <job> <new id>              a job that cuts a video to the song
+kalainova song-video <job> <new id> [--excerpt SEC [--start SEC]]  a video cut to the song
 kalainova research <job> "question" [--query q]  sources, snapshots, checked findings
 kalainova research <job> --check                 hold written findings to their sources
 kalainova clips <job> [--count 3] [--open]       short pieces from a long recording
@@ -101,6 +101,9 @@ def _make_parsers(sub: Any) -> None:
     video.add_argument("new_id")
     video.add_argument("--profile", default="landscape")
     video.add_argument("--stills", action="store_true")
+    video.add_argument("--excerpt", type=float, help="seconds: a short from part of the track")
+    video.add_argument("--start", type=float, help="where the excerpt starts; default: strongest")
+    video.add_argument("--phrase-bars", type=int, help="bars per phrase; default 4 or 8 by energy")
     found = sub.add_parser("research")
     found.add_argument("job")
     found.add_argument("question", nargs="?", default="")
@@ -266,7 +269,16 @@ def _song(a: argparse.Namespace) -> int:
 def _song_video(a: argparse.Namespace) -> int:
     from . import songs
 
-    folder = songs.video_job(open_job(a.job), a.new_id, profile=a.profile, still_only=a.stills)
+    if a.start is not None and not a.excerpt:
+        raise ContractError("--start needs --excerpt, the length to cut")
+    folder = songs.video_job(
+        open_job(a.job),
+        a.new_id,
+        profile=a.profile,
+        still_only=a.stills,
+        excerpt={"length": a.excerpt, "start": a.start} if a.excerpt else None,
+        phrase_bars=a.phrase_bars,
+    )
     print(f"{folder}\nMake it with: kalainova make {a.new_id} --from assets")
     return 0
 

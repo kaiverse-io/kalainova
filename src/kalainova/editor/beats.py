@@ -51,6 +51,24 @@ def onset_envelope(x: np.ndarray) -> np.ndarray:
     return np.maximum(flux, 0)
 
 
+def _comb(env: np.ndarray, fps: float, dur: float, period: float) -> tuple[float, float]:
+    """The period and phase whose comb of ticks sums the most onset energy. The envelope has a
+    coarse frame rate, so the period is searched finely around the autocorrelation's estimate:
+    a tempo a fraction of a percent off would drift a whole beat over a long track."""
+    soft = np.convolve(env, np.array([0.25, 0.5, 0.25]), mode="same")
+    frames = np.arange(env.size)
+    best, found = -1.0, (period, 0.0)
+    for scale in 1 + np.linspace(-0.02, 0.02, 81):
+        step = period * scale
+        for off in np.arange(0, step, 0.5 / fps):
+            ticks = np.arange(off, dur, step) * fps
+            ticks = ticks[ticks < env.size - 1]
+            score = float(np.interp(ticks, frames, soft).sum())
+            if score > best:
+                best, found = score, (step, float(off))
+    return found
+
+
 def beat_grid(path: Path, duration: float | None = None) -> dict:
     x = _pcm(path)
     env = onset_envelope(x)
@@ -68,17 +86,11 @@ def beat_grid(path: Path, duration: float | None = None) -> dict:
     )
     cand = np.where(valid, ac * weight, 0)
     lag = int(np.argmax(cand))
-    period = lag / fps
+    period, phase = _comb(env, fps, dur, lag / fps)
     bpm = 60 / period if period else 120.0
-    # phase: the offset whose comb sums the most onset energy
-    best, phase = -1.0, 0.0
-    for off in np.arange(0, period, 1 / fps):
-        ticks = (np.arange(off, dur, period) * fps).astype(int)
-        ticks = ticks[ticks < env.size]
-        sc = env[ticks].sum()
-        if sc > best:
-            best, phase = sc, off
-    beats = np.arange(phase, dur, period)
+    # an envelope frame is stamped at its window's start; the onset sits about mid-window
+    beats = np.arange(phase, dur, period) + WIN / 2 / SR
+    beats = beats[beats < dur]
     conf = float(min(1.0, ac[lag] / (ac[0] + 1e-9) * 2))
     return {
         "bpm": round(float(bpm), 2),

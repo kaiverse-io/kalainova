@@ -274,12 +274,17 @@ def open_child(parent: Job, new_id: str, *, profile: str, brief: dict) -> Job:
         "profile": profile,
         "brief": brief,
     }
-    for key in ("providers", "skip_funded"):
+    for key in ("providers", "skip_funded", "stream", "cast"):
         if key in source:
             data[key] = source[key]
     folder.mkdir(parents=True)
     (folder / "job.json").write_text(dump(data) + "\n")
-    return Job(folder)
+    child = Job(folder)
+    if source.get("stream") and parent.has(
+        "kit_lock"
+    ):  # the same kits, so shots use their references
+        child.write("kit_lock", {**parent.read("kit_lock"), "job_id": new_id})
+    return child
 
 
 def dump(data: Any) -> str:
