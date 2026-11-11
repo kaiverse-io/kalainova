@@ -109,6 +109,8 @@ These warn and choose among takes. Only a wrong level on the finished file block
 | `song.shape` | No difference in level between sections |
 | `song.length` | Far from the length asked for |
 
+A video cut to a track adds one more warning, `edit.cuts_on_beat`: the share of its cuts within 0.08 s of a beat of the track. About 1.0 means the cuts are on the grid. It is an estimate of how the edit feels, not a promise about generated motion.
+
 ## What only eyes can catch
 
 No reading sees that a door opens the wrong way or that a coat became a jacket. `kalainova sheet` shows the first and last frame of each shot for that reason, and the vision judge reads the same sheet when a model is listed.

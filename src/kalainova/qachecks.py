@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from . import bar, config, consistency, kitchecks, prompts, shots, timeline
+from .editor import musiccuts
 from .jobfs import ContractError, CostCapExceeded, Job
 from .providers import router
 
@@ -216,6 +217,28 @@ def safe_zone_checks(job: Job, profile: str) -> list[Fields]:
         )
         out.append({"id": "safe_zone.faces", "status": "warn" if bad else "pass", "detail": detail})
     return out
+
+
+def cuts_on_beat_checks(job: Job, em: Fields) -> list[Fields]:
+    """A video cut to a track: how many of its cuts landed on a beat of that track. Warns only."""
+    path = job.work / "music_cuts.json"
+    if not path.exists():
+        return []
+    beats = json.loads(path.read_text())["beats"]
+    cuts = [float(c.get("start_sec", 0)) for c in em.get("cuts", [])][1:]
+    if not cuts:
+        return []
+    rows = musiccuts.cut_offsets(cuts, beats)
+    share = musiccuts.share_on_beat(cuts, beats)
+    worst = max(r["off_sec"] for r in rows)
+    return [
+        {
+            "id": "edit.cuts_on_beat",
+            "status": "pass" if share >= 0.9 else "warn",
+            "detail": f"{share:.2f} of {len(cuts)} cuts are on a beat;"
+            f" the furthest is {worst:.2f}s off",
+        }
+    ]
 
 
 def kit_checks(job: Job, packet: Fields, am: Fields, sheet: str | None) -> list[Fields]:

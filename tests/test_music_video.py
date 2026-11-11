@@ -1,0 +1,255 @@
+"""A video cut to a track with no lyrics: bars, sections, an excerpt, the character, the cost."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+
+import numpy as np
+import pytest
+from fakes import make_job, needs_ffmpeg
+
+from kalainova import media, qachecks, songs
+from kalainova.editor import musiccuts as mc
+from kalainova.editor import musicvideo
+from kalainova.jobfs import ContractError, Job
+from kalainova.providers import router
+
+pytestmark = needs_ffmpeg
+SR = 48000
+BPM = 120.0  # a bar is 2 seconds; the numbers below follow from it
+
+
+def _write(path, x):
+    subprocess.run(
+        [media.FFMPEG, "-y", "-loglevel", "error", "-f", "f32le", "-ar", str(SR), "-ac", "1",
+         "-i", "-", "-ac", "2", str(path)],
+        input=x.astype(np.float32).tobytes(),
+        check=True,
+    )  # fmt: skip
+    return path
+
+
+def _track(path, seconds=48.0, loud_from=24.0, steady=True):
+    """A pulse with an accent on each bar, much louder from loud_from on."""
+    x = np.zeros(int(seconds * SR), np.float32)
+    beat = 60.0 / BPM
+    rng = np.random.default_rng(3)
+    for n in range(int(seconds / beat)):
+        at = n * beat
+        loud = at >= loud_from
+        amp = (0.9 if loud else 0.25) * (1.0 if n % 4 == 0 else 0.7)
+        i = int(at * SR)
+        x[i : i + 900] += np.hanning(900) * amp
+    return _write(path, x if steady else rng.standard_normal(x.size).astype(np.float32) * 0.05)
+
+
+def _song(**extra):
+    return {
+        "schema_version": "0.1",
+        "job_id": "p1",
+        "title": "An Instrumental",
+        "style": "an instrumental with a steady pulse",
+        "instrumental": True,
+        "sections": [{"kind": "intro"}, {"kind": "chorus"}],
+        **extra,
+    }
+
+
+def _parent(tmp_path, **extra):
+    job = make_job(tmp_path, media=["song"], **extra)
+    return job
+
+
+def _build(tmp_path, job, track, *, song=None, **kw):
+    manifest = {"assets": [{"model": "a finished track"}]}
+    return musicvideo.build(
+        job, "p1-video", song=song or _song(), cues=[], words=[], final=track,
+        manifest=manifest, profile=kw.pop("profile", "square"),
+        still_only=kw.pop("still_only", False), say=lambda _: None, **kw,
+    )  # fmt: skip
+
+
+def _starts(child):
+    packet = Job(child).read("script_packet")
+    at, out = 0.0, []
+    for beat in packet["beats"]:
+        out.append(round(at, 3))
+        at += beat["duration_sec"]
+    return out, packet
+
+
+def test_an_instrumental_track_with_a_steady_pulse_is_cut_on_bar_lines(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    track = _track(tmp_path / "t.wav")
+    child = _build(tmp_path, _parent(tmp_path), track)
+    starts, packet = _starts(child)
+    assert len(starts) > 2
+    bar = 60 / BPM * 4
+    found = mc.analyse(track, 48.0)
+    assert found["bars"][1] - found["bars"][0] == pytest.approx(bar, abs=0.05)
+    for at in starts[1:]:
+        assert min(abs(at - b) for b in found["bars"]) < 0.06
+    assert sum(b["duration_sec"] for b in packet["beats"]) == pytest.approx(48.0, abs=0.1)
+
+
+def test_the_biggest_rise_in_energy_gets_a_cut_where_the_drop_lands(tmp_path):
+    found = mc.analyse(_track(tmp_path / "t.wav"), 48.0)
+    assert found["rise"] is not None
+    assert found["bars"][found["rise"][0]] == pytest.approx(24.0, abs=0.3)
+    spans = mc.music_spans(found, 48.0, _song(), phrase_bars=100)
+    assert [s["start"] for s in spans][1] == pytest.approx(24.0, abs=0.3)
+    assert spans[1]["strong"]
+
+
+def test_a_section_list_with_bars_starts_a_shot_at_each_section(tmp_path):
+    track = _track(tmp_path / "t.wav")
+    found = mc.analyse(track, 48.0)
+    song = _song(
+        sections=[
+            {"kind": "intro", "bars": 5},
+            {"kind": "verse", "bars": 3},
+            {"kind": "chorus", "bars": 16},
+        ]
+    )
+    spans = mc.music_spans(found, 48.0, song, phrase_bars=100)
+    starts = [s["start"] for s in spans]
+    for bar_no in (5, 8):
+        assert any(abs(s - found["bars"][bar_no]) < 0.01 for s in starts)
+
+
+def test_an_excerpt_starts_and_ends_on_bar_lines_and_is_within_a_bar_of_its_length(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    track = _track(tmp_path / "t.wav")
+    child = _build(tmp_path, _parent(tmp_path), track, excerpt={"length": 19.0, "start": None})
+    record = json.loads((Job(child).work / "music_cuts.json").read_text())
+    a, b = record["window"]
+    bars = mc.analyse(track, 48.0)["bars"]
+    assert min(abs(a - x) for x in bars) < 0.01
+    assert min(abs(b - x) for x in [*bars, 48.0]) < 0.01
+    assert abs((b - a) - 19.0) <= 2.0 + 0.01
+    assert a < 24.0 < b, "the drop sits inside the strongest stretch"
+    assert media.duration(Job(child).work / "track.wav") == pytest.approx(b - a, abs=0.1)
+    assert record["loudness"]["integrated_lufs"] is not None
+
+
+def test_a_track_with_no_clear_pulse_is_reported_not_cut_on_a_guess(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    track = _track(tmp_path / "noise.wav", steady=False)
+    with pytest.raises(ContractError, match="no steady pulse"):
+        _build(tmp_path, _parent(tmp_path), track)
+    with pytest.raises(ContractError, match="strongest stretch|cannot cut"):
+        _build(
+            tmp_path, _parent(tmp_path, job_id="p2"), track, excerpt={"length": 10.0, "start": None}
+        )
+
+
+def test_a_flat_steady_track_has_no_peak_to_anchor_a_short(tmp_path):
+    flat = _track(tmp_path / "flat.wav", loud_from=999.0)
+    found = mc.analyse(flat, 48.0)
+    assert found["rise"] is None and "no clear energy peak" in " ".join(found["notes"])
+    with pytest.raises(ContractError, match="no clear energy peak"):
+        mc.window(found, 10.0)
+    a, b = mc.window(found, 10.0, start=8.0)
+    assert min(abs(a - x) for x in found["bars"]) < 0.01 and abs(a - 8.0) < 2.0
+
+
+def _locked_parent(tmp_path):
+    job = _parent(tmp_path, stream="chan", cast=["lead"], distribution_identity="id-1")
+    job.write(
+        "kit_lock",
+        {
+            "schema_version": "0.1",
+            "job_id": "p1",
+            "stream": "chan",
+            "distribution_identity": "id-1",
+            "cast": ["lead"],
+            "generators": {},
+            "kits": {},
+            "canon": {"lines": 0, "sha256": "0" * 64},
+        },
+    )
+    return job
+
+
+def test_the_child_carries_the_stream_the_identity_and_the_kit_lock(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    child = Job(_build(tmp_path, _locked_parent(tmp_path), _track(tmp_path / "t.wav")))
+    assert child.job["stream"] == "chan" and child.job["distribution_identity"] == "id-1"
+    assert child.job["cast"] == ["lead"]
+    assert child.read("kit_lock")["job_id"] == "p1-video"
+    assert child.read("kit_lock")["stream"] == "chan"
+
+
+def test_a_character_shot_never_runs_past_the_ceiling_and_changes_angle(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    track = _track(tmp_path / "t.wav")
+    child = _build(tmp_path, _locked_parent(tmp_path), track, profile="short-9x16")
+    packet = Job(child).read("script_packet")
+    assert max(b["duration_sec"] for b in packet["beats"]) <= 3.2 + 1e-6
+    sizes = [b["shot"]["size"] for b in packet["beats"] if "shot" in b]
+    assert {"wide", "close", "medium"} <= set(sizes), "cutaways, not one long take"
+    # without a character the phrase length stands
+    plain = _build_plain(tmp_path, track)
+    assert max(b["duration_sec"] for b in Job(plain).read("script_packet")["beats"]) > 3.2
+
+
+def _build_plain(tmp_path, track):
+    job = make_job(tmp_path, media=["song"], job_id="plain")
+    return musicvideo.build(
+        job, "plain-video", song=_song(), cues=[], words=[], final=track,
+        manifest={"assets": [{}]}, profile="short-9x16", still_only=False, say=lambda _: None,
+    )  # fmt: skip
+
+
+def test_cuts_on_beat_reads_one_for_cuts_on_the_grid_and_lower_off_it():
+    beats = [i * 0.5 for i in range(40)]
+    assert mc.share_on_beat([2.0, 4.0, 8.5], beats) == 1.0
+    assert mc.share_on_beat([2.13, 4.2, 8.25], beats) < 0.5
+
+
+def test_qa_warns_when_the_cuts_of_a_track_video_are_off_the_grid(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    child = Job(_build(tmp_path, _parent(tmp_path), _track(tmp_path / "t.wav")))
+    packet = child.read("script_packet")
+    at, cuts = 0.0, []
+    for beat in packet["beats"]:
+        cuts.append({"start_sec": at})
+        at += beat["duration_sec"]
+    (on,) = qachecks.cuts_on_beat_checks(child, {"cuts": cuts})
+    assert on["id"] == "edit.cuts_on_beat" and on["status"] == "pass"
+    shifted = [{"start_sec": c["start_sec"] + 0.21} for c in cuts]
+    (off,) = qachecks.cuts_on_beat_checks(child, {"cuts": shifted})
+    assert off["status"] == "warn"
+
+
+def test_the_estimate_is_said_before_any_call_and_a_costly_plan_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    monkeypatch.setattr(router, "quote", lambda *a, **k: ("fake", 1.0))
+    track = _track(tmp_path / "t.wav")
+    said: list[str] = []
+    job = _parent(tmp_path, cost_cap=2.0)
+    with pytest.raises(ContractError, match="over the .* cap"):
+        musicvideo.build(
+            job, "p1-video", song=_song(), cues=[], words=[], final=track,
+            manifest={"assets": [{}]}, profile="square", still_only=False, say=said.append,
+        )  # fmt: skip
+    assert any("shots" in line and "$" in line for line in said)
+    assert not (tmp_path / "jobs" / "p1-video").exists(), "refused before a child was opened"
+
+
+def test_a_full_length_track_defaults_to_stills_with_a_few_moving_shots(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    track = _track(tmp_path / "long.wav", seconds=120.0, loud_from=60.0)
+    said: list[str] = []
+    manifest = {"assets": [{}]}
+    child = musicvideo.build(
+        _parent(tmp_path), "long-video", song=_song(), cues=[], words=[], final=track,
+        manifest=manifest, profile="square", still_only=False, say=said.append,
+    )  # fmt: skip
+    kinds = [b["visual_kind"] for b in Job(child).read("script_packet")["beats"]]
+    assert kinds.count("video") == musicvideo.FULL_LENGTH_MOVING and "still" in kinds
+    assert any("stills with camera moves" in line for line in said)
+    assert songs  # the public entry point lives there

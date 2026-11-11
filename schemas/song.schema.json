@@ -114,6 +114,11 @@
           "visual": {
             "type": "string",
             "description": "What a lyric video shows here."
+          },
+          "bars": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many bars the section runs, so a video can start a shot at each one."
           }
         }
       }
