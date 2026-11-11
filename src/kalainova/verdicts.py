@@ -23,19 +23,39 @@ SEPARATES_AT = 0.8
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
 
+def _known_take(job: Job, shot: str, take: int) -> None:
+    entry = (_json(job.folder / "takes.json").get("shots") or {}).get(shot)
+    if not entry or not any(t["n"] == take for t in entry["takes"]):
+        raise ContractError(f"{job.id}: {shot} has no take {take} to give a verdict on")
+
+
 def record(
-    job: Job, verdict: str, *, reviewer: str, shot: str | None = None, note: str = ""
+    job: Job,
+    verdict: str,
+    *,
+    reviewer: str,
+    shot: str | None = None,
+    note: str = "",
+    take: int | None = None,
 ) -> dict[str, Any]:
-    """Write down what a person said. It has to name them, because a verdict is theirs."""
+    """Write down what a person said. It has to name them, because a verdict is theirs.
+
+    A verdict on a shot may name one of its takes, so each model's result in a bench gets its own.
+    """
     if verdict not in CHOICES:
         raise ContractError(f"a verdict is one of {CHOICES}, not {verdict!r}")
     if not reviewer.strip():
         raise ContractError("a verdict names the person who gave it")
+    if take is not None:
+        if not shot:
+            raise ContractError("a verdict on a take names the shot it belongs to")
+        _known_take(job, shot, take)
     entry = {
         "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "verdict": verdict,
         "reviewer": reviewer,
         **({"shot": shot} if shot else {}),
+        **({"take": take} if take is not None else {}),
         **({"note": note} if note else {}),
     }
     with open(job.folder / VERDICTS_FILE, "a") as fh:
@@ -73,11 +93,14 @@ def _piece_points(folder: Path, verdict: str) -> dict[str, tuple[float, str]]:
     return points
 
 
-def _shot_points(folder: Path, shot: str, verdict: str) -> dict[str, tuple[float, str]]:
+def _shot_points(
+    folder: Path, shot: str, verdict: str, take: int | None = None
+) -> dict[str, tuple[float, str]]:
     entry = (_json(folder / "takes.json").get("shots") or {}).get(shot)
     if not entry:
         return {}
-    chosen: dict[str, Any] = next((t for t in entry["takes"] if t["n"] == entry["chosen"]), {})
+    wanted = entry["chosen"] if take is None else take
+    chosen: dict[str, Any] = next((t for t in entry["takes"] if t["n"] == wanted), {})
     points = {}
     for name, value in (chosen.get("readings") or {}).items():
         number = _number(value)
@@ -92,7 +115,7 @@ def _gather(jobs_root: Path) -> dict[str, list[tuple[float, str]]]:
         for entry in load(folder):
             shot = entry.get("shot")
             found = (
-                _shot_points(folder, shot, entry["verdict"])
+                _shot_points(folder, shot, entry["verdict"], entry.get("take"))
                 if shot
                 else _piece_points(folder, entry["verdict"])
             )

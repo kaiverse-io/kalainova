@@ -89,7 +89,8 @@ class Provider:
         if self.free:
             return 0.0
         key = self.price_key(capability, request)
-        if not config.price_for(self.name, key):
+        model = request.get("model")
+        if not config.price_for(self.name, key, model):
             return None
         return config.estimate(
             self.name,
@@ -97,6 +98,7 @@ class Provider:
             key=key,
             chars=request.get("chars", 0),
             duration=request.get("duration", 0.0),
+            model=model,
         )
 
     def reference_support(self, capability: str, model: str) -> dict[str, Any]:

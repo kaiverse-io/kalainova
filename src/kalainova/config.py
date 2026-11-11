@@ -44,8 +44,10 @@ def model_for(provider: str, key: str) -> str:
     return str(studio().get("models", {}).get(provider, {}).get(key, ""))
 
 
-def price_for(provider: str, key: str) -> dict:
-    return dict(studio().get("prices", {}).get(provider, {}).get(key, {}))
+def price_for(provider: str, key: str, model: str | None = None) -> dict:
+    """A model's own price row if the table has one under its slug, otherwise the capability's."""
+    table = studio().get("prices", {}).get(provider, {})
+    return dict((model and table.get(model)) or table.get(key, {}))
 
 
 def reference_spec(provider: str, capability: str, model: str) -> dict:
@@ -87,10 +89,16 @@ def space_spec(capability: str) -> dict:
 
 
 def estimate(
-    provider: str, capability: str, *, chars: int = 0, duration: float = 0.0, key: str | None = None
+    provider: str,
+    capability: str,
+    *,
+    chars: int = 0,
+    duration: float = 0.0,
+    key: str | None = None,
+    model: str | None = None,
 ) -> float:
     """Pre-call cost estimate from the price table, used to reserve against the cap."""
-    p = price_for(provider, key or capability)
+    p = price_for(provider, key or capability, model)
     return (
         chars / 1000 * p.get("per_kchar", 0)
         + duration * p.get("per_sec", 0)

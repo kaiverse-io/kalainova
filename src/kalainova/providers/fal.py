@@ -72,6 +72,18 @@ class Fal(Provider):
             return "reference_to_video"
         return "image_to_video" if capability == "video" and request.get("image") else capability
 
+    def estimate(self, capability: str, **request: Any) -> float | None:
+        """A clip is billed at the length the model allows, which is never shorter than the ask."""
+        if capability == "video" and request.get("duration"):
+            key = self.price_key(capability, request)
+            spec = video_spec("fal", request.get("model") or model_for("fal", key))
+            if spec:
+                request = {
+                    **request,
+                    "duration": float(_billed_length(spec, request["duration"])[0]),
+                }
+        return super().estimate(capability, **request)
+
     def reference_support(self, capability: str, model: str) -> Fields:
         return reference_spec("fal", capability, model)
 
@@ -218,7 +230,7 @@ class Fal(Provider):
         if seed is not None:
             payload["seed"] = seed
         data = self._run(model, payload, timeout=1800)
-        cost = billed * price_for("fal", key).get("per_sec", 0)
+        cost = billed * price_for("fal", key, model).get("per_sec", 0)
         self._fetch(data["video"]["url"], dst, cost)
         meta = {"billed_sec": billed, **_seed_of(data, seed)}
         return Result(path=dst, cost=cost, model=model, meta=meta)
