@@ -38,6 +38,7 @@ The operator says what to make. Everything else is yours until the gate. Ask at 
 - A vertical piece has a beat every 4 to 6 seconds, at most five words per line, and the hook on screen in frame 0.
 - Any fact goes in `claims` with a source (`research-a-piece` skill). Invented worlds, people, and backstory are marked as fiction in `continuity`.
 - Run `uv run kalainova shotplan <job>` and fix what it reports.
+- For any job with a cap and moving shots, set `brief.animatic_gate` to true. Then `uv run kalainova animatic <job>` makes a rough cut from stills and the voice, with no video paid for, and prints what the video would cost. Give the operator the file. Video stays held until they have watched it and said so (`kalainova verdict <job> accept --animatic --reviewer NAME`, a person's name, never yours). See `docs/how-to/watch-a-rough-cut.md`.
 
 ## 5. Make the picture and the sound
 

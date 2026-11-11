@@ -37,10 +37,12 @@ def record(
     shot: str | None = None,
     note: str = "",
     take: int | None = None,
+    animatic: bool = False,
 ) -> dict[str, Any]:
     """Write down what a person said. It has to name them, because a verdict is theirs.
 
     A verdict on a shot may name one of its takes, so each model's result in a bench gets its own.
+    A verdict on the animatic is on the rough cut as it stands; the job records which cut it was.
     """
     if verdict not in CHOICES:
         raise ContractError(f"a verdict is one of {CHOICES}, not {verdict!r}")
@@ -50,17 +52,36 @@ def record(
         if not shot:
             raise ContractError("a verdict on a take names the shot it belongs to")
         _known_take(job, shot, take)
+    if animatic and (shot or take is not None):
+        raise ContractError("a verdict on the animatic is on the whole rough cut, not one shot")
+    if animatic and not job.has("animatic"):
+        raise ContractError(f"{job.id}: no animatic to give a verdict on; run `kalainova animatic`")
     entry = {
         "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "verdict": verdict,
         "reviewer": reviewer,
+        **({"stage": "animatic"} if animatic else {}),
         **({"shot": shot} if shot else {}),
         **({"take": take} if take is not None else {}),
         **({"note": note} if note else {}),
     }
     with open(job.folder / VERDICTS_FILE, "a") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    if animatic:
+        _note_animatic(job, entry)
     return entry
+
+
+def _note_animatic(job: Job, entry: dict[str, Any]) -> None:
+    """The job's own field for it: a person watched this cut, and said this."""
+    data = job.job
+    data["animatic_reviewed"] = {
+        "verdict": entry["verdict"],
+        "reviewer": entry["reviewer"],
+        "at": entry["at"],
+        "animatic_sha256": job.read("animatic")["sha256"],
+    }
+    job.write("job", data)
 
 
 def load(folder: Path) -> list[dict[str, Any]]:
@@ -137,6 +158,8 @@ def samples(jobs_root: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for folder in sorted(p for p in jobs_root.iterdir() if p.is_dir()):
         for entry in load(folder):
+            if entry.get("stage") == "animatic":
+                continue  # a rough cut's verdict says nothing about what the bar reads on the piece
             shot = entry.get("shot")
             if shot:
                 found = _shot_points(folder, shot, entry["verdict"], entry.get("take"))

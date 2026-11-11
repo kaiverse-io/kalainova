@@ -2,6 +2,7 @@
 
 kalainova kit new|add|set|freeze|bump|show <kit> ...
 kalainova stream new|show|canon <stream> ...
+kalainova look <kit> [--stills --cost-cap N --image PROVIDER:MODEL]  a sheet to choose a look from
 kalainova schedule <stream> <date> "<brief>" [--cast a,b]
 kalainova request <stream> "<brief>" [--cast a,b] [--slot DATE] [--amplify NOTE]
 """
@@ -13,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import consistency, kits, streams
+from . import consistency, kits, lookdev, streams
 from .jobfs import ContractError, home
 
 
@@ -57,6 +58,18 @@ def add_parsers(sub: Any) -> None:
     canon.add_argument("stream")
     canon.add_argument("fact")
     canon.add_argument("--by", required=True)
+
+    look = sub.add_parser("look", help="a sheet of a kit's candidate references; changes no kit")
+    look.add_argument("kit")
+    look.add_argument(
+        "--stills", action="store_true", help="also make one test still per look (paid)"
+    )
+    look.add_argument(
+        "--image", metavar="PROVIDER:MODEL", help="with --stills: a model that takes references"
+    )
+    look.add_argument(
+        "--cost-cap", type=float, help="with --stills: the most the test stills may cost"
+    )
 
     slot = sub.add_parser("schedule")
     slot.add_argument("stream")
@@ -152,6 +165,20 @@ def _stream(a: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _look(a: argparse.Namespace, root: Path) -> int:
+    made: list[tuple[str, Path]] = []
+    if a.stills:
+        pin = _pin(a.image)
+        if not pin or a.cost_cap is None:
+            raise ContractError("--stills spends money: give --image PROVIDER:MODEL and --cost-cap")
+        made = lookdev.make_test_stills(
+            root, a.kit, cost_cap=a.cost_cap, provider=pin["provider"], model=pin["model"]
+        )
+    print(lookdev.sheet(root, a.kit, lookdev.out_dir(a.kit) / "look-sheet.jpg", stills=made))
+    print(f"a person picks from it; `kalainova kit freeze {a.kit} --by NAME` stays a person's")
+    return 0
+
+
 def dispatch(a: argparse.Namespace) -> int | None:
     """Run a command from this module, or None if it belongs to another."""
     root = home()
@@ -159,6 +186,8 @@ def dispatch(a: argparse.Namespace) -> int | None:
         return _kit(a, root)
     if a.cmd == "stream":
         return _stream(a, root)
+    if a.cmd == "look":
+        return _look(a, root)
     if a.cmd == "schedule":
         print(streams.schedule_add(root, a.stream, a.date, a.brief, cast=_names(a.cast)))
         return 0
