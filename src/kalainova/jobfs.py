@@ -38,6 +38,7 @@ CONTRACT_FILES = {
     "song": "song.json",
     "research": "research.json",
     "takes": "takes.json",
+    "findings": "findings.json",
     "animatic": "animatic.json",
 }
 

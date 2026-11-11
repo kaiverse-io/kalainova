@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,7 @@ def plan_checks(data: Fields, packet: Fields) -> list[Fields]:
         budget=shots.video_budget(data),
         allow_stills=True,
         wants_video="video" in data.get("media", []),
+        character_max_sec=shots.character_ceiling(data),
     )
     return [{**p, "status": "warn"} for p in found]
 
@@ -117,18 +119,103 @@ def shape(prof: Fields) -> str:
     return "vertical" if height > width else "square" if height == width else "landscape"
 
 
+MOTION_FAULTS = {"warping": "warping", "flicker": "flicker", "objects_change": "object_changes"}
+
+
+def shot_problems(shot: Fields) -> list[str]:
+    """What a judge's reading of one shot says is wrong, in the words findings.json uses."""
+    found = [name for key, name in MOTION_FAULTS.items() if shot.get(key) is True]
+    if shot.get("moved") is False or shot.get("action_happened") is False:
+        found.append("action_missing")
+    if shot.get("geometry_ok") is False:
+        found.append("geometry")
+    if shot.get("matches_previous") is False:
+        found.append("mismatch")
+    return found
+
+
+def findings_from_judge(job_id: str, judge: Fields) -> Fields | None:
+    """The judge's per-shot faults as a file a retake can read, or None when it found none."""
+    shots_found = [
+        {
+            "id": str(s.get("id")),
+            "problems": problems,
+            "note": str(s.get("note") or "see the motion strip"),
+            **(
+                {"suggested_prompt_change": str(s["retake_prompt"])}
+                if s.get("retake_prompt")
+                else {}
+            ),
+        }
+        for s in judge.get("shots") or []
+        if (problems := shot_problems(s))
+    ]
+    if not shots_found:
+        return None
+    return {"schema_version": "0.1", "job_id": job_id, "source": "judge", "shots": shots_found}
+
+
 def judged_shots(judge: Fields) -> list[Fields]:
     bad = [
         f"{s.get('id')}: {s.get('note') or 'see the sheet'}"
         for s in judge.get("shots") or []
-        if s.get("moved") is False
-        or s.get("geometry_ok") is False
-        or s.get("matches_previous") is False
+        if shot_problems(s)
     ]
     if not judge.get("shots"):
         return []
     detail = "; ".join(bad)[:600] or "every shot read as it should"
     return [{"id": "judge.shots", "status": "warn" if bad else "pass", "detail": detail}]
+
+
+def _caption_anchors(path: Path) -> list[float]:
+    """Where burned caption text is anchored, as fractions of the frame height."""
+    import re
+
+    text = path.read_text()
+    res = re.search(r"PlayResY:\s*(\d+)", text)
+    if not res:
+        return []
+    height = float(res.group(1))
+    return [
+        float(m.group(1)) / height for m in re.finditer(r"Dialogue:[^\n]*?\\pos\(\d+,(\d+)\)", text)
+    ]
+
+
+def safe_zone_checks(job: Job, profile: str) -> list[Fields]:
+    """Burned text, and a face where a detector has recorded one, against the interface overlays a
+    short vertical player puts over the frame. Warns only."""
+    zone = config.safe_zone(profile)
+    if not zone:
+        return []
+    out = []
+    caps = job.work / "captions.ass"
+    low, high = zone["caption_y"]
+    floor = float(zone.get("caption_floor", high))
+    anchors = _caption_anchors(caps) if caps.exists() else []
+    off = sorted({round(y, 2) for y in anchors if not low - 0.005 <= y <= high + 0.005})
+    if anchors:
+        detail = (
+            f"burned text is anchored at {off} of the frame height; keep it between"
+            f" {low} and {high} and never below {floor}, where interface overlays cover it"
+            if off
+            else "burned text sits in the band the interface overlays leave clear"
+        )
+        out.append(
+            {"id": "safe_zone.captions", "status": "warn" if off else "pass", "detail": detail}
+        )
+    faces = job.work / "face_centres.json"
+    if faces.exists():
+        centres = json.loads(faces.read_text())
+        lo, hi = zone["face_y"]
+        bad = [c for c in centres if not lo <= float(c["y"]) <= hi]
+        detail = (
+            f"a face centre is outside {lo}-{hi} of the frame height"
+            f" in {len(bad)} of {len(centres)} readings"
+            if bad
+            else "faces sit where interface overlays leave them clear"
+        )
+        out.append({"id": "safe_zone.faces", "status": "warn" if bad else "pass", "detail": detail})
+    return out
 
 
 def kit_checks(job: Job, packet: Fields, am: Fields, sheet: str | None) -> list[Fields]:

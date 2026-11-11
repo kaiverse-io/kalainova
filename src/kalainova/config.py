@@ -70,6 +70,11 @@ def profile(name: str) -> dict:
     return dict(studio().get("profiles", {}).get(name, {}))
 
 
+def safe_zone(name: str) -> dict:
+    """Where interface overlays leave room on a vertical profile, as fractions of the frame."""
+    return dict(profile(name).get("safe_zone") or {})
+
+
 @lru_cache(maxsize=1)
 def _repo_licences() -> dict:
     path = REPO / "config" / "studio.yaml"

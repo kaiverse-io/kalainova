@@ -147,6 +147,8 @@ audio_models:
 takes:
   always: 1                        # made regardless of how the first reads
   most: 2                          # retakes stop here, even if a reading still misses
+  retakes_per_shot: 2              # `kalainova retake` is refused past this, however it is called
+  retakes_per_job: 6               # and past this across the job; a brief can set max_retakes
 
 # Words a video model reads well. Past this a model drops what comes last, so motion goes first.
 prompt_words_max:
@@ -228,13 +230,18 @@ bar:
   song_range_lu_min: 2.0           # less than this has no shape between sections
   song_length_tolerance: 0.25
 
+# character_shot_max_sec: the longest a shot with a character in it should run before a face tends
+#   to drift. ESTIMATE until a live check shows where drift starts. Warns only; a brief overrides it.
+# safe_zone: where the interface overlays of a short vertical player leave room, as fractions of the
+#   frame. Burned text sits in caption_y, never below caption_floor, clear of the right margin; a face
+#   centre sits in face_y. ESTIMATE. Warns only.
 profiles:
-  short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
-  square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
-  landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
+  short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2, safe_zone: {caption_y: [0.55, 0.72], caption_floor: 0.75, right_margin: 0.15, face_y: [0.15, 0.75]}}
+  square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
+  landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
   song: {aspect: "audio-only", target_lufs: -14, true_peak_dbtp_max: -1}
-  story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1}
+  story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
   film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
   film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}

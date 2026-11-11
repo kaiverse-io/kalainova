@@ -35,6 +35,43 @@ def counts(brief: dict[str, Any]) -> tuple[int, int]:
     return always, max(int(brief.get("max_takes", defaults.get("most", 2))), always)
 
 
+def retake_limits(brief: dict[str, Any]) -> tuple[int, int]:
+    """The most retakes one shot gets, and a whole job gets. A brief can set max_retakes."""
+    defaults = config.takes()
+    per_shot = max(int(defaults.get("retakes_per_shot", 2)), 0)
+    per_job = max(int(brief.get("max_retakes", defaults.get("retakes_per_job", 6))), 0)
+    return per_shot, per_job
+
+
+def check_retake(job: Job, shot: str, brief: dict[str, Any]) -> None:
+    """Refuse a retake past the limits. The command enforces this, so no skill can loop past it."""
+    per_shot, per_job = retake_limits(brief)
+    shots = load(job)["shots"]
+    mine = sum(1 for t in (shots.get(shot) or {}).get("takes", []) if t.get("retake"))
+    total = sum(1 for e in shots.values() for t in e["takes"] if t.get("retake"))
+    if mine >= per_shot:
+        raise ContractError(
+            f"{job.id}: {shot} has had {mine} retakes and the limit is {per_shot}; "
+            "choose among its takes with `kalainova take`, or hand it over as it is"
+        )
+    if total >= per_job:
+        raise ContractError(
+            f"{job.id}: the job has had {total} retakes and the limit is {per_job}; "
+            "set brief.max_retakes to allow more, which is the operator's call"
+        )
+
+
+def findings(job: Job) -> dict[str, Any]:
+    """What the last look at the piece in motion found, or nothing."""
+    if job.has("findings"):
+        return job.read("findings")
+    return {"schema_version": "0.1", "job_id": job.id, "source": "agent", "shots": []}
+
+
+def finding_for(job: Job, shot: str) -> dict[str, Any] | None:
+    return next((f for f in findings(job)["shots"] if f["id"] == shot), None)
+
+
 def load(job: Job) -> dict[str, Any]:
     if job.has("takes"):
         return job.read("takes")

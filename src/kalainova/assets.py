@@ -120,6 +120,7 @@ def _review_the_plan(piece: _Piece, *, hold_to_the_cap: bool = True) -> None:
         wants_video="video" in piece.kinds,
         style=shotmake.style(piece.data),
         limit=shots.word_limit(config.preference("video", piece.data)),
+        character_max_sec=shots.character_ceiling(piece.data),
     )
     for problem in found:
         if problem["status"] == "warn":
@@ -218,9 +219,6 @@ def _join_voice(piece: _Piece, lines: _Narration, opening_ms: int) -> None:
     )
 
 
-_unspoken_length = preproduction.estimated_length
-
-
 def _make_voice(piece: _Piece) -> float:
     """Every line, and the timeline they set. Returns the length of the whole piece."""
     # a film opens on picture and music, and holds after its last word; a reel starts on the words
@@ -232,7 +230,7 @@ def _make_voice(piece: _Piece) -> float:
     lines = _Narration()
     for n, beat in enumerate(piece.packet["beats"]):
         start = at
-        at += _say_line(piece, n, start, lines) if speaks else _unspoken_length(beat)
+        at += _say_line(piece, n, start, lines) if speaks else preproduction.estimated_length(beat)
         piece.timeline.append(
             {
                 "beat_id": beat["id"],

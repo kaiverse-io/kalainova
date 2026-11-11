@@ -113,6 +113,8 @@ These warn and choose among takes. Only a wrong level on the finished file block
 
 No reading sees that a door opens the wrong way or that a coat became a jacket. `kalainova sheet` shows the first and last frame of each shot for that reason, and the vision judge reads the same sheet when a model is listed.
 
+Warping, flicker, and an object that changes between frames are not in a first and last frame either. `kalainova sheet --motion` shows several frames across every shot, and `sheet --cuts` shows both sides of every join. The vision judge reads the motion strip with the first sheet and writes what it found to `findings.json`; with no model key the agent looks and writes the same file. These are warnings: they inform the person who decides, and block nothing (ADR 0011). Two more warnings come from `config/studio.yaml`: a shot with a character in it that runs past `character_shot_max_sec`, and burned text or a face outside a vertical profile's `safe_zone`, where interface overlays cover the frame. Both numbers are estimates until a live check.
+
 ## Known gaps
 
 - Stereo only. An honest 5.1 needs a real multichannel mix, and an upmix from stereo does not count.

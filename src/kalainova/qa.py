@@ -26,6 +26,28 @@ def contact_sheet(job: Job, final, em: dict) -> str | None:
     return out.name if out else None
 
 
+def motion_sheets(job: Job, final, em: dict) -> tuple[str | None, str | None]:
+    """A strip of frames across every shot, and a strip of frames either side of every cut."""
+    motion = timeline.motion_sheet(
+        final, em.get("cuts", []), em["duration_sec"], job.work / "motion.jpg"
+    )
+    cuts = em.get("cuts", [])
+    report = timeline.cut_report(final, cuts) if len(cuts) > 1 else []
+    around = timeline.cut_sheet(final, report, job.work / "cuts.jpg")
+    return (motion.name if motion else None), (around.name if around else None)
+
+
+def _keep_findings(job: Job, judge: dict) -> None:
+    """The judge's faults, in a file a retake can read. An agent's findings are never overwritten."""
+    if job.has("findings") and job.read("findings").get("source") != "judge":
+        return
+    found = qachecks.findings_from_judge(job.id, judge)
+    if found:
+        job.write("findings", found)
+    else:
+        job.path("findings").unlink(missing_ok=True)
+
+
 def run_file(job: Job) -> dict:
     """Checks that need only the delivered file and its record, for files the engine did not render."""
     data, am, final = job.job, job.read("asset_manifest"), job.artifact()
@@ -352,6 +374,8 @@ def run(job: Job) -> dict:
     checks.extend(qachecks.licence_checks(am))
 
     sheet = contact_sheet(job, final, em)
+    motion, cut_strip = motion_sheets(job, final, em)
+    checks.extend(qachecks.safe_zone_checks(job, data.get("profile") or "short-9x16"))
     checks.extend(qachecks.kit_checks(job, packet, am, sheet))
     judge = None
     try:
@@ -365,11 +389,12 @@ def run(job: Job) -> dict:
                 prompts.load("qa_rubric").format(
                     shape=qachecks.shape(prof), script=qachecks.judge_script(packet)
                 ),
-                images=[job.work / sheet],
+                images=[job.work / sheet, *([job.work / motion] if motion else [])],
                 max_tokens=1600,
                 note="qa-judge",
             )
             judge = extract_json(res.text)
+            _keep_findings(job, judge)
             checks.extend(qachecks.judged_shots(judge))
             _check(
                 checks,
@@ -419,6 +444,8 @@ def run(job: Job) -> dict:
                 "audio": "final.m4a" if (job.work / "final.m4a").exists() else None,
                 "thumbnail": "thumb.jpg",
                 "contact_sheet": sheet,
+                "motion_strip": motion,
+                "cut_strip": cut_strip,
                 "captions_srt": "captions.srt" if (job.work / "captions.srt").exists() else None,
             }.items()
             if v

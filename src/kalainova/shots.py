@@ -47,6 +47,22 @@ def video_budget(data: dict[str, Any]) -> int:
     return UNLIMITED if moving else DEFAULT_STILL_PROFILE_BUDGET
 
 
+def beat_length(beat: Beat) -> float:
+    """How long a shot runs when no voice sets it: the planned length, else the words at pace."""
+    return float(beat.get("duration_sec") or max(2.0, len(beat["text"].split()) / 2.6))
+
+
+def character_ceiling(data: dict[str, Any]) -> float | None:
+    """The longest a shot with a character in it should run, or None for no ceiling.
+
+    A profile sets a default; a brief overrides it with character_shot_max_sec, and 0 turns it off.
+    The ceiling only ever warns, so an operator's choice is never overridden."""
+    asked = (data.get("brief") or {}).get("character_shot_max_sec")
+    if asked is None:
+        asked = config.profile(data.get("profile") or "short-9x16").get("character_shot_max_sec")
+    return float(asked) if asked else None
+
+
 def _names(beat: Beat, field: str) -> list[str]:
     value = beat.get(field)
     if not value:
@@ -230,10 +246,26 @@ def _prompt_lengths(packet: Packet, style: str, limit: int | None) -> list[Probl
     return out
 
 
+def _character_lengths(beats: list[Beat], ceiling: float | None) -> list[Problem]:
+    if not ceiling:
+        return []
+    out = []
+    for beat in beats:
+        length = beat_length(beat)
+        if beat.get("visual_kind") == "video" and beat.get("cast") and length > ceiling:
+            detail = (
+                f"{beat['id']} holds a character for about {length:.1f}s; past {ceiling:g}s a face "
+                "tends to drift, so cut between angles instead"
+            )
+            out.append(_problem("character_shot_length", "warn", detail))
+    return out
+
+
 def review(
     packet: Packet,
     *,
     budget: int,
+    character_max_sec: float | None = None,
     allow_stills: bool = False,
     wants_video: bool = True,
     style: str = "",
@@ -246,6 +278,7 @@ def review(
     out += _sequence_problems(beats)
     out += _slideshow_risk(beats, wants_video)
     out += _prompt_lengths(packet, style, limit)
+    out += _character_lengths(beats, character_max_sec)
     for beat in beats:
         if beat.get("visual_kind") == "video":
             out += _moving_shot_problems(beat)
