@@ -37,6 +37,8 @@
 | Live adapter check (opt-in, paid) | `kalainova providers --check` | `providers/check.py` | `tests/test_provider_check.py` |
 | Chain of title | `kalainova provenance`, `ledger` | `provenance.py` | `tests/test_verdicts_provenance.py` |
 | Approval and publishing | `kalainova approve`, `publish` | `publish/` | `tests/test_engine.py`, `tests/test_gate_master.py` |
+| AI label per platform from the assets, and a publish time where the platform holds one | `kalainova publish --at` | `publish/labels.py`, `publish/aggregator.py` | `tests/test_publish_labels.py` |
+| Cover picker: sharpest clean frame, square cut, brief override | `brief.cover_at_sec`, `brief.cover_file` | `render/cover.py`, `render/export.py` | `tests/test_cover.py` |
 | Reservations and the ledger | every paid call | `jobfs.py`, `providers/router.py` | `tests/test_ledger.py`, `tests/test_router.py` |
 | Open models on this machine | `providers: {"video": ["mac"]}` | `providers/mac.py`, `providers/runners/` | `tests/test_mac_provider.py` |
 | Incremental render | `kalainova make --from edit` | `render/cache.py` | `tests/test_rendercache.py` |

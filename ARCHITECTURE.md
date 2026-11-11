@@ -559,6 +559,8 @@ Edit manifest to a closed op list, then to the file through ffmpeg. A plan can b
 
 Kinetic captions (`brief.captions: kinetic`) take a different route inside `burn_captions`: `drawn` writes a transparent HyperFrames page from the same word timings, renders it alone to a WebM with alpha, and lays it over the graded picture with ffmpeg, so the grade path is untouched. The page keeps its type inside the profile's `safe_zone`, and the boxes it placed go to `captions.drawn.json` for the QA warning. `drawn` also writes the title, quote and stat card compositions (`kalainova card`). Film profiles never reach it: they burn nothing.
 
+The export step picks the cover (`cover`): the sharpest clean frame across the piece, clear of the fades, or the time or file a brief names, plus a square cut around the most detailed part.
+
 Picture steps hand each other lossless 10-bit masters, so nothing degrades between steps. The cost is hundreds of megabits a second, gigabytes for a short piece. The title pass is skipped when there is nothing to burn in, rather than writing a second copy. `cache.clean` (`kalainova clean`) deletes the picture intermediates a plan wrote, and nothing else: the final, assets, takes, and sound stems stay, and the next render remakes what was deleted.
 
 ```
@@ -620,7 +622,7 @@ What a person said about a piece or one shot, or about the animatic as a rough c
 How a piece was made, for whoever answers for it: each asset's model, weights, seed, terms, and hash.
 
 ### publish
-Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account.
+Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account. `labels` sets each platform's AI-content label from the assets' synthetic flag, using the fields the aggregator documents, and refuses a platform with none; it also holds a publish time only where the platform's own API takes one. `aggregator` is the one-upload route to several platforms.
 
 ### providers
 The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.

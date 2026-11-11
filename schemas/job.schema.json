@@ -150,6 +150,15 @@
           "type": "integer",
           "minimum": 0
         },
+        "cover_at_sec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Take the cover frame at this time instead of the picker's choice."
+        },
+        "cover_file": {
+          "type": "string",
+          "description": "A picture in the job's work folder to use as the cover instead of a frame."
+        },
         "animatic_gate": {
           "type": "boolean",
           "description": "When true, the assets stage pays for no video until the animatic has a verdict of accept."

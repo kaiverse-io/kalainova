@@ -295,7 +295,13 @@ def _picture_steps(job: Job, em: dict[str, Any], assets: dict[str, Any]) -> list
     return [*steps, {"op": "overlay_text", "args": overlay}]
 
 
-def _final_step(em: dict[str, Any], am: dict[str, Any], video: str, audio: str | None) -> Step:
+def _final_step(
+    em: dict[str, Any],
+    am: dict[str, Any],
+    video: str,
+    audio: str | None,
+    brief: dict[str, Any] | None = None,
+) -> Step:
     prof = em["profile"]
     return {
         "op": "export",
@@ -306,6 +312,9 @@ def _final_step(em: dict[str, Any], am: dict[str, Any], video: str, audio: str |
             "crf": 16,
             "preset": "slow",
             "thumbnail": "thumb.jpg",
+            "thumbnail_square": "thumb_square.jpg",
+            "cover_at_sec": (brief or {}).get("cover_at_sec"),
+            "cover_file": (brief or {}).get("cover_file"),
             "audio_only": "final.m4a" if audio else None,
             "fade_in_sec": em.get("fade_in_sec"),
             "fade_out_sec": em.get("fade_out_sec"),
@@ -329,7 +338,7 @@ def _piece_steps(job: Job, em: dict[str, Any], am: dict[str, Any]) -> list[Step]
     if em.get("audio") or original:
         steps += _audio_steps(em, assets, original=original)
         audio = "mix.norm.wav"
-    return [*steps, _final_step(em, am, video, audio)]
+    return [*steps, _final_step(em, am, video, audio, job.job.get("brief"))]
 
 
 def compile_plan(job: Job) -> dict[str, Any]:
