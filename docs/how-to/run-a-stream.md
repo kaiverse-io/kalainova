@@ -48,6 +48,8 @@ uv run kalainova kit freeze <kit> --by <your name>
 
 To cast a face: generate candidates, pick one, then make a front, a three-quarter, a profile, a full-body shot, and a few expressions from that pick. Freezing is your attestation that the face and voice were invented and the character is an adult. Check that the face does not resemble a real person, because no software can prove that.
 
+Look before you freeze. `kalainova look <kit>` writes one sheet of the draft's candidate references, each shown whole, as the upper two thirds, and close up (these are crops of what you gave it, not new views). Add `--stills --image <provider>:<model> --cost-cap <usd>` to also make one test still per look on a model that takes references. That spends money, so it needs a cap and a model you name. The sheet changes no kit. You look at it, you pick, and you freeze. Nothing in the engine does either for you.
+
 To change anything later, run `kit bump`, edit, and freeze again. Existing jobs keep the version they locked.
 
 ## 3. Make a stream
@@ -76,6 +78,8 @@ uv run kalainova publish jobs/<id> youtube --live
 `approve` refuses an empty reviewer name, a placeholder, and a manifest that names a provider or model the router never called (`generations.jsonl` is the router's record). It also refuses a model whose terms do not allow commercial use, unless the job's brief sets `draft` for a piece that will not be released.
 
 The job records exact kit versions in `kit.lock.json`. If a reference changes on disk, or a kit version is edited, the engine stops.
+
+Before a piece is made, `kalainova animatic <job>` makes a rough cut from stills and the voice, with no video paid for. Set `brief.animatic_gate` to hold all video until you accept it. See [Watch a rough cut](watch-a-rough-cut.md).
 
 ## 5. Keep the story straight
 

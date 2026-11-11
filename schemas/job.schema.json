@@ -146,6 +146,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "animatic_gate": {
+          "type": "boolean",
+          "description": "When true, the assets stage pays for no video until the animatic has a verdict of accept."
+        },
         "client": {
           "type": "string",
           "description": "Client label for strategy client. The deliverable goes to their accounts; they hold the rights."
@@ -165,6 +169,18 @@
     "profile": {
       "type": "string",
       "description": "Name from config/studio.yaml profiles."
+    },
+    "animatic_reviewed": {
+      "type": "object",
+      "description": "Written by `kalainova verdict --animatic`: a person's verdict on the rough cut, and which cut it was.",
+      "required": ["verdict", "reviewer", "at", "animatic_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {"enum": ["accept", "fix", "reject"]},
+        "reviewer": {"type": "string", "minLength": 1},
+        "at": {"type": "string"},
+        "animatic_sha256": {"type": "string"}
+      }
     },
     "edit": {
       "type": "object",

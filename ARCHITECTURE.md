@@ -428,16 +428,20 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
 
 ```
  __main__ ──▶ studio_cli ──▶ streams ──▶ consistency ──▶ kits ──▶ blobstore
+    │            └─▶ lookdev ─▶ kits, kitrules, timeline, providers
     │                                       │  │          │
     │                                       │  └─▶ kitrules ◀── scripts/check.py
     │                                       └─▶ providers
     ├─▶ production_cli ──▶ dub, nle, provenance, qa, research, shotmake, shots,
-    │                      songs, takes, timeline, verdicts, editor, config, bench
+    │                      songs, takes, timeline, verdicts, editor, config, bench,
+    │                      assets, preproduction
     ├─▶ plan ──────▶ consistency, prompts, providers, shots
     ├─▶ research ──▶ plan, prompts, providers, config
     ├─▶ writers ───▶ consistency, plan, prompts, providers
     ├─▶ songs ─────▶ bar, captions, config, editor, media, providers, render, takes, writers
-    ├─▶ assets ────▶ consistency, media, shotmake, shots, soundbed, takes, config, providers
+    ├─▶ assets ────▶ consistency, media, preproduction, shotmake, shots, soundbed, takes,
+    │                config, providers
+    ├─▶ preproduction ▶ media, motion, shotmake, takes, timeline, providers
     ├─▶ soundbed ──▶ blobstore, kits, media, shotmake
     ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, config, providers
     ├─▶ takes ─────▶ bar, blobstore, media, config
@@ -460,7 +464,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ nle: the cut as timeline files, from the job folder alone
     ├─▶ provenance ▶ blobstore, takes, verdicts, config
     ├─▶ verdicts ──▶ bar, media, jobfs
-    ├─▶ publish ───▶ blobstore, consistency, streams, stock
+    ├─▶ publish ───▶ blobstore, consistency, preproduction, streams, stock
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
     ├─▶ intake ────▶ media, render
     ├─▶ stock
@@ -474,7 +478,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
 The command line. Parses arguments and calls a stage. Holds no rules.
 
 ### studio_cli
-Commands for kits, streams, canon, schedules, and requests.
+Commands for kits, streams, canon, schedules, requests, and the look sheet.
 
 ### production_cli
 Commands for making and judging a piece shot by shot, songs, research, and everything after a cut: takes, retakes, the shot sheet, timeline export, clips, dubbing, verdicts, provenance, and the ledger.
@@ -524,6 +528,22 @@ A camera test: one shot made on several models from the same start frame, prompt
 
 ### shotmake
 One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A first run and a retake share this code, so they keep the same promise and the same record. A retake is refused past the take limits (`takes.check_retake`), and with no note it reads that shot's finding from `findings.json`.
+
+### preproduction
+The rough cut before the money, and the gate on it. The assets stage, run with `animatic`, makes the voice and one still per shot and asks for no video. This module prices each moving shot (`moving_quotes`, per shot, at the length asked for), draws the stills under a camera move with the words and the voice into `animatic.mp4` stamped ANIMATIC, and writes `animatic.json`. `require_review` is the gate: with `brief.animatic_gate` set, the assets stage refuses before any spend unless the job's `animatic_reviewed` is an `accept` for the cut that exists now. `publish` refuses an animatic by name and by hash. Depends on `media`, `motion`, `shotmake`, `takes`, `timeline`, and `providers`.
+
+```
+ assets(animatic) ─▶ voice + stills ─▶ made{timeline, shots, quotes}
+                                           │
+        preproduction.render ──▶ animatic.mp4        preproduction.write_record ──▶ animatic.json
+                                                                   │
+ verdict --animatic ──▶ job.animatic_reviewed ◀── sha of the cut ──┘
+                              │
+ assets(full) ─▶ require_review ─▶ refuses, or goes on to pay for video
+```
+
+### lookdev
+Look development: a sheet of a kit's candidate references, each at three framings (crops of what was given), and optionally one test still per look through the router, under a cap, on a model that takes references. It reads a kit's draft or latest frozen version and changes no kit. A person picks, and a person freezes. Depends on `kits`, `kitrules`, `timeline`, and `providers`.
 
 ### assets
 Script to files. Every shot of a stream job carries its references and pinned model.
@@ -592,7 +612,7 @@ The checks QA runs that each ask one question: a kept promise of motion, a model
 What QA asks of a stream job: did the record keep what the lock promised, and do the frames match the kit's references.
 
 ### verdicts
-What a person said about a piece or one shot, and which readings predict it. `review-set` lists each verdict beside its readings, including a shot's own source clip, and says "not enough yet" below three of each side. It reads the bar's `generated_shot_motion` and cannot approve or publish anything.
+What a person said about a piece or one shot, or about the animatic as a rough cut, and which readings predict it. A verdict on the animatic sets the job's `animatic_reviewed` and is left out of the review set. `review-set` lists each verdict beside its readings, including a shot's own source clip, and says "not enough yet" below three of each side. It reads the bar's `generated_shot_motion` and cannot approve or publish anything.
 
 ### provenance
 How a piece was made, for whoever answers for it: each asset's model, weights, seed, terms, and hash.
