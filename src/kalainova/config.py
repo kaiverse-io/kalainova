@@ -98,7 +98,11 @@ def estimate(
     model: str | None = None,
 ) -> float:
     """Pre-call cost estimate from the price table, used to reserve against the cap."""
-    p = price_for(provider, key or capability, model)
+    p = (
+        price_for(provider, key or capability, model)
+        if model
+        else price_for(provider, key or capability)
+    )
     return (
         chars / 1000 * p.get("per_kchar", 0)
         + duration * p.get("per_sec", 0)

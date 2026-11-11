@@ -90,7 +90,8 @@ class Provider:
             return 0.0
         key = self.price_key(capability, request)
         model = request.get("model")
-        if not config.price_for(self.name, key, model):
+        row = config.price_for(self.name, key, model) if model else config.price_for(self.name, key)
+        if not row:
             return None
         return config.estimate(
             self.name,
