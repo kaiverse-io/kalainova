@@ -133,3 +133,63 @@ def test_a_long_piece_samples_shots_from_end_to_end():
     picked = bar._spread(list(range(1000)), 10)
     assert len(picked) == 10 and picked[0] == 0 and picked[-1] >= 900
     assert bar._spread([1.0, 2.0], 10) == [1.0, 2.0]
+
+
+def _claim(job, final, **asset):
+    manifest = job.read("asset_manifest")
+    manifest["assets"] = [{"id": "v", "kind": "audio", "path": "x.wav", **asset}]
+    job.write("asset_manifest", manifest)
+    render.stamp(job, final)
+
+
+def _rows(job, *rows):
+    (job.folder / "generations.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+def test_approval_itself_refuses_a_placeholder_manifest(tmp_path, monkeypatch):
+    job, final, _ = _approvable(tmp_path, monkeypatch)
+    _claim(job, final, provider="local", model="local-pad")
+    with pytest.raises(ContractError, match="placeholder"):
+        publish.approve(job, "human", platforms=["youtube"])
+
+
+def test_a_manifest_naming_a_provider_the_router_never_called_is_refused(tmp_path, monkeypatch):
+    job, final, _ = _approvable(tmp_path, monkeypatch)
+    _claim(job, final, provider="fal", model="some-model")
+    _rows(job, {"key": "k", "provider": "elevenlabs", "model": "other", "meta": {}})
+    with pytest.raises(ContractError, match="never called"):
+        publish.approve(job, "human", platforms=["youtube"])
+
+
+def test_a_manifest_the_router_wrote_is_approved(tmp_path, monkeypatch):
+    job, final, _ = _approvable(tmp_path, monkeypatch)
+    _claim(job, final, provider="fal", model="some-model")
+    _rows(job, {"key": "k", "provider": "fal", "model": "some-model", "meta": {}})
+    assert publish.approve(job, "human", platforms=["youtube"])["reviewer"] == "human"
+
+
+def test_a_row_a_caller_supplied_is_no_proof(tmp_path, monkeypatch):
+    job, final, _ = _approvable(tmp_path, monkeypatch)
+    _claim(job, final, provider="fal", model="some-model")
+    _rows(job, {"key": "k", "provider": "fal", "model": "some-model", "source": "intake"})
+    with pytest.raises(ContractError, match="never called"):
+        publish.approve(job, "human", platforms=["youtube"])
+
+
+def test_terms_that_forbid_commercial_use_stop_approval_unless_the_job_is_a_draft(
+    tmp_path, monkeypatch
+):
+    job, final, _ = _approvable(tmp_path, monkeypatch)
+    _claim(job, final, provider="spaces", model="some-app")
+    with pytest.raises(ContractError, match="commercial"):
+        publish.approve(job, "human", platforms=["youtube"])
+    data = job.job
+    data["brief"]["draft"] = True
+    job.write("job", data)
+    assert publish.approve(job, "human", platforms=["youtube"])["reviewer"] == "human"
+
+
+def test_approval_needs_a_reviewer_name(tmp_path, monkeypatch):
+    job, _, _ = _approvable(tmp_path, monkeypatch)
+    with pytest.raises(ContractError, match="reviewer"):
+        publish.approve(job, "  ", platforms=["youtube"])

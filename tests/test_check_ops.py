@@ -16,3 +16,13 @@ def test_the_gate_and_the_engine_agree_on_every_render_op():
     module = importlib.util.module_from_spec(loaded)
     loaded.loader.exec_module(module)
     assert module.OPS == set(spec.OPS)
+
+
+def test_the_gate_and_the_publisher_agree_on_which_models_are_placeholders():
+    from kalainova import publish
+
+    loaded = importlib.util.spec_from_file_location("kalainova_check", CHECK)
+    assert loaded and loaded.loader
+    module = importlib.util.module_from_spec(loaded)
+    loaded.loader.exec_module(module)
+    assert module.LOCAL_MODELS == publish.LOCAL_MODELS
