@@ -249,3 +249,29 @@ def test_a_title_goes_where_the_picture_is_calm():
     frame = np.random.default_rng(1).integers(0, 255, (160, 90)).astype(np.float64)
     frame[10:40] = 30.0  # the only quiet band sits near the top
     assert captions.calmest_band(frame, [0.16, 0.5, 0.8]) == 0.16
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_the_master_level_is_read_against_its_profile_not_a_fixed_number(tmp_path):
+    tone = tmp_path / "tone.mov"
+    media.run(
+        [
+            *("-f", "lavfi", "-i", "testsrc2=s=64x64:d=3:r=24"),
+            *("-f", "lavfi", "-i", "sine=frequency=440:duration=3"),
+            *("-af", "volume=-20dB", "-c:v", "prores_ks", "-c:a", "pcm_s24le", "-ar", "48000"),
+            *("-ac", "2", str(tone)),
+        ]
+    )
+    level = media.loudness(tone)["integrated_lufs"]
+
+    def read(target, peak=-1.0):
+        found = bar.measure_master(
+            tone, target_fps=24.0, target_lufs=target, true_peak_dbtp_max=peak
+        )
+        return {r["id"]: r for r in found}
+
+    assert read(round(level, 1))["master.lkfs"]["ok"]
+    assert read(round(level, 1) + 0.9)["master.lkfs"]["ok"], "inside the tolerance"
+    assert not read(round(level, 1) + 3)["master.lkfs"]["ok"]
+    assert not read(round(level, 1), peak=-60.0)["master.true_peak"]["ok"]
+    assert "+/- 1" in read(-24)["master.lkfs"]["limit"]

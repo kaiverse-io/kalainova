@@ -50,7 +50,11 @@ def _score(take: Take) -> float:
 
 
 def _best(takes: list[Take]) -> int:
-    """The take that reads best among those that pass; otherwise the one closest to passing."""
+    """The take that reads best among those that pass; otherwise the one closest to passing.
+
+    A bench take is a camera test, so it only stands for the shot when nothing else was made.
+    """
+    takes = [t for t in takes if not t.get("bench")] or takes
     passing = [t for t in takes if t["ok"]]
     return int(max(passing or takes, key=_score)["n"])
 
@@ -63,7 +67,7 @@ def record(job: Job, shot: str, take: Take) -> dict[str, Any]:
     )
     entry["takes"] = [t for t in entry["takes"] if t["n"] != take["n"]] + [take]
     entry["takes"].sort(key=lambda t: t["n"])
-    if entry["chosen_by"] != "human":
+    if entry["chosen_by"] != "human" and not (take.get("bench") and len(entry["takes"]) > 1):
         # someone asked for this take because they saw what a reading cannot, so it is used if it
         # reads well, even when an earlier take reads just as well
         asked_for = take.get("note") and take.get("ok")
@@ -134,9 +138,11 @@ def attempt(
     assess: Assess,
     prompt: str = "",
     note: str = "",
+    seed: int | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> Take:
-    """Make one attempt with its own seed, read it, and record it."""
-    seed = seed_for(prompt, n)
+    """Make one attempt with its own seed, read it, and record it with what it cost."""
+    seed = seed_for(prompt, n) if seed is None else seed
     dst = take_path(job, shot, n, suffix)
     provider, res = make(seed, dst)
     readings, ok = assess(dst)
@@ -149,6 +155,8 @@ def attempt(
         "model": res.model,
         "readings": readings,
         "ok": bool(ok),
+        **({"cost": round(float(res.cost), 6)} if res.cost else {}),
+        **(extra or {}),
     }
     if prompt:
         take["prompt"] = prompt
@@ -174,11 +182,17 @@ def make_until_good(
 ) -> Take:
     """Attempts until one reads well or the limit is reached. Returns the chosen take."""
     always, most = counts(brief)
-    done = load(job)["shots"].get(shot, {}).get("takes", [])
-    start = len(done)
-    for n in range(start, most):
-        if n >= always and any(t["ok"] for t in load(job)["shots"].get(shot, {}).get("takes", [])):
+
+    def made() -> list[
+        Take
+    ]:  # a bench take is a camera test, and does not count against the limits
+        found = load(job)["shots"].get(shot, {}).get("takes", [])
+        return [t for t in found if not t.get("bench")]
+
+    while len(made()) < most:
+        if len(made()) >= always and any(t["ok"] for t in made()):
             break
+        n = next_take_number(job, shot)
         attempt(job, shot, n, suffix=suffix, make=make, assess=assess, prompt=prompt)
     found = chosen(job, shot)
     if not found:

@@ -80,10 +80,9 @@ def sound_checks(prof: Fields, am: Fields) -> list[Fields]:
 
 
 def plan_checks(data: Fields, packet: Fields) -> list[Fields]:
-    brief = data.get("brief") or {}
     found = shots.review(
         packet,
-        budget=int(brief.get("max_video_beats", 3)),
+        budget=shots.video_budget(data),
         allow_stills=True,
         wants_video="video" in data.get("media", []),
     )

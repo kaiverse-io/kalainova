@@ -21,7 +21,7 @@ Then name the provider in a job, or in `preference` in `config/studio.yaml`:
 "providers": {"voice": ["mac"], "image": ["mac"], "video": ["mac"], "music": ["mac"], "transcribe": ["mac"]}
 ```
 
-Model ids are under `models.mac` in `config/studio.yaml`. A job asks for moving shots with `brief.max_video_beats`, which defaults to 3.
+Model ids are under `models.mac` in `config/studio.yaml`. A job asks for moving shots with `brief.max_video_beats`, which defaults to every shot on a moving-picture profile and to 3 on an audio-only one.
 
 ## Songs
 

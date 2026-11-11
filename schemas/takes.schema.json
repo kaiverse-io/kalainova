@@ -85,6 +85,14 @@
                 "note": {
                   "type": "string"
                 },
+                "cost": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "bench": {
+                  "type": "boolean",
+                  "description": "A camera test: made to compare models, and never chosen over a real take."
+                },
                 "meta": {
                   "type": "object"
                 },

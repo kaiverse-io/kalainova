@@ -6,15 +6,26 @@ last_reviewed: 2026-11-06
 
 # The studio bar
 
-The goal: **a finished piece a premium streaming platform could ingest, and a viewer could not tell from a good human edit.** That has three layers, and only the first two are measurable here.
+The goal: **a finished file that meets a published delivery specification as far as this engine can reach, and that a viewer could not tell from a good human edit.** That has three layers, and only the first two are measurable here.
 
 | Layer | Who decides | How |
 |---|---|---|
 | Delivery | A tool | `kalainova bar <job>` against published ingest requirements |
 | Craft | A tool, then a human | `kalainova bar`, then watching it |
-| Taste and acceptance | A human, then the platform | First review, then the platform's own editorial review |
+| Taste and acceptance | A human, then any outside reviewer | First review, then that reviewer's own editorial review |
 
 A perfect score shows no measured defect. It does not show the piece is good.
+
+## What this is not
+
+The bar reads the file the engine delivers today. It does not cover:
+
+- **HDR.** Output is SDR, BT.709.
+- **Surround sound.** Output is stereo.
+- **A packaged master.** The delivery is a single file, with captions beside it. It is not a platform's package of video, audio, caption, and metadata files.
+- **Better sources than the models give.** A rented model's output sets the ceiling on picture size, bit depth, and motion, and the master cannot add what the source lacks.
+
+A piece can pass every reading here and still miss a platform's own specification.
 
 ## Run it
 
@@ -69,7 +80,10 @@ Web profiles deliver H.264 with BT.709 tags. The `film-hd` and `film-uhd` profil
 | `master.black_head_tail` | Begins and ends on a black frame |
 | `master.duplicate_frames` | No held or repeated frames |
 | `master.audio` | 24-bit LPCM stereo at 48 kHz |
-| `master.lkfs`, `master.true_peak` | At most -18 LKFS and -1 dBTP, measured per BS.1770 |
+| `master.lkfs` | Within 1 LU of the profile's `target_lufs`, as integrated loudness per BS.1770 |
+| `master.true_peak` | At or under the profile's `true_peak_dbtp_max` |
+
+The master's level and peak come from its own profile (`film-hd` and `film-uhd` set -24 LUFS and -2 dBTP), the same numbers the render's loudness step aims at, so one file cannot pass one and fail the other. The tolerance is `master_lufs_tolerance` under `bar:` in `config/studio.yaml`. The engine measures integrated loudness over the whole file. It does not gate by dialogue, so a spec that asks for a dialogue-gated level is not measured here.
 
 Captions leave the picture on film profiles and ship as SRT, WebVTT, and iTunes Timed Text files.
 

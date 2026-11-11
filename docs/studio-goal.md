@@ -22,6 +22,8 @@ A capability has three states, and only the last one is a claim about quality.
 
 Nothing here moves past **Run** without a real file, and nothing moves past **Accepted** without a person.
 
+**Delivery level today:** SDR, stereo, a single-file master made from the 8-bit output of rented models. HDR, surround sound, and a packaged master are not built; `docs/studio-bar.md` lists what the bar does not cover.
+
 ## The line, and where each part came from
 
 | Capability | What it does | Idea from |

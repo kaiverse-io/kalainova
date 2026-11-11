@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .. import media, mediascan
+from .. import config, media, mediascan
 from .picture import BLACK_LEVEL, DUPLICATE_LEVEL, Arr
 from .readings import Reading, limits
 
@@ -80,14 +80,13 @@ def _master_picture(path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _master_sound(path: Path) -> list[dict[str, Any]]:
+def _master_sound(path: Path, target: float, ceiling: float) -> list[dict[str, Any]]:
     a = media.stream_info(path, "audio")
     if not a:
         return [_check("master.audio", None, "LPCM stereo", False)]
     loud = media.loudness(path)
     lkfs, peak = loud["integrated_lufs"], loud["true_peak_dbtp"]
-    max_lkfs = float(limits()["master_integrated_lkfs_max"])
-    max_peak = float(limits()["master_true_peak_dbtp_max"])
+    tolerance = float(limits()["master_lufs_tolerance"])
     return [
         _check(
             "master.audio",
@@ -97,11 +96,35 @@ def _master_sound(path: Path) -> list[dict[str, Any]]:
             and a.get("sample_rate") == "48000"
             and a.get("channels") == 2,
         ),
-        _check("master.lkfs", lkfs, f"<= {max_lkfs:g}", lkfs is not None and lkfs <= max_lkfs),
-        _check("master.true_peak", peak, f"<= {max_peak:g}", peak is not None and peak <= max_peak),
+        _check(
+            "master.lkfs",
+            lkfs,
+            f"{target:g} +/- {tolerance:g}",
+            lkfs is not None and abs(lkfs - target) <= tolerance,
+        ),
+        _check("master.true_peak", peak, f"<= {ceiling:g}", peak is not None and peak <= ceiling),
     ]
 
 
-def measure_master(path: Path, *, target_fps: float) -> list[dict[str, Any]]:
-    """The delivery file against a premium platform's published ingest requirements."""
-    return [*_master_video(path, target_fps), *_master_picture(path), *_master_sound(path)]
+def measure_master(
+    path: Path,
+    *,
+    target_fps: float,
+    target_lufs: float | None = None,
+    true_peak_dbtp_max: float | None = None,
+) -> list[dict[str, Any]]:
+    """The delivery file against the delivery spec and the loudness its profile aims at.
+
+    The level is integrated loudness per BS.1770, ungated by dialogue. With no target given, the
+    film profile's own target and peak stand in, so a loose file is read the way a film job is.
+    """
+    film = config.profile("film-hd")
+    target = float(target_lufs if target_lufs is not None else film["target_lufs"])
+    ceiling = float(
+        true_peak_dbtp_max if true_peak_dbtp_max is not None else film["true_peak_dbtp_max"]
+    )
+    return [
+        *_master_video(path, target_fps),
+        *_master_picture(path),
+        *_master_sound(path, target, ceiling),
+    ]

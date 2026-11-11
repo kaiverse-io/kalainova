@@ -27,6 +27,7 @@ MARGIN_SEC = 0.3
 LABEL_FONT = "Inter.ttf"
 WAVE_HEIGHT = 96
 FRAME_WIDTH = 320
+BENCH_WIDTH = 200
 CLICK_WINDOW_SEC = 0.012
 CLICK_CONTEXT_SEC = 0.25
 CLICK_RATIO = 12.0  # how far a step at a cut stands above the sound around it to read as a click
@@ -110,6 +111,38 @@ def shot_sheet(path: Path, cuts: list[dict[str, Any]], duration: float, dst: Pat
         if label:
             draw.text((8, y + 6), label, fill=(255, 255, 255), font=font, stroke_width=2,
                       stroke_fill=(0, 0, 0))  # fmt: skip
+    sheet.save(dst, quality=85)
+    return dst
+
+
+def bench_sheet(rows: list[tuple[str, Path]], dst: Path, *, frames: int = 5) -> Path | None:
+    """One row per clip, frames spread across its length, labelled, for comparing models."""
+    cells = []
+    for label, clip in rows:
+        duration = media.duration(clip)
+        found = [
+            _frame(clip, min(duration * (i + 0.5) / frames, max(duration - 0.05, 0.0)), BENCH_WIDTH)
+            for i in range(frames)
+        ]
+        cells.append((label, found))
+    height = next((f.height for _, found in cells for f in found if f), 0)
+    if not height:
+        return None
+    gap = 4
+    label_h = 22
+    sheet = Image.new(
+        "RGB",
+        (BENCH_WIDTH * frames + gap * (frames - 1), (height + label_h + gap) * len(cells)),
+        (16, 16, 18),
+    )
+    draw = ImageDraw.Draw(sheet)
+    font = _label_font(14)
+    for r, (label, found) in enumerate(cells):
+        y = r * (height + label_h + gap)
+        draw.text((6, y + 3), label, fill=(255, 255, 255), font=font)
+        for i, frame in enumerate(found):
+            if frame:
+                sheet.paste(frame, (i * (BENCH_WIDTH + gap), y + label_h))
     sheet.save(dst, quality=85)
     return dst
 

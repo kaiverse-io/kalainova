@@ -59,11 +59,19 @@ def _prompt(job: dict) -> str:
         ],
         "publish": {"title": "platform title", "description": "2-3 lines", "hashtags": ["#tag"]},
     }
-    budget = brief.get("max_video_beats", 3)
+    budget = shots.video_budget(job)
+    if "video" not in (job.get("media") or []):
+        motion = "visual_kind=still for every beat."
+    elif budget >= shots.UNLIMITED:
+        motion = "visual_kind=video for every beat; a shot that does not move reads as a slideshow."
+    else:
+        motion = (
+            f"visual_kind=video for at most {budget} beats, choosing where motion matters most."
+        )
     return (
         f"Brief:\n{json.dumps(brief, indent=2, ensure_ascii=False)}\n\n"
         f"Media: {job.get('media')}. Rights: {job.get('rights')}. Target duration: {target}s.\n"
-        f"Write 6-10 beats. visual_kind=video for at most {budget} beats, choosing where motion matters most.\n\n"
+        f"Write 6-10 beats. {motion}\n\n"
         f"JSON shape:\n{json.dumps(schema_hint, indent=2)}"
     )
 
@@ -92,7 +100,7 @@ def _research_context(job: Job) -> str:
 def plan_refusals(job: Job, packet: dict) -> list[str]:
     """What shots.review refuses, so a planner can be told and try again."""
     brief = job.job.get("brief") or {}
-    budget = int(brief.get("max_video_beats", 3))
+    budget = shots.video_budget(job.job)
     found = shots.review(packet, budget=budget, allow_stills=bool(brief.get("allow_stills")))
     return [p["detail"] for p in found if p["status"] == "fail"]
 

@@ -430,7 +430,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     │                                       │  └─▶ kitrules ◀── scripts/check.py
     │                                       └─▶ providers
     ├─▶ production_cli ──▶ dub, nle, provenance, qa, research, shotmake, shots,
-    │                      songs, takes, timeline, verdicts, editor, config
+    │                      songs, takes, timeline, verdicts, editor, config, bench
     ├─▶ plan ──────▶ consistency, prompts, providers, shots
     ├─▶ research ──▶ plan, prompts, providers, config
     ├─▶ writers ───▶ consistency, plan, prompts, providers
@@ -439,6 +439,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ soundbed ──▶ blobstore, kits, media, shotmake
     ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, config, providers
     ├─▶ takes ─────▶ bar, blobstore, media, config
+    ├─▶ bench ─────▶ consistency, shotmake, shots, takes, timeline, config, providers
     ├─▶ shots ─────▶ config
     ├─▶ edit ──────▶ config
     ├─▶ render ────▶ bar, captions, look, motion, media, mediascan
@@ -508,6 +509,16 @@ What a shot says, kept apart: the still prompt, the motion prompt, continuity sh
 
 ### takes
 Attempts at one shot, each with its own seed and readings. A reading picks among them, and a person's choice stands (ADR 0013).
+
+### bench
+A camera test: one shot made on several models from the same start frame, prompt, and seeds. It prints each model's estimate, refuses before any call when the total passes the job's cap, and makes takes marked `bench` through the router and the take store, so each carries its model, seed, and cost. It writes one sheet with a row per take. Depends on `consistency`, `shotmake`, `shots`, `takes`, `timeline`, `config`, and `providers`.
+
+```
+ shot + models --> estimate per model --> over the cap? --> refuse, no call
+                                              | no
+                                              v
+        router --> takes.attempt (bench) --> takes.json --> timeline.bench_sheet
+```
 
 ### shotmake
 One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A first run and a retake share this code, so they keep the same promise and the same record.

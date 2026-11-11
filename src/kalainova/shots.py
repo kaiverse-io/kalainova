@@ -32,7 +32,19 @@ _MOTION_WORDS = re.compile(
 )
 ALIKE = 0.7  # cues sharing this much of their words read as the same shot twice
 SAME_SIZE_RUN = 3
+UNLIMITED = 10**6
+DEFAULT_STILL_PROFILE_BUDGET = 3
 GROUPS = (("cast", "people"), ("location", "places"), ("props", "props"))
+
+
+def video_budget(data: dict[str, Any]) -> int:
+    """How many shots of a job may move. A moving-picture profile moves every shot unless the brief
+    asks for fewer with max_video_beats; an audio-only profile keeps the old limit of 3."""
+    asked = (data.get("brief") or {}).get("max_video_beats")
+    if asked is not None:
+        return int(asked)
+    moving = bool(config.profile(data.get("profile") or "short-9x16").get("fps"))
+    return UNLIMITED if moving else DEFAULT_STILL_PROFILE_BUDGET
 
 
 def _names(beat: Beat, field: str) -> list[str]:

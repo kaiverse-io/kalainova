@@ -11,6 +11,8 @@
 | Free the disk a render used | `kalainova clean [--dry-run]` | `render/cache.py` | `tests/test_rendercache.py` |
 | Plan review before spending | `kalainova shotplan` | `shots.py` | `tests/test_shots.py` |
 | Takes and retakes | `kalainova takes`, `take`, `retake` | `takes.py`, `shotmake.py` | `tests/test_takes.py` |
+| Compare models on one shot | `kalainova bench`, `verdict --take` | `bench.py`, `takes.py`, `timeline.py`, `verdicts.py` | `tests/test_bench.py` |
+| Every shot moves by default | `kalainova make`, `shotplan` | `shots.py`, `plan.py`, `assets.py` | `tests/test_moving_by_default.py` |
 | The motion promise | `kalainova make` | `assets.py`, `qachecks.py` | `tests/test_takes.py` |
 | Songs | `kalainova song`, `song-video` | `songs.py`, `bar/song.py` | `tests/test_songs.py` |
 | Scripts from a brief | `kalainova song`, `comic`, `story` | `writers.py` | `tests/test_songs.py` |
