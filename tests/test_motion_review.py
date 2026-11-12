@@ -289,3 +289,31 @@ def test_a_profile_with_no_safe_zone_is_not_checked(tmp_path):
     job = make_job(tmp_path, beats=[_moving()], job_id="zone-none")
     _ass(job, [0.95])
     assert qachecks.safe_zone_checks(job, "landscape") == []
+
+
+def test_studio_captions_sit_inside_the_vertical_band_when_given_it(tmp_path):
+    from kalainova import captions
+
+    card = {"text": "hello there", "start_sec": 0.0, "end_sec": 1.0}
+    zone = config.safe_zone("short-9x16")
+    job = make_job(tmp_path, beats=[_moving()], job_id="zone-default")
+    job.work.mkdir(parents=True, exist_ok=True)
+    text, _ = captions.studio_captions([card], 1080, 1920, None, zone["caption_y"][1])
+    (job.work / "captions.ass").write_text(text)
+    found = qachecks.safe_zone_checks(job, "short-9x16")
+    assert found[0]["id"] == "safe_zone.captions" and found[0]["status"] == "pass"
+    unset, _ = captions.studio_captions([card], 1080, 1920)
+    (job.work / "captions.ass").write_text(unset)
+    assert qachecks.safe_zone_checks(job, "short-9x16")[0]["status"] == "warn"
+
+
+def test_the_render_plan_hands_the_vertical_caption_band_to_burned_captions():
+    from kalainova.render import _caption_steps
+
+    zone = config.safe_zone("short-9x16")
+    prof = {"width": 1080, "height": 1920, "fps": 30, "safe_zone": zone}
+    cap = [{"text": "hi", "start_sec": 0.0, "end_sec": 1.0}]
+    for style, expect in (("studio", 0.72), ("kinetic", 0.72), ("drawn", None)):
+        em = {"profile": prof, "captions": cap, "caption_style": style}
+        steps, _ = _caption_steps(em, "picture.mp4")
+        assert steps[-1]["args"].get("caption_y") == expect

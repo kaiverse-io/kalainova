@@ -339,6 +339,7 @@ def run(job: Job) -> dict:
     )
     checks.extend(research.claim_checks(job, packet))
     checks.extend(qachecks.promise_checks(data, am))
+    checks.extend(qachecks.placeholder_checks(am))
     checks.extend(qachecks.plan_checks(data, packet))
     checks.extend(qachecks.sound_checks(prof, am))
     checks.extend(qachecks.cut_checks(final, em))

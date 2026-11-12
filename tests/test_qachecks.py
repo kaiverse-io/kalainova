@@ -118,3 +118,40 @@ def test_a_judge_is_shown_each_characters_own_pictures(locked, root):
     assert len(images) == 1 and images[0] == kits.blob_path(
         root, resolved.characters[lock["cast"][0]]["identity"]["refs"][0]
     )
+
+
+def _report(passed, *checks):
+    return {"passed": passed, "checks": list(checks)}
+
+
+def test_the_headline_stays_plain_when_nothing_is_broken():
+    assert qachecks.headline(_report(True)) == "QA PASSED"
+    assert qachecks.headline(_report(False)) == "QA FAILED"
+
+
+def test_a_broken_motion_promise_or_placeholder_assets_change_the_headline():
+    promise = {
+        "id": "delivery.motion_promise",
+        "status": "warn",
+        "detail": "asked to move and did not: b1, b2, b3",
+    }
+    fake = {"id": "delivery.placeholder", "status": "warn", "detail": "4 placeholder assets: a, b"}
+    line = qachecks.headline(_report(True, promise, fake))
+    assert "PASSED" not in line and "not reviewable" in line
+    assert "did not move: b1, b2, b3" in line and "4 placeholder assets" in line
+    assert "FAILED" in qachecks.headline(_report(False, promise))
+
+
+def test_assets_from_a_placeholder_provider_are_named():
+    am = {
+        "assets": [
+            {"id": "s1", "provider": "local"},
+            {"id": "s2", "provider": "operator"},
+            {"id": "s3"},
+            {"id": "s4", "provider": "nowhere"},
+        ]
+    }
+    (found,) = qachecks.placeholder_checks(am)
+    assert found["id"] == "delivery.placeholder" and found["status"] == "warn"
+    assert "1 placeholder" in found["detail"] and "s1" in found["detail"]
+    assert qachecks.placeholder_checks({"assets": [{"id": "x", "provider": "operator"}]}) == []

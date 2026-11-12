@@ -43,7 +43,7 @@ import shutil
 import sys
 import time
 
-from . import assets, edit, plan, production_cli, qa, render, studio_cli
+from . import assets, edit, plan, production_cli, qa, qachecks, render, studio_cli
 from .jobfs import REPO, ContractError, home, open_job
 
 
@@ -100,7 +100,7 @@ def _make(a) -> int:
     for c in report["checks"]:
         if c["status"] != "pass":
             print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.artifact()}")
+    print(f"{qachecks.headline(report)}  ->  {job.artifact()}")
     _print_bar(report)
     print(f"spent {job.spent():.4f} of cap {job.job.get('cost_cap')}")
     return 0 if report["passed"] else 2
@@ -152,7 +152,7 @@ def _render_edit(job) -> int:
     for c in report["checks"]:
         if c["status"] != "pass":
             print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {job.artifact()}")
+    print(f"{qachecks.headline(report)}  ->  {job.artifact()}")
     _print_bar(report)
     return 0 if report["passed"] else 2
 
@@ -174,7 +174,7 @@ def _document(a) -> int:
     for c in report["checks"]:
         if c["status"] != "pass":
             print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {final}")
+    print(f"{qachecks.headline(report)}  ->  {final}")
     return 0 if report["passed"] else 2
 
 

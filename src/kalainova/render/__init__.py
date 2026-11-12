@@ -252,8 +252,10 @@ def _caption_steps(em: dict[str, Any], picture: str) -> tuple[list[Step], str]:
         "style": style if style != "none" else "plain",
         "captions": em["captions"],
     }
+    zone = prof.get("safe_zone") or {}
+    if zone and style not in ("drawn", "none"):
+        args["caption_y"] = zone["caption_y"][1]  # burned text anchors at the band's lower edge
     if style == "drawn":
-        zone = prof.get("safe_zone") or {}
         args["fps"] = prof["fps"]
         if zone:
             args["zone"] = [*zone["caption_y"], zone["right_margin"]]
