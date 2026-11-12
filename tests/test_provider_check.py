@@ -135,3 +135,13 @@ def test_the_reference_route_is_left_out_for_a_provider_that_cannot_take_one(tmp
     monkeypatch.setitem(base._REGISTRY, "plain-video", Plain)
     calls, _ = check.plan(_job(tmp_path), "plain-video")
     assert [c.label for c in calls] == ["video", "video from a still"]
+
+
+def test_the_check_picture_is_big_enough_for_the_strictest_video_model(tmp_path):
+    import struct
+
+    from kalainova.providers.check import _grey_png
+
+    data = _grey_png(tmp_path / "still.png").read_bytes()
+    width, height = struct.unpack(">II", data[16:24])
+    assert min(width, height) >= 240  # Wan rejects smaller first frames and references

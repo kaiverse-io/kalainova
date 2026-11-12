@@ -67,8 +67,11 @@ def _tone(path: Path, seconds: float = 3.0) -> Path:
     return path
 
 
-def _grey_png(path: Path, side: int = 64) -> Path:
-    """A flat grey picture, written by hand, to give a model as a first frame or a reference."""
+def _grey_png(path: Path, side: int = 256) -> Path:
+    """A flat grey picture, written by hand, to give a model as a first frame or a reference.
+
+    256 px a side: Wan refuses anything under 240 (found live, 2026-11-12).
+    """
 
     def chunk(kind: bytes, body: bytes) -> bytes:
         crc = zlib.crc32(kind + body)
