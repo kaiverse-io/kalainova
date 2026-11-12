@@ -231,7 +231,10 @@ class Fal(Provider):
         else:
             spec = video_spec("fal", model)
         billed, length = _billed_length(spec, duration)
-        payload = {"prompt": text, "aspect_ratio": aspect, "duration": length, **fields}
+        payload = {"prompt": text, "duration": length, **fields}
+        aspect_field = spec.get("aspect_param", "aspect_ratio")
+        if aspect_field:  # a model whose schema lists none is sent none
+            payload[aspect_field] = aspect
         payload.update(spec.get("extra", {}))
         if image and not refs:
             payload[spec.get("image_param", "image_url")] = self._upload(image)

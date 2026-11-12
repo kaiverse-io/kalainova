@@ -141,7 +141,7 @@ licences:
 audio_models:
   fal:
     fal-ai/ace-step: {max_sec: 240, style_field: tags, instrumental_lyrics: "[inst]"}   # fal's page: 5 to 240 s
-    minimax/music-3: {style_field: prompt}   # VERIFY the longest track it makes, then add max_sec
+    minimax/music-3: {max_sec: 300, style_field: prompt}   # fal's schema: duration up to 300 s
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
 takes:
@@ -180,23 +180,29 @@ reference_models:
         max_images: 7
         durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
 
-# How each plain video model takes its inputs, from the vendor's published schema.
+# How each plain video model takes its inputs, from the vendor's published schema. aspect_param names
+# the field for the aspect ratio; null sends none. scripts/check_fal_schemas.py compares every name here.
 video_models:
   fal:
-    alibaba/wan-3.0-prime/image-to-video: &wan
-      image_param: image_url
+    alibaba/wan-3.0-prime/image-to-video:
+      image_param: start_image_url
+      end_image_param: end_image_url
       durations: "3,4,5,6,7,8,9,10,12,15,20,30"
       duration_type: int
       extra: {audio: false, resolution: "1080p"}
-    alibaba/wan-3.0-prime/text-to-video: *wan
+    alibaba/wan-3.0-prime/text-to-video:
+      durations: "3,4,5,6,7,8,9,10,12,15,20,30"
+      duration_type: int
+      extra: {audio: false, resolution: "1080p"}
     fal-ai/kling-video/v3/pro/image-to-video:
       image_param: start_image_url
-      end_image_param: end_image_url   # VERIFY against the live schema; one page lists tail_image_url
+      end_image_param: end_image_url
+      aspect_param: null               # its schema lists no aspect_ratio; the frame sets the shape
       durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
       extra: {generate_audio: false}
     bytedance/seedance-2.5/image-to-video:
       image_param: image_url
-      end_image_param: end_image_url   # VERIFY against the live schema
+      end_image_param: end_image_url
       durations: "4,5,6,8,10,12,15"
       extra: {generate_audio: false}
 
