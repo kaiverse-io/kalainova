@@ -9,6 +9,7 @@ from typing import Any
 from . import bar, config, consistency, kitchecks, prompts, shots, timeline
 from .editor import musiccuts
 from .jobfs import ContractError, CostCapExceeded, Job
+from .providers import base as providers_base
 from .providers import router
 
 Fields = dict[str, Any]
@@ -31,6 +32,48 @@ def promise_checks(data: Fields, am: Fields) -> list[Fields]:
             "detail": f"asked to move and did not: {named}",
         }
     ]
+
+
+def placeholder_checks(am: Fields) -> list[Fields]:
+    """Assets a placeholder provider made. They keep a piece from being reviewed."""
+    made = sorted(
+        {a.get("id", "?") for a in am.get("assets", []) if _is_placeholder(a.get("provider"))}
+    )
+    if not made:
+        return []
+    return [
+        {
+            "id": "delivery.placeholder",
+            "status": "warn",
+            "detail": f"{len(made)} placeholder assets, not a result: {', '.join(made)}",
+        }
+    ]
+
+
+def _is_placeholder(name: object) -> bool:
+    try:
+        return bool(isinstance(name, str) and providers_base.get(name).placeholder)
+    except KeyError:
+        return False
+
+
+def headline(report: Fields) -> str:
+    """The line a person or agent reads first. `passed` covers the contract checks only; a piece
+    that did not move as promised, or that placeholders made, says so here."""
+    state = "PASSED" if report["passed"] else "FAILED"
+    checks = {c["id"]: c for c in report["checks"]}
+    unmet = []
+    promise = checks.get("delivery.motion_promise")
+    if promise:
+        unmet.append(promise["detail"].replace("asked to move and did not: ", "did not move: "))
+    fake = checks.get("delivery.placeholder")
+    if fake:
+        unmet.append(fake["detail"].split(":")[0])
+    if not unmet:
+        return f"QA {state}"
+    if not report["passed"]:
+        return f"QA {state}, and not reviewable: {'; '.join(unmet)}"
+    return f"QA: checks ran, not reviewable: {'; '.join(unmet)}"
 
 
 def licence_checks(am: Fields) -> list[Fields]:
