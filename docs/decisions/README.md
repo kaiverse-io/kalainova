@@ -19,3 +19,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0013](0013-takes-and-the-motion-promise.md) | A shot is a set of takes, and a promise of motion is kept or refused |
 | [0014](0014-songs.md) | Songs are takes of a written song, and readings never reject one on taste |
 | [0015](0015-research-with-checked-quotes.md) | A fact is usable when its quote is found in its source |
+| [0016](0016-refinement-ladder-and-layered-qa.md) | A piece rises through stages that end in locks, and QA runs in layers |
