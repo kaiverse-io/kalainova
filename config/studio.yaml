@@ -4,7 +4,7 @@
 # Prices are estimates for the job cost cap; the invoice is the truth. Re-check monthly.
 
 preference:
-  llm: [anthropic]
+  llm: [anthropic]                 # OpenAI-compatible vendors (gemini, groq, openrouter, zai) join once models.<name>.llm is set; add them here
   voice: [elevenlabs, local]
   image: [fal, local]
   video: [fal]
@@ -16,6 +16,11 @@ preference:
   separate: []                     # stems cost money, so a job opts in: providers: {separate: [fal]}. "mac" can too
   graphics: [hyperframes]
   search: [exa, wikipedia, openalex]
+
+# Open tools called as commands, beside the engine's own code (ADR 0012). `use: inhouse` is the default.
+# A tool is a program on PATH: nothing is vendored, and a missing one stops the step with its name.
+adapters:
+  beats: {use: inhouse}            # beat_this: {use: beat_this, command: beat_this}. Gives downbeats too
 
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:
@@ -70,6 +75,14 @@ models:
       lyrics_param: lyrics
       style_param: tags
       duration_param: max_duration_seconds
+
+# OpenAI-compatible LLM vendors (providers/compat.py). Endpoints and key names are built in: GEMINI_API_KEY,
+# GROQ_API_KEY, OPENROUTER_API_KEY, ZAI_API_KEY. Add or override one here with base_url and env_key.
+# Model ids and prices are the operator's: copy them from the vendor's current docs, because they change.
+# A vendor with no model id is not ready. Example, in a private config:
+#   models:  {groq: {llm: <model id from the vendor's model list>}}
+#   prices:  {groq: {llm: {free: true}}}    # a free tier; or {input_per_mtok: ..., output_per_mtok: ...}
+openai_compat: {}
 
 prices:
   anthropic:
@@ -132,8 +145,15 @@ licences:
       obligations: ["The code is MIT but the trained weights' licence is unclear: read it before releasing stems", "Confirm the model's own terms on fal"]
   anthropic:
     "*": {name: vendor terms, commercial: true, retention: unknown}
+  gemini: &compat_terms
+    "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Free tiers often let the vendor train on inputs: read the terms before sending anything private"]}
+  groq: *compat_terms
+  openrouter: *compat_terms
+  zai: *compat_terms
   hyperframes:
     "*": {name: Apache-2.0, commercial: true, retention: "none: renders on this machine"}
+  whispercpp:
+    "*": {name: MIT (whisper.cpp; the model file has its own terms), commercial: true, retention: "none: runs on this machine"}
 
 # What a song model states about itself. max_sec refuses a longer ask before any spend; a model with
 # no row is not checked. style_field and instrumental_lyrics are the adapter's field names. VERIFY each

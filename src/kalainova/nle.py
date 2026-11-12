@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import quoteattr  # noqa: S406 - writes XML; nothing here parses any
 
+from . import media
 from .jobfs import ContractError, Job
 
 NTSC = (Fraction(24000, 1001), Fraction(30000, 1001), Fraction(60000, 1001))
@@ -29,6 +30,7 @@ class Clip:
     start: float  # where it sits on the timeline
     duration: float
     source_in: float  # where it starts in its source
+    source_length: float | None = None  # the whole source, when it can be probed
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,16 @@ def _spans(cuts: list[dict[str, Any]], total: float) -> list[tuple[float, float]
     return list(zip(starts, [*starts[1:], total], strict=True))
 
 
+def _length(path: Path) -> float | None:
+    """The probed length of a source, or None when it is not on disk to probe."""
+    if not path.is_file():
+        return None
+    try:
+        return media.duration(path)
+    except (media.MediaError, KeyError, ValueError):
+        return None
+
+
 def build(job: Job) -> Timeline:
     """The cut as the job records it, with every source as a full path."""
     em = job.read("edit_manifest")
@@ -76,16 +88,19 @@ def build(job: Job) -> Timeline:
     if not em.get("cuts"):
         raise ContractError(f"{job.id}: this piece has no cuts to export")
     total = float(em["duration_sec"])
-    picture = [
-        Clip(
-            name=str(cut.get("id") or cut["source"]),
-            path=(job.work / assets[cut["source"]]["path"]).resolve(),
-            start=start,
-            duration=end - start,
-            source_in=float(cut.get("in_sec") or 0.0),
+    picture = []
+    for cut, (start, end) in zip(em["cuts"], _spans(em["cuts"], total), strict=True):
+        path = (job.work / assets[cut["source"]]["path"]).resolve()
+        picture.append(
+            Clip(
+                name=str(cut.get("id") or cut["source"]),
+                path=path,
+                start=start,
+                duration=end - start,
+                source_in=float(cut.get("in_sec") or 0.0),
+                source_length=_length(path),
+            )
         )
-        for cut, (start, end) in zip(em["cuts"], _spans(em["cuts"], total), strict=True)
-    ]
     audio = em.get("audio") or {}
     sound = [
         Clip(
@@ -94,6 +109,7 @@ def build(job: Job) -> Timeline:
             start=0.0,
             duration=total,
             source_in=0.0,
+            source_length=_length((job.work / assets[aid]["path"]).resolve()),
         )
         for role, aid in (
             ("voice", audio.get("voice_asset_id")),
@@ -176,6 +192,16 @@ def _otio_time(seconds: float, rate: Fraction) -> dict[str, Any]:
 
 
 def _otio_clip(clip: Clip, rate: Fraction) -> dict[str, Any]:
+    reference: dict[str, Any] = {
+        "OTIO_SCHEMA": "ExternalReference.1",
+        "target_url": clip.path.as_uri(),
+    }
+    if clip.source_length is not None:
+        reference["available_range"] = {
+            "OTIO_SCHEMA": "TimeRange.1",
+            "start_time": _otio_time(0.0, rate),
+            "duration": _otio_time(clip.source_length, rate),
+        }
     return {
         "OTIO_SCHEMA": "Clip.1",
         "name": clip.name,
@@ -184,7 +210,7 @@ def _otio_clip(clip: Clip, rate: Fraction) -> dict[str, Any]:
             "start_time": _otio_time(clip.source_in, rate),
             "duration": _otio_time(clip.duration, rate),
         },
-        "media_reference": {"OTIO_SCHEMA": "ExternalReference.1", "target_url": clip.path.as_uri()},
+        "media_reference": reference,
     }
 
 
@@ -209,9 +235,9 @@ def otio(tl: Timeline) -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
-def _smpte(seconds: float, rate: Fraction) -> str:
+def _smpte(count: int, rate: Fraction) -> str:
+    """Timecode for a whole number of frames."""
     base = round(float(rate))
-    count = frames(seconds, rate)
     hours, rest = divmod(count, base * 3600)
     minutes, rest = divmod(rest, base * 60)
     secs, left = divmod(rest, base)
@@ -219,15 +245,26 @@ def _smpte(seconds: float, rate: Fraction) -> str:
 
 
 def edl(tl: Timeline) -> str:
-    """CMX 3600, the oldest format every editing system still reads. Picture only."""
+    """CMX 3600, the oldest format every editing system still reads. Picture only.
+
+    Whole frames throughout: each event's length is counted once, and source and record both end
+    that many frames after they begin, so a reader never sees the two lengths disagree. An EDL
+    does not carry its rate, so a closing comment says it (the CMX 3600 reader refuses a comment
+    before the first event).
+    """
+    rate = tl.rate
     lines = [f"TITLE: {tl.name}", "FCM: NON-DROP FRAME", ""]
+    rec_in = 0
     for n, clip in enumerate(tl.picture, 1):
-        source = _smpte(clip.source_in, tl.rate), _smpte(clip.source_in + clip.duration, tl.rate)
-        record = _smpte(clip.start, tl.rate), _smpte(clip.start + clip.duration, tl.rate)
+        length = frames(clip.duration, rate)
+        src_in = frames(clip.source_in, rate)
+        times = (src_in, src_in + length, rec_in, rec_in + length)
         lines.append(
-            f"{n:03d}  AX       V     C        {source[0]} {source[1]} {record[0]} {record[1]}"
+            f"{n:03d}  AX       V     C        " + " ".join(_smpte(t, rate) for t in times)
         )
         lines.append(f"* FROM CLIP NAME: {clip.path.name}")
+        rec_in += length
+    lines.append(f"* FRAME RATE: {float(rate):.3f} FPS")
     return "\n".join(lines) + "\n"
 
 

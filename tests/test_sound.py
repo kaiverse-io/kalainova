@@ -228,3 +228,25 @@ def test_music_sits_well_under_the_voice_while_it_speaks(tmp_path):
     voice, *_ = media.decode_stereo(tmp_path / "voice.stem.wav")
     music, _, sr = media.decode_stereo(tmp_path / "music.stem.wav")
     assert bar.voice_to_music_db(voice, music, sr) >= 15.0
+
+
+def test_two_renders_of_one_plan_give_the_same_bytes(tmp_path):
+    """The ducker reads two inputs in whatever order threads deliver them, unless framed alike."""
+    _tone(tmp_path / "v.wav", 4.0, freq=220.0, volume=0.4)
+    _tone(tmp_path / "m.wav", 5.0, freq=330.0, volume=0.3)
+    plan = {
+        "out": "mix.wav",
+        "duration_sec": 4.0,
+        "voice": "v.wav",
+        "voice_chain": True,
+        "music": "m.wav",
+        "duck": True,
+    }
+    norm = {"input": "mix.wav", "out": "norm.wav", "target_lufs": -16.0, "true_peak_dbtp_max": -1.5}
+    names = ("mix.wav", "norm.wav", "voice.stem.wav", "music.stem.wav")
+    seen = []
+    for _ in range(4):
+        render.sound.op_mix_audio(tmp_path, plan)
+        render.sound.op_loudnorm(tmp_path, norm)
+        seen.append([(tmp_path / n).read_bytes() for n in names])
+    assert all(run == seen[0] for run in seen[1:])
