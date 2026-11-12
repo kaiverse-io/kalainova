@@ -283,12 +283,17 @@ def _karaoke_lines(words: list[dict], active: int, wrapped: list[list[str]]) -> 
 
 
 def studio_captions(
-    captions: list[dict], w: int, h: int, band_levels: list[float] | None = None
+    captions: list[dict],
+    w: int,
+    h: int,
+    band_levels: list[float] | None = None,
+    y_frac: float | None = None,
 ) -> tuple[str, dict]:
-    """Quiet karaoke at the bottom of the safe area, darkened behind only where the picture needs it."""
+    """Quiet karaoke, darkened behind only where the picture needs it. It sits at the bottom of the
+    safe area unless y_frac (the profile's caption band) puts it higher."""
     safe = safe_area(w, h)
     _, _, cap = _sizes(w, h)
-    x, y = w // 2, int(h * (1 - safe["bottom"]))
+    x, y = w // 2, int(h * (y_frac if y_frac is not None else 1 - safe["bottom"]))
     width = w * (1 - 2 * safe["side"])
     shadow = max(cap // 9, 2)
     lines = [studio_header(w, h)]

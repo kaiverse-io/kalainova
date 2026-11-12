@@ -40,6 +40,7 @@ from . import (
     preproduction,
     provenance,
     qa,
+    qachecks,
     research,
     shotmake,
     shots,
@@ -270,7 +271,7 @@ def _print_qa(job: Job, final: Path) -> int:
     for check in report["checks"]:
         if check["status"] != "pass":
             print(f"  [{check['status']}] {check['id']}: {check['detail']}")
-    print(f"QA {'PASSED' if report['passed'] else 'FAILED'}  ->  {final}")
+    print(f"{qachecks.headline(report)}  ->  {final}")
     return 0 if report["passed"] else 2
 
 

@@ -333,7 +333,7 @@ def op_burn_captions(work: Path, a: dict[str, Any]) -> None:
         return
     if a.get("style") == "studio":
         text, report = ass.studio_captions(
-            caps, width, height, _caption_levels(src, caps, width, height)
+            caps, width, height, _caption_levels(src, caps, width, height), a.get("caption_y")
         )
         (work / "type_report.json").write_text(json.dumps(report) + "\n")
     else:
