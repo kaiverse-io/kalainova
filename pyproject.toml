@@ -40,6 +40,10 @@ dev = [
     "types-PyYAML",
     "types-requests",
     "pypdf>=7.0.0",
+    "pytest-xdist>=3.8.0",
+    "opentimelineio>=0.18.1",
+    "otio-fcpx-xml-adapter>=1.0.0",
+    "otio-cmx3600-adapter>=1.0.0",
 ]
 
 [tool.ruff]
@@ -112,6 +116,8 @@ ignore_errors = true
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
 addopts = [
+    # One worker per core; pytest-cov merges each worker's coverage. Use `-n0` to debug one test.
+    "-n=auto",
     "--cov=kalainova",
     "--cov-report=term-missing",
     # Keep in sync with [tool.coverage.report] fail_under (same Copier answer).

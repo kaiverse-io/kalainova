@@ -17,7 +17,7 @@
 | Every shot moves by default | `kalainova make`, `shotplan` | `shots.py`, `plan.py`, `assets.py` | `tests/test_moving_by_default.py` |
 | The motion promise | `kalainova make` | `assets.py`, `shotmake.py`, `qachecks.py` | `tests/test_takes.py`, `tests/test_vendor_payloads.py` |
 | Songs | `kalainova song`, `song-video` | `songs.py`, `bar/song.py` | `tests/test_songs.py` |
-| Video cut to a track: bars, phrases, excerpt, character cutaways, estimate | `kalainova song-video [--excerpt]` | `editor/musiccuts.py`, `editor/musicvideo.py`, `editor/beats.py`, `jobfs.py` (`open_child`), `qachecks.py` (`edit.cuts_on_beat`) | `tests/test_music_video.py` |
+| Video cut to a track: bars, phrases, excerpt, character cutaways, estimate | `kalainova song-video [--excerpt]` | `editor/musiccuts.py`, `editor/musicvideo.py`, `editor/beats.py` (seam: `adapters.beats`), `editor/beat_this.py`, `jobfs.py` (`open_child`), `qachecks.py` (`edit.cuts_on_beat`) | `tests/test_music_video.py`, `tests/test_beat_adapters.py` |
 | Song release files, stems, length check | `kalainova song` | `render/release.py`, `providers/fal.py` (`separate`), `providers/router.py` (`refuse_too_long`) | `tests/test_song_release.py`, `tests/test_fal_stems.py` |
 | Scripts from a brief | `kalainova song`, `comic`, `story` | `writers.py` | `tests/test_songs.py` |
 | Research with checked quotes | `kalainova research` | `research.py`, `providers/search.py` | `tests/test_research.py` |
@@ -35,6 +35,7 @@
 | The studio bar | `kalainova bar` | `bar/` | `tests/test_bar.py` |
 | Verdicts and signals | `kalainova verdict`, `signals` | `verdicts.py` | `tests/test_verdicts_provenance.py` |
 | The review set | `kalainova review-set` | `verdicts.py`, `bar/sources.py` | `tests/test_review_set.py` |
+| OpenAI-compatible LLM vendors (Gemini, Groq, OpenRouter, z.ai) | `providers: {"llm": ["groq"]}` | `providers/compat.py`, `config/studio.yaml` | `tests/test_compat_llm.py` |
 | Live adapter check (opt-in, paid) | `kalainova providers --check` | `providers/check.py` | `tests/test_provider_check.py` |
 | Chain of title | `kalainova provenance`, `ledger` | `provenance.py` | `tests/test_verdicts_provenance.py` |
 | Approval and publishing | `kalainova approve`, `publish` | `publish/` | `tests/test_engine.py`, `tests/test_gate_master.py` |
@@ -42,4 +43,5 @@
 | Cover picker: sharpest clean frame, square cut, brief override | `brief.cover_at_sec`, `brief.cover_file` | `render/cover.py`, `render/export.py` | `tests/test_cover.py` |
 | Reservations and the ledger | every paid call | `jobfs.py`, `providers/router.py` | `tests/test_ledger.py`, `tests/test_router.py` |
 | Open models on this machine | `providers: {"video": ["mac"]}` | `providers/mac.py`, `providers/runners/` | `tests/test_mac_provider.py` |
+| Real word times from the `whisper-cli` command | `preference.transcribe: [whispercpp]`, `KALAINOVA_WHISPER_CPP_MODEL` | `providers/whispercpp.py` | `tests/test_whispercpp.py` |
 | Incremental render | `kalainova make --from edit` | `render/cache.py` | `tests/test_rendercache.py` |

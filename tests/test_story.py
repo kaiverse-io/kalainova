@@ -8,7 +8,7 @@ import zipfile
 
 import pypdf
 import pytest
-from PIL import Image
+from PIL import Image, features
 from reportlab.pdfbase import pdfmetrics
 
 from kalainova import bookpdf, publish, qa, story
@@ -231,6 +231,10 @@ def test_kerning_moves_a_pair_and_keeps_every_letter():
         assert all(nudge < 0 for _, nudge in pieces[:-1])
 
 
+@pytest.mark.skipif(
+    not features.check("raqm"),
+    reason="the line breaker's kerning comes from libraqm; Pillow here was built without it",
+)
 def test_a_word_is_as_wide_in_print_as_the_line_breaker_measured_it(tmp_path):
     face = story.captions.FONTS / story.BODY_FACE
     book = bookpdf.Book("t", "", story.PAGE_W, story.PAGE_H, tmp_path, face, tmp_path / "cuts")

@@ -103,3 +103,35 @@ def test_the_command_refuses_here_because_the_tests_are_automation(tmp_path, pai
 def test_a_capability_the_provider_lacks_is_an_error(tmp_path, paid):
     with pytest.raises(ContractError, match="no voice"):
         check.plan(_job(tmp_path), "paid", "voice")
+
+
+class Video(base.Provider):
+    name = "video-only"
+    capabilities = ("video",)
+
+    def estimate(self, capability, **request):
+        return 0.5
+
+    def reference_support(self, capability, model):
+        return {"images_param": "x"}
+
+
+def test_the_video_check_also_tries_a_still_and_a_reference(tmp_path, monkeypatch):
+    monkeypatch.setitem(base._REGISTRY, "video-only", Video)
+    calls, _ = check.plan(_job(tmp_path), "video-only")
+    assert [c.label for c in calls] == ["video", "video from a still", "video from a reference"]
+    still = calls[1].kw["image"]
+    assert still.read_bytes().startswith(b"\x89PNG")
+    assert calls[2].kw["references"][0]["label"]
+
+
+def test_the_reference_route_is_left_out_for_a_provider_that_cannot_take_one(tmp_path, monkeypatch):
+    class Plain(Video):
+        name = "plain-video"
+
+        def reference_support(self, capability, model):
+            return {}
+
+    monkeypatch.setitem(base._REGISTRY, "plain-video", Plain)
+    calls, _ = check.plan(_job(tmp_path), "plain-video")
+    assert [c.label for c in calls] == ["video", "video from a still"]

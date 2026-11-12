@@ -11,7 +11,9 @@ from pathlib import Path
 
 import numpy as np
 
-from .. import media
+from .. import config, media
+from ..jobfs import ContractError
+from . import beat_this
 
 SR, HOP, WIN = 22050, 512, 2048
 
@@ -70,6 +72,17 @@ def _comb(env: np.ndarray, fps: float, dur: float, period: float) -> tuple[float
 
 
 def beat_grid(path: Path, duration: float | None = None) -> dict:
+    """The beat grid, from whichever adapter `adapters.beats` selects. Every adapter returns
+    {"bpm", "beats", "confidence"} and may add "downbeats" (seconds)."""
+    chosen = config.adapter("beats")
+    if chosen["use"] == "inhouse":
+        return inhouse_grid(path, duration)
+    if chosen["use"] == "beat_this":
+        return beat_this.beat_grid(path, duration, chosen.get("command"))
+    raise ContractError(f"adapters.beats: unknown adapter {chosen['use']!r} (inhouse, beat_this)")
+
+
+def inhouse_grid(path: Path, duration: float | None = None) -> dict:
     x = _pcm(path)
     env = onset_envelope(x)
     fps = SR / HOP
