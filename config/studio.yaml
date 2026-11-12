@@ -21,6 +21,8 @@ preference:
 # A tool is a program on PATH: nothing is vendored, and a missing one stops the step with its name.
 adapters:
   beats: {use: inhouse}            # beat_this: {use: beat_this, command: beat_this}. Gives downbeats too
+  speech_cuts: {use: inhouse}      # auto_editor: {use: auto_editor, command: auto-editor, margin: 0.2s}. Cuts by loudness
+  timeline: {use: inhouse}         # otio: {use: otio, command: otioconvert}. OpenTimelineIO writes FCPXML and EDL and reads an edit back
 
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:

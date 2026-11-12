@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import quoteattr  # noqa: S406 - writes XML; nothing here parses any
 
-from . import media
+from . import config, media, nle_otio
 from .jobfs import ContractError, Job
 
 NTSC = (Fraction(24000, 1001), Fraction(30000, 1001), Fraction(60000, 1001))
@@ -269,11 +269,22 @@ def edl(tl: Timeline) -> str:
 
 
 def export(job: Job, to: str = "fcpxml") -> Path:
-    """Write the cut in a format an editor can open, next to the rendered file."""
+    """Write the cut in a format an editor can open, next to the rendered file. `adapters.timeline`
+    picks who writes it: this module (default), or `otioconvert` for FCPXML and EDL."""
     if to not in FORMATS:
         raise ContractError(f"no export to {to}; choose from {FORMATS}")
     timeline = build(job)
+    chosen = config.adapter("timeline")["use"]
+    if chosen == "otio":
+        return nle_otio.export(job, to, otio(timeline))
+    if chosen != "inhouse":
+        raise ContractError(f"adapters.timeline: unknown adapter {chosen!r} (inhouse, otio)")
     writers = {"fcpxml": fcpxml, "otio": otio, "edl": edl}
     dst = job.work / f"timeline.{to}"
     dst.write_text(writers[to](timeline))
     return dst
+
+
+def read_back(job: Job, path: Path) -> Path:
+    """Read a timeline an editor saved into a summary in the job's folder (otio adapter only)."""
+    return nle_otio.read_back(job, path)

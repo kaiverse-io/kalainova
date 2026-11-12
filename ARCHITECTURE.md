@@ -122,7 +122,7 @@ flowchart TB
         direct["editor/direct.py<br/>choose.py"]
         notes["editor/notes.py"]
         beats["editor/beats.py"]
-        speech["editor/speech.py<br/>clips.py"]
+        speech["editor/speech.py<br/>clips.py, auto_editor.py"]
     end
 
     subgraph finish["Shared finish"]
@@ -143,6 +143,8 @@ flowchart TB
 
     subgraph after["After the cut"]
         nle["nle.py<br/>timeline export"]
+        nleotio["nle_otio.py<br/>otioconvert adapter"]
+        opentools["opentools.py<br/>run a tool as a command"]
         dub["dub.py"]
         record["provenance.py<br/>verdicts.py"]
     end
@@ -167,6 +169,7 @@ flowchart TB
     render --> qa --> publish
     qa --> timeline
     render --> nle
+    nle --> nleotio --> opentools
     render --> dub
     qa --> record
 
@@ -461,7 +464,9 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ story ─────▶ bookpdf, comic, captions, render, providers
     ├─▶ bookpdf: fonts and PDF drawing, no engine imports
     ├─▶ dub ───────▶ captions, media, plan, prompts, render, config, providers
-    ├─▶ nle: the cut as timeline files, from the job folder alone
+    ├─▶ nle ───────▶ nle_otio, config
+    ├─▶ nle_otio ──▶ opentools, config
+    ├─▶ opentools ─▶ jobfs: runs an open tool as a command, imported by each adapter
     ├─▶ provenance ▶ blobstore, takes, verdicts, config
     ├─▶ verdicts ──▶ bar, media, jobfs
     ├─▶ publish ───▶ blobstore, consistency, preproduction, streams, stock
@@ -580,7 +585,34 @@ Lyrics to takes of a song, readings that pick among them, a master, lyric files,
 A piece in another language as a job of its own: its music and effects stem under new voices, and captions in the new language, with its own human gate.
 
 ### nle
-The cut as files an editing system opens: FCPXML, OpenTimelineIO, and EDL.
+The cut as files an editing system opens: FCPXML, OpenTimelineIO, and EDL. `adapters.timeline` in `config/studio.yaml` picks who writes them: this module (default), or `otio`, where `nle_otio` has OpenTimelineIO's `otioconvert` write the FCPXML and EDL from the cut's OTIO file. `read_back` reads a timeline an editor saved (FCPXML, EDL, or OTIO) into a summary, through the same adapter; it changes no cut and no approval.
+
+### nle_otio
+The second adapter behind `adapters.timeline`: `otioconvert` called as a command, from the `opentimelineio` package and the `otio-fcpx-xml-adapter` and `otio-cmx3600-adapter` packages in an environment of their own. Public interface: `export(job, to, otio_text)` writes `timeline.<to>` in the job's work folder and checks it is the kind of file asked for (an FCPXML with clips, an EDL with events); `read_back(job, file)` writes `imports/<file>.json`, the clips in order with where each sits and what part of its source it uses. It expects OpenTimelineIO 0.18, stops before the job reaches it when that is not on PATH, and never falls back to `nle.py` by itself. A source that is not on disk has no length to carry, and the FCPXML adapter then fails on it; that failure is reported as the tool's. Depends on `opentools`, `config`, `jobfs`.
+
+```
+ nle.export(job, "fcpxml")
+     │  adapters.timeline.use
+     ├── inhouse ──▶ nle.fcpxml(...) ──▶ timeline.fcpxml
+     └── otio ─────▶ timeline.otio (nle.otio) ──▶ otioconvert -O fcpx_xml ──▶ timeline.fcpxml
+                                                    │ opentools.run: timeout, process group
+                                                    ▼ checked: root, clips; hashes in tool_runs.json
+ nle.read_back(job, file) ──▶ otioconvert -I <format> ──▶ imports/<file>.otio ──▶ imports/<file>.json
+```
+
+### opentools
+The one place an adapter runs an open tool as a command, and the contract every such adapter keeps (ADR 0012). Public interface: `find` (the program on PATH, or a stop naming it and the config key), `require_version` (the program is the version the adapter was written for), `run` (an argument list, a timeout, the tool's own process group killed when the deadline passes), `inside` (a path in the job's folders by real directories: `..` and symlinks refused), and `record` (appends to the job's `tool_runs.json`: program, options, start and end, exit status, the last 2,000 characters of each stream, and the SHA-256 of every input and output). Five failures are told apart by class: `ToolMissingError`, `BadInputError`, `ToolTimeoutError`, `ToolFailedError`, `BadOutputError`. Depends on `jobfs`.
+
+The contract an adapter keeps:
+
+- names the exact program and the version it expects, and checks both before the job reaches it;
+- validates inputs, builds an argument list (never a shell string), and writes only inside the job's folders;
+- has a timeout, and cancels the tool when it passes;
+- tells apart a missing tool, a bad input, a timeout, a tool failure, and a bad output;
+- keeps a bounded copy of what the tool printed, its times, and its exit status, with the hash of every input and output;
+- checks the output exists and is the kind asked for before the step counts as done;
+- never falls back silently to another route: a missing tool stops the step and says how to switch back;
+- for a tool that brings an edit back in: the result is a new edit revision and voids an approval of the old bytes. The timeline read-back does not do this yet, because it only summarises.
 
 ### timeline
 Looking at a piece without playing it: the first and last frame of every shot, a motion strip of frames across each shot, a cut strip of frames either side of each join, a filmstrip over a waveform, and a check for a click or a flash at each cut.
@@ -628,7 +660,7 @@ Approve, publish, and measure. Binds approval to the bytes and a stream piece to
 The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
 
 ### editor
-The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording (starting on a sentence start, with opening fillers dropped, and optionally opening and closing on a drawn title card from the graphics provider), chooses the crop through one seam with two adapters (the in-house motion centre, and a face detector the operator names as a command in `config/studio.yaml`), refusing a job whose `brief.source` does not say where the file came from and which file in the job folder covers its use. `musiccuts` turns a beat grid into bars, phrases, sections and the biggest rise in energy, and says so when there is no steady pulse; `musicvideo` builds the job that cuts a video to a track, with an excerpt, character cutaways under the shot ceiling, and the cost said first. `beats` is a seam: `adapters.beats` in `config/studio.yaml` picks its own onset-and-comb grid (default) or `beat_this`, which `beat_this.py` runs as a command and which adds downbeats. A seam is built only with its second adapter, and a missing command stops the step with its name.
+The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording (starting on a sentence start, with opening fillers dropped, and optionally opening and closing on a drawn title card from the graphics provider), chooses the crop through one seam with two adapters (the in-house motion centre, and a face detector the operator names as a command in `config/studio.yaml`), refusing a job whose `brief.source` does not say where the file came from and which file in the job folder covers its use. `musiccuts` turns a beat grid into bars, phrases, sections and the biggest rise in energy, and says so when there is no steady pulse; `musicvideo` builds the job that cuts a video to a track, with an excerpt, character cutaways under the shot ceiling, and the cost said first. `beats` is a seam: `adapters.beats` in `config/studio.yaml` picks its own onset-and-comb grid (default) or `beat_this`, which `beat_this.py` runs as a command and which adds downbeats. `speech_cuts` is a second seam: `speech.keep_spans` (called by `direct` for each take with sound) follows `adapters.speech_cuts`, which picks the in-house cuts at gaps between words (a silence detector when there is no transcript, the default) or `auto_editor`, which runs the `auto-editor` command, keeps the loud spans it reports, and lays any words over them. `auto_editor.py` follows the adapter contract in `opentools`, and keeps its result by the file's bytes and options. A seam is built only with its second adapter, and a missing command stops the step with its name.
 
 ### stock
 Free-license footage with credits.
