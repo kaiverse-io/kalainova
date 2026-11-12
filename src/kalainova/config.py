@@ -32,6 +32,14 @@ def bar_limits() -> dict:
     return {**_repo_bar(), **(studio().get("bar") or {})}
 
 
+def adapter(capability: str) -> dict:
+    """Which implementation serves an open-tool capability (`adapters:` in the studio config).
+    `use` names it; the rest is that adapter's own settings, such as the command to call.
+    A capability not listed keeps its in-house implementation."""
+    entry = (studio().get("adapters") or {}).get(capability) or {}
+    return {"use": "inhouse", **entry}
+
+
 def preference(capability: str, job: dict | None = None) -> list[str]:
     """The providers to try, in order. A job's own list replaces the studio's, so naming one provider pins it."""
     job_pref = ((job or {}).get("providers") or {}).get(capability)
