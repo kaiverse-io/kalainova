@@ -25,7 +25,7 @@
 | Review in motion: motion strip, cut strip, findings, retake limits | `kalainova sheet --motion`, `sheet --cuts`, `findings`, `retake` | `timeline.py`, `qa.py`, `qachecks.py`, `takes.py`, `shotmake.py` | `tests/test_motion_review.py` |
 | Character shot ceiling, overlay safe zone | `kalainova shotplan`, `make` | `shots.py`, `qachecks.py`, `config/studio.yaml` (`character_shot_max_sec`, `safe_zone`) | `tests/test_motion_review.py` |
 | Kinetic captions drawn as a transparent layer; title, quote and stat cards | `brief.captions: kinetic`, `kalainova card` | `render/drawn.py`, `render/picture.py` (`op_burn_captions`), `edit.py`, `qachecks.py`, `providers/hyperframes.py` | `tests/test_drawn.py` |
-| Timeline export | `kalainova export` | `nle.py` | `tests/test_nle.py` |
+| Timeline export, and an edit read back (seam: `adapters.timeline`) | `kalainova export`, `kalainova timeline-import` | `nle.py`, `nle_otio.py` (`otioconvert`), `opentools.py` (the contract every command adapter keeps) | `tests/test_nle.py`, `tests/test_nle_otio.py` |
 | Footage edit | `kalainova ingest`, `edit`, `revise` | `editor/` | `tests/test_editor.py` |
 | Word-level speech cuts | `kalainova edit` | `editor/speech.py` | `tests/test_speech_clips.py` |
 | Clips from a long source, refused without a record of where the source came from | `kalainova clips`, `brief.source` | `editor/clips.py` (`require_source`, `tidy`, `choose_crop`, `face_centre`, `motion_centre`, opening and closing cards), `publish/__init__.py` | `tests/test_speech_clips.py`, `tests/test_clip_cards.py`, `tests/test_production_cli.py` |
