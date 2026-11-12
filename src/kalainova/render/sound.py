@@ -20,6 +20,10 @@ VOICE_CHAIN = (
     "acompressor=threshold=-22dB:ratio=2.5:attack=6:release=120:makeup=3dB,"
     "alimiter=limit=0.9:attack=2:release=50:level=disabled"
 )
+# sidechaincompress reads two inputs whose frames reach it in whatever order the threads deliver
+# them, and its output changes with that order. Cutting both into frames of one fixed size makes
+# every render pair them the same way, so the same plan gives the same bytes.
+PAIR_FRAMES = "asetnsamples=n=1024:p=0"
 MUSIC_POCKET = "equalizer=f=2800:t=q:w=1.4:g=-3"  # a space in the music for the words to sit in
 DUCK = "sidechaincompress=threshold=0.05:ratio=3:attack=25:release=450:makeup=1"  # gently: 5 dB
 # A real room is never silent. A faint bed keeps speech gaps from dropping to digital zero.
@@ -92,8 +96,8 @@ def _add_music(graph: _Graph, work: Path, a: dict[str, Any], seconds: float) -> 
         bed, gain, key_gain = _music_under_voice(work, a, bed)
     music = _music_chain(graph.add_input(bed), gain, seconds, has_voice)
     if has_voice and a.get("duck"):
-        graph.chains.append(f"{music}[mus]")
-        graph.chains.append(f"[vkey]volume={key_gain:.2f}dB[key]")
+        graph.chains.append(f"{music},{PAIR_FRAMES}[mus]")
+        graph.chains.append(f"[vkey]volume={key_gain:.2f}dB,{PAIR_FRAMES}[key]")
         graph.chains.append(f"[mus][key]{DUCK},asplit=2[musd][mstem]")
     else:
         graph.chains.append(f"{music},asplit=2[musd][mstem]")
