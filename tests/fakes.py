@@ -208,6 +208,17 @@ def make_job(tmp_path: Path, *, beats=None, packet=None, job_id="p1", **extra) -
     return job
 
 
+def cover_source(
+    job: Job, *, origin: str = "a recording the operator made", reference: str = "brief.md"
+) -> Job:
+    """Give a job what a cut needs: where its source came from, and the file that covers its use."""
+    (job.folder / reference).write_text("This job may cut the recording it was given.\n")
+    data = json.loads((job.folder / "job.json").read_text())
+    data.setdefault("brief", {})["source"] = {"origin": origin, "reference": reference}
+    (job.folder / "job.json").write_text(json.dumps(data))
+    return Job(job.folder)
+
+
 class Reply:
     """A vendor's HTTP reply."""
 

@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
-from .. import config, edit, media, prompts
+from .. import blobstore, config, consistency, edit, media, prompts
 from ..jobfs import ContractError, Job, open_child
 from ..providers import router
 from . import speech
@@ -21,6 +22,31 @@ CLIPS_FILE = "clips.json"
 SHORTEST_SEC, LONGEST_SEC = 15.0, 60.0
 SENTENCE_END = re.compile(r"[.!?]$")
 PROFILE = "short-9x16"
+
+
+def require_source(job: Job) -> dict[str, Any]:
+    """Refuse to cut anything the job has no record of being allowed to use.
+
+    The job's contract already names its rights. `brief.source` adds where the file came from
+    (`origin`) and which file in the job folder covers its use (`reference`: the brief or the
+    licence). The engine never fetches a source: the file is the one the brief provides.
+    """
+    source = (job.job.get("brief") or {}).get("source")
+    if not isinstance(source, dict) or not all(
+        str(source.get(k) or "").strip() for k in ("origin", "reference")
+    ):
+        raise ContractError(
+            f"{job.id}: clips need brief.source with `origin` (where the file came from) and "
+            "`reference` (the brief or licence file in the job folder)"
+        )
+    folder = job.folder.resolve()
+    ref = (folder / str(source["reference"])).resolve()
+    if not ref.is_relative_to(folder) or not ref.is_file():
+        raise ContractError(
+            f"{job.id}: brief.source.reference {source['reference']!r} is not a file "
+            "in the job folder"
+        )
+    return dict(source)
 
 
 def _sentences(words: list[speech.Word]) -> list[list[speech.Word]]:
@@ -111,6 +137,7 @@ def choose(job: Job, words: list[speech.Word], count: int) -> list[dict[str, Any
 
 def find(job: Job, source: Path, *, count: int = 3) -> list[dict[str, Any]]:
     """Choose the moments and save them, where a person or an agent can change them."""
+    require_source(job)
     words = speech.transcript(job, source)
     if not words:
         raise ContractError(
@@ -121,8 +148,10 @@ def find(job: Job, source: Path, *, count: int = 3) -> list[dict[str, Any]]:
     return clips
 
 
-def _manifest(job_id: str, source_rel: str, data: dict[str, Any], length: float) -> dict[str, Any]:
-    return {
+def _manifest(
+    job_id: str, source_rel: str, data: dict[str, Any], length: float, lock_sha: str | None = None
+) -> dict[str, Any]:
+    manifest: dict[str, Any] = {
         "schema_version": "0.1",
         "job_id": job_id,
         "duration_sec": round(length, 3),
@@ -138,12 +167,36 @@ def _manifest(job_id: str, source_rel: str, data: dict[str, Any], length: float)
             }
         ],
     }
+    if lock_sha:  # the same field the generated path writes, so the kit check at publish passes
+        manifest["kit_lock_sha256"] = lock_sha
+    return manifest
+
+
+def motion_centre(parent: Job, source: Path, clip: dict[str, Any]) -> float | None:
+    """Where the shots under a clip say the action is, from ingest. A motion centre, not a face."""
+    path = parent.folder / "footage.json"
+    if not path.exists():
+        return None
+    footage = json.loads(path.read_text())
+    ids = {s["id"] for s in footage["sources"] if Path(str(s["path"])).name == source.name}
+    total = x = 0.0
+    for shot in footage["shots"]:
+        if shot["source"] not in ids or shot.get("subject_x") is None:
+            continue
+        overlap = min(float(shot["out_sec"]), clip["end_sec"]) - max(
+            float(shot["in_sec"]), clip["start_sec"]
+        )
+        if overlap > 0:
+            total += overlap
+            x += overlap * float(shot["subject_x"])
+    return round(x / total, 3) if total else None
 
 
 def open_job(
-    parent: Job, source: Path, clip: dict[str, Any], new_id: str, *, crop_x: float = 0.5
+    parent: Job, source: Path, clip: dict[str, Any], new_id: str, *, crop_x: float | None = None
 ) -> Job:
     """A short piece from one chosen moment, with its speech cut clean and its words as captions."""
+    record = require_source(parent)
     words = speech.transcript(parent, source) or []
     span = [
         w
@@ -154,12 +207,16 @@ def open_job(
     if not keeps:
         raise ContractError(f"{parent.id}: nothing to keep in {clip.get('title', 'that clip')}")
     title = str(clip.get("title") or new_id)
-    child = open_child(parent, new_id, profile=PROFILE, brief={"subject": title})
+    seen = {"file": source.name, "sha256": blobstore.sha256_file(source)}
+    brief = {**(parent.job.get("brief") or {}), "subject": title, "source": {**record, **seen}}
+    child = open_child(parent, new_id, profile=PROFILE, brief=brief)
+    shutil.copyfile(parent.folder / record["reference"], child.folder / record["reference"])
     copied = child.work / f"source{source.suffix}"
     if not copied.exists():
         copied.hardlink_to(source)
     length = sum(b - a for a, b in keeps)
-    child.write("asset_manifest", _manifest(new_id, copied.name, child.job, length))
+    lock = consistency.lock_sha256(child) if child.has("kit_lock") else None
+    child.write("asset_manifest", _manifest(new_id, copied.name, child.job, length, lock))
     child.write(
         "script_packet",
         {
@@ -169,12 +226,19 @@ def open_job(
             "beats": [{"id": "c1", "role": "hook", "text": title}],
         },
     )
-    _write_edit(child, keeps, span, crop_x)
+    centre = motion_centre(parent, source, clip) if crop_x is None else None
+    basis = "given" if crop_x is not None else "motion_centre" if centre is not None else "default"
+    at = crop_x if crop_x is not None else centre if centre is not None else 0.5
+    _write_edit(child, keeps, span, at, basis)
     return child
 
 
 def _write_edit(
-    child: Job, keeps: list[tuple[float, float]], words: list[speech.Word], crop_x: float
+    child: Job,
+    keeps: list[tuple[float, float]],
+    words: list[speech.Word],
+    crop_x: float,
+    crop_basis: str,
 ) -> None:
     prof = config.profile(PROFILE)
     cuts, at = [], 0.0
@@ -188,6 +252,7 @@ def _write_edit(
                 "role": "hook" if n == 0 else "body",
                 "start_sec": round(at, 3),
                 "crop_x": crop_x,
+                "crop_basis": crop_basis,
                 "keep_audio": True,
                 **({"zoom": 1.08} if n % 2 else {}),
             }

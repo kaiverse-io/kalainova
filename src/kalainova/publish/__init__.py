@@ -227,7 +227,7 @@ def approve(
         "title": pub.get("title") or packet.get("title") or job.id,
         "description": pub.get("description", ""),
         "hashtags": pub.get("hashtags", []),
-        "synthetic_disclosure": True,
+        "synthetic_disclosure": labels.is_synthetic(job),
         "privacy": privacy,
         "notes": notes,
     }

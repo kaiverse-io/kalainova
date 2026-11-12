@@ -12,14 +12,20 @@ This writes the cut, not the file, so a person can finish it. The sources stay w
 
 ## Cut short pieces from a long recording
 
-Ingest the source first, then:
+A cut needs a record of what it may use. Before `clips` will run, the job's `brief.source` names where the file came from (`origin`) and the file in the job folder that covers its use (`reference`: the brief, or the licence):
+
+```json
+"brief": {"subject": "...", "source": {"origin": "<who supplied the file>", "reference": "brief.md"}}
+```
+
+The engine does not fetch a source. The file is the one the brief provides. Ingest it first, then:
 
 ```bash
 uv run kalainova clips <job> --count 3         # chooses moments, into clips.json
 uv run kalainova clips <job> --count 3 --open  # and opens a job for each
 ```
 
-A model chooses when one is listed. With none, the densest whole sentences are chosen, and you can edit `clips.json` by hand. Each clip starts and ends on a word, and needs a transcript. Each is its own job with its own human gate.
+A model chooses when one is listed. With none, the densest whole sentences are chosen, and you can edit `clips.json` by hand. Each clip starts and ends on a word, and needs a transcript. Each is its own job with its own human gate. A clip keeps its parent's brief, rights, identity and stream, carries the source's hash and a copy of the reference file, and says in `crop_basis` what its crop came from: `motion_centre` is where the picture moves in the scored shots, which is not a face. A clip of real footage is approved and posted without the generated-media label.
 
 ## Dub a piece
 
