@@ -33,3 +33,21 @@ kalainova timeline-import <job> edited.fcpxml
 `timeline-import` writes `imports/edited.fcpxml.json` in the job's work folder: each clip in order, where it sits, and which part of its source it uses. It reads FCPXML, EDL, and OTIO. It changes no cut. Every run is recorded in the job's `tool_runs.json`.
 
 A cut whose sources are not on disk has no lengths to carry, and the FCPXML writer in OpenTimelineIO fails on it. The step reports that as the tool's failure.
+
+## auto-editor (`adapters.speech_cuts`)
+
+```bash
+uv venv --python 3.12 ~/tools/auto-editor-env
+uv pip install --python ~/tools/auto-editor-env/bin/python auto-editor==29.3.1
+export PATH=~/tools/auto-editor-env/bin:$PATH
+auto-editor --version
+```
+
+The package downloads the program's binary from its GitHub releases the first time it runs, so run `--version` once with a network before a job needs it. The adapter expects 29.x.
+
+```yaml
+adapters:
+  speech_cuts: {use: auto_editor, command: auto-editor}   # margin: 0.2s, edit: audio, timeout_sec: 900
+```
+
+A long-form footage edit (`kalainova edit`) then keeps the loud spans auto-editor reports for each take with sound, instead of cutting at gaps between words. It judges loudness, not words, so a cut can land inside a quiet word; raise `margin` to guard against that. Words from a transcript, when there is one, are still laid over the kept spans for captions. A take that is silent throughout stops the step rather than falling back. Results are kept in the job's `speech_cuts/` folder, by the file's bytes and options, and every run is recorded in `tool_runs.json`.
