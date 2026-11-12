@@ -15,6 +15,7 @@ import math
 import os
 import struct
 import wave
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,7 @@ class Call:
     kw: dict[str, Any]
     est: dict[str, Any]
     estimated: float | None
+    label: str = ""  # what the line is called when one capability has several routes
 
 
 @dataclass
@@ -62,6 +64,24 @@ def _tone(path: Path, seconds: float = 3.0) -> Path:
             for i in range(int(rate * seconds))
         )
         out.writeframes(b"".join(frames))
+    return path
+
+
+def _grey_png(path: Path, side: int = 64) -> Path:
+    """A flat grey picture, written by hand, to give a model as a first frame or a reference."""
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        crc = zlib.crc32(kind + body)
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", crc)
+
+    rows = b"".join(b"\x00" + b"\x80\x80\x80" * side for _ in range(side))
+    header = struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0)
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
     return path
 
 
@@ -120,8 +140,49 @@ def plan(job: Job, name: str, capability: str | None = None) -> tuple[list[Call]
             unchecked.append(Outcome(cap, "unchecked", detail=NO_CHEAP_CALL[cap]))
             continue
         fn, args, kw, est = _request(cap, work)
-        calls.append(Call(cap, fn, args, kw, est, provider.estimate(cap, **est)))
+        calls.append(Call(cap, fn, args, kw, est, provider.estimate(cap, **est), cap))
+        if cap == "video":  # the routes a moving shot really takes, not only text to video
+            calls.extend(_video_routes(provider, work))
     return calls, unchecked
+
+
+def _video_routes(provider: base.Provider, work: Path) -> list[Call]:
+    """A clip from a still, and one from a reference, for a provider that takes them."""
+    still = _grey_png(work / "check.still.png")
+    base_kw: dict[str, Any] = {"duration": 2.0, "aspect": "16:9"}
+    routes: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
+        ("video from a still", {"image": still}, {"image": True}),
+        (
+            "video from a reference",
+            {"references": [{"path": still, "label": "a plain grey square"}]},
+            {"references": True},
+        ),
+    ]
+    calls = []
+    try:
+        takes_refs = bool(
+            provider.reference_support(
+                "video", config.model_for(provider.name, "reference_to_video")
+            )
+        )
+    except KeyError:
+        takes_refs = False
+    for label, extra, flag in routes:
+        if "references" in extra and not takes_refs:
+            continue
+        est = {"duration": 2.0, **flag}
+        calls.append(
+            Call(
+                "video",
+                "video",
+                ("a plain grey wall", work / "check.video.mp4"),
+                {**base_kw, **extra},
+                est,
+                provider.estimate("video", **est),
+                label,
+            )
+        )
+    return calls
 
 
 def refuse_automation(env: Mapping[str, str]) -> None:
@@ -164,7 +225,7 @@ def run(job: Job, name: str, calls: list[Call], *, spend: bool) -> list[Outcome]
             message = str(exc)
             outcomes.append(
                 Outcome(
-                    call.capability,
+                    call.label or call.capability,
                     _classify(message),
                     estimated=call.estimated,
                     charged=round(job.spent() - before, 6),
@@ -174,7 +235,7 @@ def run(job: Job, name: str, calls: list[Call], *, spend: bool) -> list[Outcome]
             continue
         outcomes.append(
             Outcome(
-                call.capability,
+                call.label or call.capability,
                 "passed",
                 model=res.model,
                 estimated=call.estimated,
@@ -206,7 +267,7 @@ def cli(name: str, job_ref: str | None, capability: str | None, spend: bool) -> 
     known = [c.estimated for c in calls if c.estimated is not None]
     for c in calls:
         shown = "no price" if c.estimated is None else f"about ${c.estimated:.4f}"
-        print(f"  {c.capability:<11} {shown}")
+        print(f"  {c.label or c.capability:<22} {shown}")
     for u in unchecked:
         print(f"  {u.capability:<11} unchecked: {u.detail}")
     print(f"estimated total ${sum(known):.4f}; cap {job.job.get('cost_cap')}")

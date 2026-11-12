@@ -46,7 +46,9 @@ def test_image_to_video_uses_a_live_endpoint_with_an_integer_duration(fal):
     provider.video("a prompt", tmp / "a.mp4", duration=4.2, aspect="9:16", image=still)
     assert sent["model"] == "alibaba/wan-3.0-prime/image-to-video"
     assert sent["payload"]["duration"] == 5
-    assert sent["payload"]["image_url"].startswith("data:image/png")
+    assert sent["payload"]["start_image_url"].startswith("data:image/png")
+    assert "image_url" not in sent["payload"]
+    assert sent["payload"]["aspect_ratio"] == "9:16"
     assert sent["payload"]["resolution"] == "1080p"
     assert sent["payload"]["audio"] is False
 
@@ -90,4 +92,35 @@ def test_an_end_frame_goes_in_the_models_own_field(fal):
     assert sent["payload"]["end_image_url"] == "https://x/e.png"
     assert sent["payload"]["start_image_url"] == "https://x/s.png"
     provider.video("p", tmp / "b.mp4", duration=5, aspect="9:16", image=still, end_image=end)
-    assert "end_image_url" not in sent["payload"], "the default model has no end frame field"
+    assert sent["payload"]["end_image_url"] == "https://x/e.png", "the default model takes one too"
+    assert sent["payload"]["start_image_url"] == "https://x/s.png"
+
+
+def test_a_model_whose_schema_lists_no_aspect_ratio_is_sent_none(fal):
+    provider, sent, tmp = fal
+    still = tmp / "s.png"
+    still.write_bytes(b"s")
+    kling = "fal-ai/kling-video/v3/pro/image-to-video"
+    provider.video("p", tmp / "a.mp4", duration=5, aspect="9:16", image=still, model=kling)
+    assert "aspect_ratio" not in sent["payload"]
+    provider.video("p", tmp / "b.mp4", duration=5, aspect="9:16")
+    assert sent["payload"]["aspect_ratio"] == "9:16"
+    assert "start_image_url" not in sent["payload"], "text to video takes no first frame"
+
+
+def test_a_song_longer_than_the_model_makes_is_bounded_in_config():
+    assert config.audio_spec("fal", "minimax/music-3")["max_sec"] == 300
+
+
+def test_every_section_tag_of_a_song_sits_on_its_own_line():
+    from kalainova import songs
+
+    song = {
+        "sections": [
+            {"kind": "verse", "lines": ["one", "two"]},
+            {"kind": "chorus", "lines": ["three"]},
+        ]
+    }
+    lines = songs.lyrics_text(song).splitlines()  # type: ignore[arg-type]  # a minimal song
+    tags = [line for line in lines if line.startswith("[")]
+    assert len(tags) == 2 and all(line.endswith("]") for line in tags)

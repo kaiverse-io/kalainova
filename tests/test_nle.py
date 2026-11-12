@@ -141,7 +141,33 @@ def test_an_edl_lists_each_event_with_source_and_record_times(tmp_path, monkeypa
     text = nle.edl(nle.build(job))
     assert text.startswith(f"TITLE: {job.id}\nFCM: NON-DROP FRAME")
     assert "002  AX       V     C        00:00:02:00 00:00:07:00 00:00:04:00 00:00:09:00" in text
+    assert "* FRAME RATE: 24.000 FPS" in text
     assert "* FROM CLIP NAME: a.mp4" in text
+
+
+@pytest.mark.parametrize("fps", [24.0, 25.0, 30.0, 23.976, 29.97])
+def test_the_reference_reader_accepts_an_edl_at_odd_cut_points(tmp_path, monkeypatch, fps):
+    otio = pytest.importorskip("opentimelineio")
+    job = _job(tmp_path, monkeypatch, fps=fps)
+    em = job.read("edit_manifest")
+    em["cuts"][1]["start_sec"] = 3.57
+    em["cuts"][1]["in_sec"] = 2.33
+    job.write("edit_manifest", em)
+    timeline = otio.adapters.read_from_string(
+        nle.edl(nle.build(job)), "cmx_3600", rate=float(nle.rate_of(fps))
+    )
+    assert len(list(timeline.find_clips())) == 2
+
+
+def test_the_otio_export_loads_and_carries_each_sources_length(tmp_path, monkeypatch):
+    otio = pytest.importorskip("opentimelineio")
+    job = _job(tmp_path, monkeypatch)
+    monkeypatch.setattr(nle, "_length", lambda path: 12.0)
+    path = tmp_path / "t.otio"
+    path.write_text(nle.otio(nle.build(job)))
+    timeline = otio.adapters.read_from_file(str(path))
+    clip = next(iter(timeline.find_clips()))
+    assert clip.media_reference.available_range.duration.value == 288.0
 
 
 def test_times_stay_on_whole_frames_at_ntsc_rates(tmp_path, monkeypatch):
@@ -170,3 +196,10 @@ def test_a_piece_with_no_cuts_has_nothing_to_export(tmp_path, monkeypatch):
     job.write("edit_manifest", em)
     with pytest.raises(ContractError, match="no cuts"):
         nle.build(job)
+
+
+def test_the_fcpxml_export_loads_with_the_fcpx_adapter(tmp_path, monkeypatch):
+    otio = pytest.importorskip("opentimelineio")
+    job = _job(tmp_path, monkeypatch)
+    timeline = otio.adapters.read_from_string(nle.fcpxml(nle.build(job)), "fcpx_xml")
+    assert len(list(timeline.find_clips())) >= 2
