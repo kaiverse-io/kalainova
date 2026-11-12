@@ -15,7 +15,7 @@ This writes the cut, not the file, so a person can finish it. The sources stay w
 A cut needs a record of what it may use. Before `clips` will run, the job's `brief.source` names where the file came from (`origin`) and the file in the job folder that covers its use (`reference`: the brief, or the licence):
 
 ```json
-"brief": {"subject": "...", "source": {"origin": "<who supplied the file>", "reference": "brief.md"}}
+"brief": {"subject": "<what the piece is about>", "source": {"origin": "<who supplied the file>", "reference": "brief.md"}}
 ```
 
 The engine does not fetch a source. The file is the one the brief provides. Ingest it first, then:
