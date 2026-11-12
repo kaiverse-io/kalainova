@@ -1,5 +1,6 @@
 ---
 name: ub-mode
+model: sonnet
 description: >
   Disciplined engineering when writing or changing code: First Make it Work, then
   Make it Right, then Follow Practice — with crapper, dryer and mutator as the
@@ -125,19 +126,19 @@ ratchet, the ADR rule, the commit convention), follow `AGENTS.md`.
 
 ## Crapper — `just crap`
 
-* Run `just crap` (CRAP = CC² × (1 − coverage)³ + CC, per function, threshold 10).
+* Run `just crap` once, before the final commit, not after every edit. (CRAP = CC² × (1 − coverage)³ + CC, per function, threshold 10).
 * Bring each function under CRAP 10 by splitting it, by testing it, or both.
 * Consider whether a `match`/`if` chain is worth reducing before splitting it.
 
 ## Dryer — `just dry`
 
-* Run `just dry` and eliminate duplication that scores 0.8 or above.
+* Run `just dry` once, before the final commit, on the files you changed. Eliminate duplication that scores 0.8 or above.
 * A pair the tool flags is a candidate, not a verdict: merge only when both copies change for
   the same reason.
 
 ## Mutator — `just mutate <path>`
 
-* Run `just mutate` on the file you changed, not the whole tree — every covered mutant runs.
+* Run `just mutate` only on one changed file with logic worth pinning, and only when asked or when the change is under 50 lines. It reruns every covered mutant, so it is the most expensive step.
 * Cover the uncovered.
 * Kill the survivors.
 * Delete dead code.
@@ -159,7 +160,7 @@ ratchet, the ADR rule, the commit convention), follow `AGENTS.md`.
 ## Guard the Context Window
 
 * Keep the main thread small.
-* Send the bulk elsewhere, and keep the summary.
+* Send the bulk to a subagent on a cheaper model (`model: haiku` or `sonnet`), and keep the summary.
 
 ## Worktree Cleanup
 
