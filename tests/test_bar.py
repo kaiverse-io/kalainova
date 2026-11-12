@@ -458,3 +458,16 @@ def test_with_no_banding_filter_the_reading_is_left_out(monkeypatch, tmp_path):
 def test_a_banding_run_that_fails_reads_as_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(mediascan, "has_filter", lambda name: True)
     assert mediascan.cambi(tmp_path / "missing.mp4") is None
+
+
+def test_bar_says_plainly_when_given_a_still_image(tmp_path, capsys):
+    from kalainova.__main__ import main
+
+    still = tmp_path / "still.png"
+    Image.new("RGB", (64, 64), (30, 30, 30)).save(still)
+    with pytest.raises(media.MediaError, match="still image"):
+        media.duration(still)
+    assert main(["bar", str(still)]) == 1
+    err = capsys.readouterr().err
+    assert "studio bar cannot read it" in err
+    assert err.count(str(still)) == 1

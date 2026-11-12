@@ -248,3 +248,12 @@ def test_the_commands_take_a_character_from_files_to_a_locked_job(root, tmp_path
     assert "kalainova make" in out
     assert main(["request", "chan", "x", "--cast", "stranger"]) == 1
     assert "not on this stream" in capsys.readouterr().err
+
+
+def test_a_stream_pinned_to_a_draft_or_unnumbered_kit_is_refused_cleanly(tmp_path):
+    from kalainova import consistency
+    from kalainova.jobfs import ContractError
+
+    for pin in ("lead@draft", "lead"):
+        with pytest.raises(ContractError, match="frozen, numbered version"):
+            consistency.resolve(tmp_path, {"kits": {"lead": pin}})
