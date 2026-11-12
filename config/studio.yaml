@@ -134,6 +134,8 @@ licences:
     "*": {name: vendor terms, commercial: true, retention: unknown}
   hyperframes:
     "*": {name: Apache-2.0, commercial: true, retention: "none: renders on this machine"}
+  whispercpp:
+    "*": {name: MIT (whisper.cpp; the model file has its own terms), commercial: true, retention: "none: runs on this machine"}
 
 # What a song model states about itself. max_sec refuses a longer ask before any spend; a model with
 # no row is not checked. style_field and instrumental_lyrics are the adapter's field names. VERIFY each

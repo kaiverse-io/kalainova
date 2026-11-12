@@ -22,4 +22,6 @@ Ideas are credited in `docs/studio-goal.md` and in the module that uses them. No
 - [ShortGPT](https://github.com/RayVentura/ShortGPT) (MIT): the flow of a translation.
 - [genblaze](https://github.com/backblaze-labs/genblaze) (MIT, Backblaze): what a record of a generated asset should hold.
 
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) is run as the `whisper-cli` command when `whispercpp` is listed for `transcribe`. It is not vendored, and the model file has its own terms.
+
 `src/kalainova/providers/runners/` calls [heartlib](https://github.com/HeartMuLa/heartlib) (Apache-2.0) and [ACE-Step](https://github.com/ace-step/ACE-Step-1.5) (MIT) in their own environments. Neither is vendored, and each model's weights have their own terms: see `licences:` in `config/studio.yaml`.
