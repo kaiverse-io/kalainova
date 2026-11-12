@@ -31,6 +31,14 @@ EVERY = (
 )
 
 
+# A 330 Hz tone struck every half second (120 bpm), the first strike of each four louder, so the
+# placeholder song has the steady pulse a track must have to be cut to its music.
+_PULSED = (
+    "aevalsrc=sin(2*PI*330*t)*exp(-12*mod(t\\,0.5))*(0.5+0.5*lt(mod(t\\,2)\\,0.5))"
+    ":d={seconds}:s=48000"
+)
+
+
 class Studio(base.Provider):
     """Each attempt is logged, so a test can read what the engine asked for."""
 
@@ -115,7 +123,7 @@ class Studio(base.Provider):
         source = (
             f"anullsrc=r=48000:cl=stereo:d={seconds}"
             if Studio.silent_song
-            else f"sine=f=330:d={seconds}:r=48000"
+            else _PULSED.format(seconds=seconds)
         )
         media.run(["-f", "lavfi", "-i", source, "-ac", "2", str(dst)])
         return base.Result(path=dst, model="fake-song", meta={"seed": kw.get("seed")})
