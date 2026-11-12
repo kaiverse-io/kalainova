@@ -12,6 +12,7 @@ kalainova findings <job>                         what the last look at the piece
 kalainova filmstrip <file> <start> <end>         frames over a waveform
 kalainova cutcheck <job>                         a click or a flash at any cut
 kalainova export <job> [--to fcpxml|otio|edl]    the cut for an editing system
+kalainova timeline-import <job> <file>  an edit saved in FCPXML, EDL or OTIO, read back
 kalainova song <job>                             lyrics to takes to a master
 kalainova song-video <job> <new id> [--excerpt SEC [--start SEC]]  a video cut to the song
 kalainova research <job> "question" [--query q]  sources, snapshots, checked findings
@@ -109,6 +110,9 @@ def _look_parsers(sub: Any) -> None:
     export = sub.add_parser("export")
     export.add_argument("job")
     export.add_argument("--to", default="fcpxml", choices=nle.FORMATS)
+    back = sub.add_parser("timeline-import")
+    back.add_argument("job")
+    back.add_argument("file", type=Path)
 
 
 def _make_parsers(sub: Any) -> None:
@@ -267,6 +271,11 @@ def _cutcheck(a: argparse.Namespace) -> int:
 
 def _export(a: argparse.Namespace) -> int:
     print(nle.export(open_job(a.job), a.to))
+    return 0
+
+
+def _timeline_import(a: argparse.Namespace) -> int:
+    print(nle.read_back(open_job(a.job), a.file))
     return 0
 
 
@@ -448,6 +457,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "filmstrip": _filmstrip,
     "cutcheck": _cutcheck,
     "export": _export,
+    "timeline-import": _timeline_import,
     "song": _song,
     "song-video": _song_video,
     "research": _research,
