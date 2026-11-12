@@ -13,9 +13,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .. import media
-from ..jobfs import Job
+from .. import config, media
+from ..jobfs import ContractError, Job
 from ..providers import router
+from . import auto_editor, choose
 
 Word = dict[str, Any]
 PAD_BEFORE_SEC = 0.05
@@ -92,3 +93,26 @@ def on_output_timeline(words: list[Word], spans: list[tuple[float, float]]) -> l
                 )
         offset += end - start
     return out
+
+
+def keep_spans(
+    job: Job, path: Path, duration: float
+) -> tuple[list[tuple[float, float]], list[Word]]:
+    """What to keep of a take that has sound, and its words at their time in the kept part.
+    `adapters.speech_cuts` picks the judge. Both return spans in seconds of the source:
+    `inhouse` cuts at gaps between words (a silence detector when there are no words), and
+    `auto_editor` cuts by loudness with the `auto-editor` command, then lays any words over it."""
+    chosen = config.adapter("speech_cuts")
+    if chosen["use"] == "inhouse":
+        words = transcript(job, path) or []
+        spans = keeps(words, duration)
+        if spans:
+            return spans, on_output_timeline(words, spans)
+        silences = media.silencedetect(path, -38, choose.MIN_PAUSE_TO_CUT_SEC)
+        return choose.speech_keeps(silences, duration), []
+    if chosen["use"] == "auto_editor":
+        spans = auto_editor.keeps(job, path, duration)
+        return spans, on_output_timeline(transcript(job, path) or [], spans)
+    raise ContractError(
+        f"adapters.speech_cuts: unknown adapter {chosen['use']!r} (inhouse, auto_editor)"
+    )

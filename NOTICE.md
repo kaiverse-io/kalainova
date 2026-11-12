@@ -25,6 +25,7 @@ Ideas are credited in `docs/studio-goal.md` and in the module that uses them. No
 
 [beat_this](https://github.com/CPJKU/beat_this) (MIT) is run as a command when `adapters.beats` selects it. It is not vendored, and its checkpoints have their own terms.
 [OpenTimelineIO](https://github.com/AcademySoftwareFoundation/OpenTimelineIO) (Apache-2.0, Academy Software Foundation) and its `otio-fcpx-xml-adapter` and `otio-cmx3600-adapter` packages are run as the `otioconvert` command when `adapters.timeline` selects `otio`. They are not vendored.
+[auto-editor](https://github.com/WyattBlue/auto-editor) (public domain) is run as the `auto-editor` command when `adapters.speech_cuts` selects it. It is not vendored.
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) is run as the `whisper-cli` command when `whispercpp` is listed for `transcribe`. It is not vendored, and the model file has its own terms.
 
 `src/kalainova/providers/runners/` calls [heartlib](https://github.com/HeartMuLa/heartlib) (Apache-2.0) and [ACE-Step](https://github.com/ace-step/ACE-Step-1.5) (MIT) in their own environments. Neither is vendored, and each model's weights have their own terms: see `licences:` in `config/studio.yaml`.

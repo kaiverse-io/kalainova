@@ -213,12 +213,7 @@ def _take_keeps(
     dur = src["duration_sec"]
     if not (s["remove_silence"] and src.get("has_audio")):
         return [(0.0, dur)], []
-    words = speech.transcript(job, path) or []
-    spans = speech.keeps(words, dur)
-    if spans:
-        return spans, speech.on_output_timeline(words, spans)
-    silences = media.silencedetect(path, -38, choose.MIN_PAUSE_TO_CUT_SEC)
-    return choose.speech_keeps(silences, dur), []
+    return speech.keep_spans(job, path, dur)
 
 
 def _long_cut(
