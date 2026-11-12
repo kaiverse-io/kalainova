@@ -17,6 +17,11 @@ preference:
   graphics: [hyperframes]
   search: [exa, wikipedia, openalex]
 
+# Open tools called as commands, beside the engine's own code (ADR 0012). `use: inhouse` is the default.
+# A tool is a program on PATH: nothing is vendored, and a missing one stops the step with its name.
+adapters:
+  beats: {use: inhouse}            # beat_this: {use: beat_this, command: beat_this}. Gives downbeats too
+
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:
   llm: 660

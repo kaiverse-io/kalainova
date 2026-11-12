@@ -23,4 +23,6 @@ Ideas are credited in `docs/studio-goal.md` and in the module that uses them. No
 - [HyperFrames](https://github.com/heygen-com/hyperframes) (Apache-2.0, HeyGen): the engine's graphics provider. It renders compositions to video, with an alpha channel for the caption layer; it runs through `npx` and is not vendored. Kinetic captions and cards are drawn this way.
 - [genblaze](https://github.com/backblaze-labs/genblaze) (MIT, Backblaze): what a record of a generated asset should hold.
 
+[beat_this](https://github.com/CPJKU/beat_this) (MIT) is run as a command when `adapters.beats` selects it. It is not vendored, and its checkpoints have their own terms.
+
 `src/kalainova/providers/runners/` calls [heartlib](https://github.com/HeartMuLa/heartlib) (Apache-2.0) and [ACE-Step](https://github.com/ace-step/ACE-Step-1.5) (MIT) in their own environments. Neither is vendored, and each model's weights have their own terms: see `licences:` in `config/studio.yaml`.
