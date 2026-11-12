@@ -4,7 +4,7 @@ The `mac` provider's call returns segments only, so its words are spread by esti
 the tool for one word per segment (`-ml 1 -sow`) and reads the times it reports. The tool runs as
 its own program: it needs a ggml model file, named by KALAINOVA_WHISPER_CPP_MODEL, and nothing is
 downloaded here. List "whispercpp" under `preference.transcribe` in config/studio.yaml to use it.
-It has been tested against a fake of the command only.
+It was tried against the real tool and ggml-base.en (docs/how-to/try-the-open-tools.md).
 """
 
 from __future__ import annotations
@@ -24,13 +24,18 @@ COMMAND = "whisper-cli"
 MODEL_ENV = "KALAINOVA_WHISPER_CPP_MODEL"
 
 
+def _is_marker(text: str) -> bool:
+    pairs = {"[": "]", "(": ")", "*": "*"}  # [BLANK_AUDIO], (upbeat music), *music*
+    return len(text) > 1 and pairs.get(text[0]) == text[-1]
+
+
 def parse_words(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """Words from whisper.cpp's JSON: each entry of `transcription` carries offsets in ms."""
     words: list[dict[str, Any]] = []
     for seg in doc.get("transcription") or []:
         text = str(seg.get("text", "")).strip()
-        if not text or (text.startswith("[") and text.endswith("]")):
-            continue  # a sound marker such as [BLANK_AUDIO], not a word
+        if not text or _is_marker(text):
+            continue  # a pause (empty) or a sound marker such as [BLANK_AUDIO], not a word
         off = seg.get("offsets") or {}
         words.append(
             {

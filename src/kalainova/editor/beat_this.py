@@ -3,7 +3,8 @@
 
 `beat_this <audio> -o <out.beats>` writes one line per beat: the time in seconds, then a tab and
 the beat's place in its bar, where 1 is a downbeat. The reader accepts a bare time, a 0 or a blank
-as "a beat, not a downbeat". It has been tested here against a fake of the command only.
+as "a beat, not a downbeat". It was tried against the real tool (docs/how-to/try-the-open-tools.md).
+The tool reads only what soundfile reads (wav, flac, ogg, mp3), so any input is decoded to wav.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from .. import media
 from ..jobfs import ContractError
 
 COMMAND = "beat_this"
@@ -22,6 +24,13 @@ COMMAND = "beat_this"
 
 def available(command: str | None = None) -> bool:
     return shutil.which(command or COMMAND) is not None
+
+
+def _is_one(col: str) -> bool:
+    try:
+        return float(col) == 1.0
+    except ValueError:
+        return False
 
 
 def parse(text: str) -> tuple[list[float], list[float]]:
@@ -36,7 +45,7 @@ def parse(text: str) -> tuple[list[float], list[float]]:
         except ValueError:
             continue  # a header or a comment
         beats.append(t)
-        if len(cols) > 1 and cols[1].strip() == "1":
+        if len(cols) > 1 and _is_one(cols[1]):
             downbeats.append(t)
     return beats, downbeats
 
@@ -49,12 +58,14 @@ def beat_grid(
     if exe is None:
         raise ContractError(
             f"adapters.beats is beat_this, but `{cmd}` is not on PATH. Install it in its own "
-            "environment (pipx install beat_this) or set adapters.beats.use to inhouse"
+            "environment (docs/how-to/try-the-open-tools.md) or set adapters.beats.use to inhouse"
         )
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "grid.beats"
+        wav = Path(tmp) / "in.wav"
+        media.run(["-i", str(path), "-vn", "-ac", "1", "-ar", "44100", str(wav)])
         proc = subprocess.run(  # noqa: S603 - the configured command, run as a list
-            [exe, str(path), "-o", str(out)], capture_output=True, text=True, check=False
+            [exe, str(wav), "-o", str(out)], capture_output=True, text=True, check=False
         )
         if proc.returncode != 0 or not out.exists():
             raise ContractError(f"`{cmd}` failed on {path.name}: {proc.stderr.strip()[-300:]}")

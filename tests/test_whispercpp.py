@@ -25,6 +25,41 @@ def test_parse_keeps_words_and_drops_markers():
     assert (words[0]["start_sec"], words[0]["end_sec"]) == (0.12, 0.48)
 
 
+def _seg(a: int, b: int, text: str) -> dict:
+    """One entry as whisper-cli 1.8 writes it with `-ml 1 -sow -oj`: strings and ms offsets."""
+    stamp = {
+        "from": f"00:00:{a // 1000:02d},{a % 1000:03d}",
+        "to": f"00:00:{b // 1000:02d},{b % 1000:03d}",
+    }
+    return {"timestamps": stamp, "offsets": {"from": a, "to": b}, "text": text}
+
+
+# A pause is an empty segment; text may be non-ASCII; markers come in three bracket styles.
+REAL_SHAPE = {
+    "systeminfo": "x",
+    "model": {},
+    "params": {},
+    "result": {"language": "en"},
+    "transcription": [
+        _seg(0, 280, ""),
+        _seg(280, 650, " Tomás"),
+        _seg(650, 1000, " (soft music)"),
+        _seg(1000, 1300, " day's"),
+        _seg(1300, 1400, " *music*"),
+    ],
+}
+
+
+def test_parse_the_real_shape_drops_pauses_and_markers_and_keeps_unicode():
+    words = whispercpp.parse_words(REAL_SHAPE)
+    assert [w["text"] for w in words] == ["Tomás", "day's"]
+    assert [w["start_sec"] for w in words] == [0.28, 1.0]
+
+
+def test_a_lone_asterisk_or_bracket_is_not_a_marker():
+    assert whispercpp.parse_words({"transcription": [_seg(0, 1, " *")]})
+
+
 def test_unavailable_without_the_command_or_a_model(monkeypatch, tmp_path):
     monkeypatch.setattr(whispercpp.shutil, "which", lambda name: None)
     assert any("whisper-cli" in m for m in WhisperCpp().missing_env())
