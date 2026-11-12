@@ -136,7 +136,7 @@ flowchart TB
     subgraph access["Model access"]
         router["providers/router.py"]
         base["providers/base.py<br/>contract and registry"]
-        remote["providers/remote.py<br/>fal.py, search.py, spaces.py"]
+        remote["providers/remote.py<br/>fal.py, search.py, spaces.py, compat.py"]
         mac["providers/mac.py<br/>open models on this machine"]
         local["providers/local.py<br/>placeholders"]
     end
