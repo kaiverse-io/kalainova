@@ -43,4 +43,5 @@
 | Cover picker: sharpest clean frame, square cut, brief override | `brief.cover_at_sec`, `brief.cover_file` | `render/cover.py`, `render/export.py` | `tests/test_cover.py` |
 | Reservations and the ledger | every paid call | `jobfs.py`, `providers/router.py` | `tests/test_ledger.py`, `tests/test_router.py` |
 | Open models on this machine | `providers: {"video": ["mac"]}` | `providers/mac.py`, `providers/runners/` | `tests/test_mac_provider.py` |
+| Real word times from the `whisper-cli` command | `preference.transcribe: [whispercpp]`, `KALAINOVA_WHISPER_CPP_MODEL` | `providers/whispercpp.py` | `tests/test_whispercpp.py` |
 | Incremental render | `kalainova make --from edit` | `render/cache.py` | `tests/test_rendercache.py` |
