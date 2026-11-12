@@ -16,7 +16,8 @@ kalainova song <job>                             lyrics to takes to a master
 kalainova song-video <job> <new id> [--excerpt SEC [--start SEC]]  a video cut to the song
 kalainova research <job> "question" [--query q]  sources, snapshots, checked findings
 kalainova research <job> --check                 hold written findings to their sources
-kalainova clips <job> [--count 3] [--open]       short pieces from a long recording
+kalainova clips <job> [--count 3] [--open] [--crop motion|face] [--hook-card] [--close-text T]
+                                                 short pieces from a long recording
 kalainova dub <job> <language> <new id>          the piece in another language
 kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]|--animatic]
 kalainova signals                                which readings predict a person's verdict
@@ -129,6 +130,9 @@ def _make_parsers(sub: Any) -> None:
     clips.add_argument("job")
     clips.add_argument("--count", type=int, default=3)
     clips.add_argument("--open", action="store_true")
+    clips.add_argument("--crop", choices=("motion", "face"), default="motion")
+    clips.add_argument("--hook-card", action="store_true", help="open each clip on its title")
+    clips.add_argument("--close-text", help="close each clip on a card with this text")
     dub = sub.add_parser("dub")
     dub.add_argument("job")
     dub.add_argument("language")
@@ -326,7 +330,16 @@ def _clips(a: argparse.Namespace) -> int:
         print(f"{n}: {clip['start_sec']:.1f}-{clip['end_sec']:.1f}s  {clip.get('title', '')}")
     if a.open:
         for n, clip in enumerate(found):
-            print(clips.open_job(job, source, clip, f"{job.id}-clip-{n:02d}").folder)
+            child = clips.open_job(
+                job,
+                source,
+                clip,
+                f"{job.id}-clip-{n:02d}",
+                crop=a.crop,
+                hook_text=str(clip.get("title") or "") if a.hook_card else None,
+                close_text=a.close_text,
+            )
+            print(child.folder)
     return 0 if found else 1
 
 

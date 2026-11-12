@@ -130,6 +130,14 @@
         "outcome": {
           "type": "string"
         },
+        "source": {
+          "type": "object",
+          "description": "Cut jobs: where the source file came from (origin) and the brief or licence file in the job folder that covers it (reference).",
+          "properties": {
+            "origin": {"type": "string"},
+            "reference": {"type": "string"}
+          }
+        },
         "duration_sec": {
           "type": "number",
           "minimum": 3

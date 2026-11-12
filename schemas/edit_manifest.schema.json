@@ -132,6 +132,15 @@
             "maximum": 1,
             "description": "Horizontal subject centre for reframing."
           },
+          "crop_basis": {
+            "enum": [
+              "motion_centre",
+              "face",
+              "given",
+              "default"
+            ],
+            "description": "What crop_x came from. motion_centre is where the picture moves, not a face."
+          },
           "grade": {
             "enum": [
               "natural",

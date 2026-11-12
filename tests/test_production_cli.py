@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from fakes import EVERY, make_job, needs_ffmpeg
+from fakes import EVERY, cover_source, make_job, needs_ffmpeg
 
 from kalainova.__main__ import main
 
@@ -171,10 +171,12 @@ def test_a_recording_gives_short_clips_and_each_opens_a_job(home, studio, capsys
     from kalainova.editor import analyze
 
     take = talk(home / "a_talk.mp4", [(20.0, True)], size=(320, 180))
-    job = make_job(
-        home,
-        strategy="owned-derivative",
-        providers=NO_LLM,
+    job = cover_source(
+        make_job(
+            home,
+            strategy="owned-derivative",
+            providers=NO_LLM,
+        )
     )
     analyze.ingest(job, [take])
     studio.heard = [

@@ -28,7 +28,7 @@
 | Timeline export | `kalainova export` | `nle.py` | `tests/test_nle.py` |
 | Footage edit | `kalainova ingest`, `edit`, `revise` | `editor/` | `tests/test_editor.py` |
 | Word-level speech cuts | `kalainova edit` | `editor/speech.py` | `tests/test_speech_clips.py` |
-| Clips from a long source | `kalainova clips` | `editor/clips.py` | `tests/test_speech_clips.py` |
+| Clips from a long source, refused without a record of where the source came from | `kalainova clips`, `brief.source` | `editor/clips.py` (`require_source`, `tidy`, `choose_crop`, `face_centre`, `motion_centre`, opening and closing cards), `publish/__init__.py` | `tests/test_speech_clips.py`, `tests/test_clip_cards.py`, `tests/test_production_cli.py` |
 | Dubbing | `kalainova dub` | `dub.py` | `tests/test_dub.py` |
 | Comics and books | `kalainova comic`, `story` | `comic.py`, `story.py` | `tests/test_comic.py`, `tests/test_story.py` |
 | Kits, streams, locks | `kalainova kit`, `stream`, `request` | `kits.py`, `streams.py`, `consistency.py` | `tests/test_kits.py`, `tests/test_kit_jobs.py` |

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 
 import pytest
-from fakes import EVERY, make_job, needs_ffmpeg
+from fakes import EVERY, cover_source, make_job, needs_ffmpeg
 
-from kalainova import media, qa, render
+from kalainova import media, publish, qa, render
 from kalainova.editor import analyze, clips, direct, speech
 from kalainova.jobfs import ContractError
 from kalainova.providers import router
@@ -141,7 +141,7 @@ def test_a_model_picks_the_moments_when_one_is_ready(tmp_path, studio):
 
 
 def test_finding_clips_needs_a_transcript(tmp_path, studio):
-    job = make_job(tmp_path, providers={"transcribe": []})
+    job = cover_source(make_job(tmp_path, providers={"transcribe": []}))
     source = job.work / "talk.wav"
     source.write_bytes(b"x")
     with pytest.raises(ContractError, match="transcript"):
@@ -151,7 +151,7 @@ def test_finding_clips_needs_a_transcript(tmp_path, studio):
 @needs_ffmpeg
 def test_a_clip_with_nothing_said_in_it_opens_no_job(tmp_path, monkeypatch, studio):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
-    job = make_job(tmp_path)
+    job = cover_source(make_job(tmp_path))
     source = job.work / "talk.wav"
     media.run(["-f", "lavfi", "-i", "sine=f=220:d=4", str(source)])
     studio.heard = _words((3.0, 3.5, "late"))
@@ -162,7 +162,7 @@ def test_a_clip_with_nothing_said_in_it_opens_no_job(tmp_path, monkeypatch, stud
 @needs_ffmpeg
 def test_a_clip_will_not_overwrite_a_job_that_exists(tmp_path, monkeypatch, studio):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
-    job = make_job(tmp_path)
+    job = cover_source(make_job(tmp_path))
     source = job.work / "talk.wav"
     media.run(["-f", "lavfi", "-i", "sine=f=220:d=4", str(source)])
     studio.heard = _words((0.5, 1.5, "said"))
@@ -174,7 +174,7 @@ def test_a_clip_will_not_overwrite_a_job_that_exists(tmp_path, monkeypatch, stud
 @needs_ffmpeg
 def test_a_clip_becomes_its_own_job_and_passes_the_same_gates(tmp_path, monkeypatch, studio):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
-    job = make_job(tmp_path)
+    job = cover_source(make_job(tmp_path))
     source = job.work / "talk.mp4"
     media.run(
         ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=30:r=24", "-f", "lavfi", "-i",
@@ -193,6 +193,119 @@ def test_a_clip_becomes_its_own_job_and_passes_the_same_gates(tmp_path, monkeypa
     assert (info["width"], info["height"]) == (1080, 1920)
     report = qa.run(child)
     assert report["passed"], [c for c in report["checks"] if c["status"] == "fail"]
+    brief = child.job["brief"]
+    assert brief["subject"] == "The turn" and brief["max_video_beats"] == 9, (
+        "the parent's brief stays"
+    )
+    assert brief["source"]["origin"] == "a recording the operator made"
+    assert brief["source"]["file"] == "talk.mp4" and len(brief["source"]["sha256"]) == 64
+    assert (child.folder / "brief.md").is_file(), "what covers the source travels with the clip"
+    assert {c["crop_basis"] for c in em["cuts"]} == {"default"}, (
+        "no shots were scored, so no centre"
+    )
+    approval = publish.approve(child, "human", platforms=["youtube"])
+    assert approval["synthetic_disclosure"] is False, (
+        "a cut of real footage is not labelled generated"
+    )
+
+
+def test_a_cut_is_refused_with_no_record_of_where_its_source_came_from(tmp_path, studio):
+    job = make_job(tmp_path)
+    with pytest.raises(ContractError, match="brief.source"):
+        clips.require_source(job)
+    source = job.work / "talk.wav"
+    source.write_bytes(b"x")
+    with pytest.raises(ContractError, match="brief.source"):
+        clips.find(job, source)
+
+
+def test_a_cut_is_refused_when_half_of_the_record_is_missing(tmp_path, studio):
+    job = make_job(tmp_path, brief={"subject": "a test", "source": {"origin": "a recording"}})
+    with pytest.raises(ContractError, match="brief.source"):
+        clips.require_source(job)
+
+
+def test_a_cut_is_refused_when_what_covers_it_is_not_a_file_in_the_job(tmp_path, studio):
+    job = cover_source(make_job(tmp_path))
+    (job.folder / "brief.md").unlink()
+    with pytest.raises(ContractError, match="not a file in the job folder"):
+        clips.require_source(job)
+
+
+def test_a_cut_is_refused_when_what_covers_it_sits_outside_the_job(tmp_path, studio):
+    job = cover_source(make_job(tmp_path), reference="../elsewhere.md")
+    assert (job.folder / "../elsewhere.md").is_file()
+    with pytest.raises(ContractError, match="not a file in the job folder"):
+        clips.require_source(job)
+
+
+def test_rights_the_contract_does_not_know_stop_a_cut_before_it_starts(tmp_path, studio):
+    job = cover_source(make_job(tmp_path))
+    data = json.loads((job.folder / "job.json").read_text())
+    (job.folder / "job.json").write_text(json.dumps({**data, "rights": "borrowed"}))
+    with pytest.raises(ContractError, match="rights"):
+        clips.require_source(job)
+
+
+def test_a_covered_source_gives_back_its_record(tmp_path, studio):
+    job = cover_source(make_job(tmp_path, rights="funded-brief"))
+    assert clips.require_source(job) == {
+        "origin": "a recording the operator made",
+        "reference": "brief.md",
+    }
+
+
+def _scored(job, shots):
+    footage = {
+        "sources": [{"id": "s000", "path": "src/000.mp4", "kind": "video"}],
+        "shots": [
+            {"id": f"s000.{n}", "source": "s000", "in_sec": a, "out_sec": b, "subject_x": x}
+            for n, (a, b, x) in enumerate(shots)
+        ],
+    }
+    (job.folder / "footage.json").write_text(json.dumps(footage))
+    return job.work / "src" / "000.mp4"
+
+
+def test_the_crop_centre_is_weighed_by_how_long_each_shot_sits_under_the_clip(tmp_path, studio):
+    job = make_job(tmp_path)
+    source = _scored(job, [(0, 10, 0.2), (10, 30, 0.8), (30, 40, 0.1)])
+    assert clips.motion_centre(job, source, {"start_sec": 5.0, "end_sec": 15.0}) == 0.5
+    assert clips.motion_centre(job, source, {"start_sec": 12.0, "end_sec": 20.0}) == 0.8
+
+
+def test_there_is_no_crop_centre_where_no_shot_was_scored(tmp_path, studio):
+    job = make_job(tmp_path)
+    assert clips.motion_centre(job, job.work / "talk.mp4", {"start_sec": 0, "end_sec": 5}) is None
+    source = _scored(job, [(0, 10, 0.2)])
+    assert clips.motion_centre(job, source, {"start_sec": 50.0, "end_sec": 60.0}) is None
+    other = job.work / "src" / "001.mp4"
+    assert clips.motion_centre(job, other, {"start_sec": 0.0, "end_sec": 5.0}) is None
+
+
+@needs_ffmpeg
+def test_a_clip_says_what_its_crop_came_from(tmp_path, monkeypatch, studio):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    job = cover_source(make_job(tmp_path))
+    source = _scored(job, [(0, 4, 0.3)])
+    source.parent.mkdir(parents=True, exist_ok=True)
+    media.run(["-f", "lavfi", "-i", "sine=f=220:d=4", str(source.with_suffix(".wav"))])
+    source = source.with_suffix(".wav")
+    footage = json.loads((job.folder / "footage.json").read_text())
+    footage["sources"][0]["path"] = "src/000.wav"
+    (job.folder / "footage.json").write_text(json.dumps(footage))
+    studio.heard = _words((0.5, 1.5, "said"), (1.6, 2.4, "here."))
+    clip = {"start_sec": 0, "end_sec": 3, "title": "The turn"}
+    moved = clips.open_job(job, source, clip, "c-moved").read("edit_manifest")["cuts"]
+    assert {(c["crop_x"], c["crop_basis"]) for c in moved} == {(0.3, "motion_centre")}
+    given = clips.open_job(job, source, clip, "c-given", crop_x=0.7).read("edit_manifest")["cuts"]
+    assert {(c["crop_x"], c["crop_basis"]) for c in given} == {(0.7, "given")}
+
+
+def test_a_clip_on_a_stream_carries_the_kit_lock_the_publish_check_reads():
+    data = {"rights": "owned"}
+    assert clips._manifest("c0", "source.mp4", data, 3.0, "abc")["kit_lock_sha256"] == "abc"
+    assert "kit_lock_sha256" not in clips._manifest("c0", "source.mp4", data, 3.0)
 
 
 def _talking_job(tmp_path):
