@@ -450,5 +450,7 @@ def _write_edit(
             "original_audio": True,
             "speech": True,
             "fade_out_sec": 0.3,
+            # `make` rebuilds an edit made from other assets; this one is made from these
+            "asset_manifest_sha256": blobstore.sha256_file(child.path("asset_manifest")),
         },
     )
