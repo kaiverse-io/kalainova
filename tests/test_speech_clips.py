@@ -7,7 +7,7 @@ import json
 import pytest
 from fakes import EVERY, cover_source, make_job, needs_ffmpeg
 
-from kalainova import media, publish, qa, render
+from kalainova import edit, media, publish, qa, render
 from kalainova.editor import analyze, clips, direct, speech
 from kalainova.jobfs import ContractError
 from kalainova.providers import router
@@ -207,6 +207,22 @@ def test_a_clip_becomes_its_own_job_and_passes_the_same_gates(tmp_path, monkeypa
     assert approval["synthetic_disclosure"] is False, (
         "a cut of real footage is not labelled generated"
     )
+
+
+def test_make_keeps_the_edit_a_clip_opened_with_instead_of_rebuilding_it(
+    tmp_path, monkeypatch, studio
+):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    job = cover_source(make_job(tmp_path))
+    source = job.work / "talk.mp4"
+    media.run(
+        ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=30:r=24", "-f", "lavfi", "-i",
+         "sine=f=220:d=30:r=48000", "-pix_fmt", "yuv420p", "-shortest", str(source)]
+    )  # fmt: skip
+    studio.heard = _transcript_words()
+    child = clips.open_job(job, source, {"start_sec": 0.0, "end_sec": 20.0, "title": "T"}, "p1-c")
+    opened = child.read("edit_manifest")
+    assert edit.run(child) == opened, "a clip has no beat timeline to rebuild its edit from"
 
 
 def test_a_cut_is_refused_with_no_record_of_where_its_source_came_from(tmp_path, studio):
