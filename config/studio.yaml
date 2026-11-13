@@ -168,7 +168,7 @@ audio_models:
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
 takes:
   always: 1                        # made regardless of how the first reads
-  most: 2                          # retakes stop here, even if a reading still misses
+  most: 2                          # a free provider stops here, even if a reading still misses; a paid one stops at `always`
   retakes_per_shot: 2              # `kalainova retake` is refused past this, however it is called
   retakes_per_job: 6               # and past this across the job; a brief can set max_retakes
 

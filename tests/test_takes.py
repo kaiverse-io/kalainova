@@ -60,6 +60,49 @@ def test_a_brief_can_ask_for_more_takes_up_front(tmp_path, studio):
     assert len(_shot(job)["takes"]) == 3
 
 
+def test_a_paid_model_is_not_asked_again_when_its_take_reads_badly(tmp_path, studio, monkeypatch):
+    monkeypatch.setattr(studio, "free", False)
+    studio.frozen_takes = 99
+    job = make_job(tmp_path, beats=[_moving_beat()])
+    assets.run(job)
+    assert sum(1 for c in studio.calls if c["capability"] == "video") == 1, (
+        "paying again is a person's call, never the loop's"
+    )
+    assert [t["ok"] for t in _shot(job)["takes"]] == [False]
+
+
+def test_a_paid_model_makes_the_takes_the_brief_planned_and_no_more(tmp_path, studio, monkeypatch):
+    monkeypatch.setattr(studio, "free", False)
+    studio.frozen_takes = 99
+    job = make_job(
+        tmp_path,
+        beats=[_moving_beat()],
+        brief={"subject": "a test", "max_video_beats": 9, "takes": 2, "max_takes": 4},
+    )
+    assets.run(job)
+    assert len(_shot(job)["takes"]) == 2
+
+
+def test_a_take_already_paid_for_is_not_added_to_on_a_later_run(tmp_path, studio):
+    job = make_job(tmp_path, beats=[_moving_beat()])
+    dst = takes.take_path(job, "b1", 0, ".mp4")
+    media.run(["-f", "lavfi", "-i", "smptebars=s=320x180:d=2", "-pix_fmt", "yuv420p", str(dst)])
+    takes.record(
+        job,
+        "b1",
+        {"n": 0, "seed": 1, "file": str(dst.relative_to(job.work)), "ok": False, "cost": 0.5},
+    )
+    takes.make_until_good(
+        job,
+        "b1",
+        {},
+        suffix=".mp4",
+        make=lambda seed, dst: pytest.fail("a charged take must not be followed by another"),
+        assess=takes.assess_clip,
+    )
+    assert len(_shot(job)["takes"]) == 1
+
+
 def test_every_take_is_kept_with_its_seed_and_reading(tmp_path, studio):
     studio.frozen_takes = 1
     job = make_job(tmp_path, beats=[_moving_beat()])

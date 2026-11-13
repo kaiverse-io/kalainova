@@ -96,10 +96,9 @@ def _refuse_over_the_cap(piece: _Piece) -> None:
         return
     cap = piece.data.get("cost_cap")
     if cost:
-        _, most = takes.counts(piece.brief)
         print(
-            f"{piece.job.id}: moving shots: about ${cost:.2f} at the takes always made"
-            f" (a miss can ask for up to {most} takes a shot)",
+            f"{piece.job.id}: moving shots: about ${cost:.2f} at the takes planned"
+            " (a paid model makes no further take when a reading misses)",
             file=sys.stderr,
         )
     left = None if cap is None else float(cap) - piece.job.committed()
