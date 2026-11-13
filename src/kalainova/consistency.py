@@ -73,7 +73,10 @@ def _named_slots(role: str, kit: Kit, owners: dict[str, str], named: dict[str, A
 def resolve(root: Path, stream: dict[str, Any]) -> Resolved:
     loaded: dict[str, Kit] = {}
     for role, pin in (stream.get("kits") or {}).items():
-        kit_id, version = kitrules.parse_pin(pin)
+        try:
+            kit_id, version = kitrules.parse_pin(pin)
+        except ValueError as exc:
+            raise ContractError(f"{exc}; a stream pins only a frozen, numbered version") from exc
         loaded[role] = kits.load(root, kit_id, version)
     owners: dict[str, str] = {}
     characters: dict[str, Kit] = {}

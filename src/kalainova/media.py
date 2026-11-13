@@ -163,7 +163,10 @@ def probe(path: str | Path) -> dict:
 
 
 def duration(path: str | Path) -> float:
-    return float(probe(path)["format"]["duration"])
+    found = probe(path)["format"].get("duration")
+    if found is None:
+        raise MediaError(f"{path} has no duration: it is a still image, not a video or audio file")
+    return float(found)
 
 
 def summarize(path: str | Path) -> dict:

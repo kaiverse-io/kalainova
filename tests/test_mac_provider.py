@@ -153,3 +153,30 @@ def test_a_failed_model_process_is_a_provider_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "Popen", Failed)
     with pytest.raises(RuntimeError, match="out of memory"):
         mac._run(["python", "-m", "something"])
+
+
+def test_every_runner_file_exists_and_none_shadows_a_package_it_imports():
+    """A script's own folder comes first on its import path, so a runner named after a package it
+    imports finds itself: runners/acestep.py once did, and ACE-Step never started."""
+    import ast
+    from pathlib import Path
+
+    from kalainova.providers import mac
+
+    runners = Path(mac.RUNNERS)
+    assert all(path.is_file() for path in mac.SONG_RUNNERS.values())
+    assert mac.LTX_RUNNER.is_file()
+    stems = {path.stem for path in runners.glob("*.py")}
+    for path in runners.glob("*.py"):
+        tree = ast.parse(path.read_text())
+        imported = {
+            (node.module or "").split(".")[0]
+            if isinstance(node, ast.ImportFrom)
+            else alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in (node.names if isinstance(node, ast.Import) else [None])
+        }
+        assert not (imported & stems), (
+            f"{path.name} imports {imported & stems}, which is a runner's own name"
+        )

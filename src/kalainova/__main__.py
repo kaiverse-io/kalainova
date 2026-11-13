@@ -182,11 +182,14 @@ def _bar(a) -> int:
     """The studio bar for any file or job, so a piece from anywhere can be held to the same numbers."""
     from pathlib import Path
 
-    from . import bar
+    from . import bar, media
 
     target = Path(a.target)
     if target.is_file():
-        report = bar.measure(target)
+        try:
+            report = bar.measure(target)
+        except media.MediaError as exc:
+            raise ContractError(f"the studio bar cannot read it: {exc}") from exc
     else:
         job = open_job(a.target)
         report = bar.measure_job(job.work, job.read("edit_manifest"), job.read("asset_manifest"))

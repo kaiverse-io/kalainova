@@ -31,7 +31,7 @@ SONG_PYTHON_ENV = "KALAINOVA_SONG_PYTHON"  # song engines keep their own environ
 SONG_CHECKPOINT_ENV = "KALAINOVA_SONG_CHECKPOINT"
 RUNNERS = Path(__file__).with_name("runners")
 LTX_RUNNER = RUNNERS / "ltx.py"
-SONG_RUNNERS = {"heartmula": RUNNERS / "heartmula.py", "ace-step": RUNNERS / "acestep.py"}
+SONG_RUNNERS = {"heartmula": RUNNERS / "heartmula.py", "ace-step": RUNNERS / "acestep_run.py"}
 STILL_MOST_PIXELS = (
     2_200_000  # about 1080p; past this the still model takes minutes and gains little
 )

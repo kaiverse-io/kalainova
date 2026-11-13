@@ -58,7 +58,6 @@ docs/feature-map.md feature to entry point to code to tests; start here to find 
 - Naming a vertical, niche, brand, creator, or topic in the engine docs, schemas, or prompts.
 - Checking in a sample subject "to show how it works."
 - A real person's face, voice, or name in a kit. Every character is invented, fictional, and an adult.
-- Sexual content in a prompt or script, on any stream. A restricted-tier stream changes where a file goes, not what the engine will write. Chat, subscriptions, payments, age checks, and third-party adult platforms stay outside this repo.
 - Inventing a factual claim. A fact in a script carries a source in `script_packet.json`. Backstory and canon are fiction, and are marked so.
 - Using source material not covered by `rights`: `funded-brief`, `owned`, or `licensed`.
 - Rendering a schedule up front. A slot renders when requested, and passes the human gate like any job.

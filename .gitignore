@@ -56,5 +56,7 @@ streams/*
 !streams/README.md
 # /ub-mode quality tools (just crap|dry|mutate): pinned tool checkouts and their reports
 .cache/ub-tools/
+# a song model writes its progress estimates into the folder it runs from
+.cache/acestep/
 .metrics/
 target/
