@@ -109,6 +109,8 @@ Building it is slices, each with its own tests:
 5. A measured identity check on stills and frames (issue 99).
 6. Polish of one section of a chosen take (issue 98).
 7. An autonomy level per gate (issue 97).
-8. The rule that a paid step refuses to run without the lock below it, per kind, as each kind makes its first piece.
+8. A paid step refuses to run without the accepted draft below it, starting with video and its animatic (issue 106). Each other kind adds its gate when it makes its first piece.
+9. The model check asks yes-or-no questions, runs on stills before video, and uses a cheaper model (issue 105).
+10. A video cut to a song is opened on a stream, so it carries the stream's kits (issue 104).
 
 Nothing here names a genre, a brand, or a person. Limits and targets are numbers in config.
