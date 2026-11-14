@@ -20,9 +20,11 @@ from .master import measure_master
 from .motion import MOTION_STEP_SEC, MOTION_WIDTH, shot_motion
 from .picture import (
     banding_score,
+    clipping_ratio,
     corner_mark_score,
     detail_ratio,
     duplicate_share,
+    dynamic_range,
     repetition_share,
     stutter_score,
 )
@@ -196,10 +198,31 @@ def _cambi_readings(path: Path) -> list[Reading]:
     return [at_most("picture.cambi_peak", found[1], "cambi_peak_max")]
 
 
+def _still_readings(path: Path) -> list[Reading]:
+    img = Image.open(path).convert("L")
+    gray = np.asarray(img)
+    w, h = img.size
+    return [
+        at_most("picture.banding", banding_score(gray), "banding_max"),
+        at_least("picture.detail", detail_ratio(gray), "detail_min"),
+        at_least("picture.dynamic_range", dynamic_range(gray), "picture_dynamic_range_min"),
+        at_most("picture.clipping", clipping_ratio(gray), "picture_clipping_max"),
+        Reading("picture.dimensions", f"{w}x{h}", ">= 512x512", w >= 512 and h >= 512),
+    ]
+
+
 def measure(path: Path) -> dict[str, Any]:
     """Every reading the delivered file alone can give."""
+    if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+        return summarise([asdict(r) for r in _still_readings(path)])
+    try:
+        duration = media.duration(path)
+    except media.MediaError as err:
+        try:
+            return summarise([asdict(r) for r in _still_readings(path)])
+        except Exception:
+            raise err from None
     info = media.summarize(path)
-    duration = media.duration(path)
     readings: list[Reading] = []
     if "width" in info:
         readings += _delivery_readings(path)

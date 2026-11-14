@@ -128,3 +128,18 @@ def detail_ratio(gray: Arr) -> float:
     high = np.hypot(fx, fy) > 0.25
     total = float(power.sum())
     return float(power[high].sum() / total) if total > 0 else 0.0
+
+
+def dynamic_range(gray: Arr) -> float:
+    """Normalized range between darkest and brightest pixel (0.0 to 1.0)."""
+    if gray.size == 0:
+        return 0.0
+    return float((gray.max() - gray.min()) / 255.0)
+
+
+def clipping_ratio(gray: Arr) -> float:
+    """Share of pixels crushed to 0 or blown out to 255."""
+    if gray.size == 0:
+        return 0.0
+    crushed_or_blown = (gray <= 1) | (gray >= 254)
+    return float(np.mean(crushed_or_blown))

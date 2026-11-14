@@ -103,8 +103,11 @@ def _ledger(job: Job) -> dict[str, Any]:
 
 def report(job: Job) -> dict[str, Any]:
     """Everything the record holds about how this piece was made."""
-    manifest = job.read("asset_manifest")
-    lines = [_asset_line(a) for a in manifest["assets"]]
+    if job.has("asset_manifest"):
+        manifest = job.read("asset_manifest")
+        lines = [_asset_line(a) for a in manifest["assets"]]
+    else:
+        lines = []
     data = job.job
     owed = sorted({o for line in lines for o in line.get("obligations", [])})
     return {

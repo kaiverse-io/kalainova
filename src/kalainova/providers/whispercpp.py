@@ -56,8 +56,8 @@ class WhisperCpp(Provider):
     free = True
     synthetic = False  # a reading of real audio
 
-    def missing_env(self) -> list[str]:
-        missing = super().missing_env()
+    def missing_env(self, capability: str = "") -> list[str]:
+        missing = super().missing_env(capability)
         if shutil.which(COMMAND) is None:
             missing.append(f"{COMMAND} on PATH")
         elif not missing and not Path(os.environ[MODEL_ENV]).is_file():

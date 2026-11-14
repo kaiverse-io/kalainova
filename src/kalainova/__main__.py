@@ -48,6 +48,8 @@ from .jobfs import REPO, ContractError, home, open_job
 
 
 def _new(a) -> int:
+    from . import fingerprint
+
     dst = home() / "jobs" / a.id
     if dst.exists():
         print(f"{dst} exists", file=sys.stderr)
@@ -70,6 +72,7 @@ def _new(a) -> int:
                 "outcome": a.outcome or "",
                 "duration_sec": a.duration,
             },
+            "fingerprint": fingerprint.fingerprint(),
         }
     )
     (dst / "job.json").write_text(json.dumps(data, indent=2) + "\n")
@@ -248,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("story", help="typeset a book and an EPUB from story.json").add_argument("job")
     sub.add_parser("bar", help="hold a job or any file to the studio bar").add_argument("target")
+    sub.add_parser("host", help="check host system support and prerequisite capabilities")
     pv = sub.add_parser("providers", help="what is ready; --check makes one real, paid call each")
     pv.add_argument("--check", metavar="PROVIDER", help="prove an adapter against the live service")
     pv.add_argument(
@@ -416,6 +420,10 @@ def main(argv: list[str] | None = None) -> int:
             for k, v in CONTRACT_FILES.items():
                 print(f"  {'x' if job.has(k) else ' '} {v}")
             return 0
+        if a.cmd == "host":
+            from . import host
+
+            return host.cli()
         if a.cmd == "providers":
             from .providers import base, check
 

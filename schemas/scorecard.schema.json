@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/scorecard-0.1.json",
+  "title": "Kalainova provider and model scorecards",
+  "type": "object",
+  "required": ["schema_version", "capabilities"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "generated_at": {"type": "string"},
+    "min_samples": {"type": "integer"},
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "models"],
+        "additionalProperties": false,
+        "properties": {
+          "status": {"type": "string"},
+          "models": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["sample_count"],
+              "additionalProperties": true,
+              "properties": {
+                "sample_count": {"type": "integer"},
+                "success_rate": {"type": "number"},
+                "avg_duration_sec": {"type": "number"},
+                "avg_cost": {"type": "number"},
+                "verdict_acceptance_rate": {"type": ["number", "null"]},
+                "status": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

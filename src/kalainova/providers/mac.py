@@ -145,6 +145,13 @@ class Mac(Provider):
     free = True
     self_timed = True
 
+    def missing_env(self, capability: str = "") -> list[str]:
+        missing = super().missing_env(capability)
+        if capability == "song" and not os.environ.get(SONG_PYTHON_ENV):
+            if SONG_PYTHON_ENV not in missing:
+                missing.append(SONG_PYTHON_ENV)
+        return missing
+
     def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw: Any) -> Result:
         name = voice or "am_michael"
         model = model_for("mac", "voice")

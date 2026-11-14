@@ -245,6 +245,12 @@ bar:
   hard_cuts_per_min_max: 6
   digital_silence_sec_max: 0.2
   ending_drop_db_max: -12
+  audio_groove_steadiness_min: 0.70
+  audio_pitch_snapping_max: 0.85
+  audio_crest_factor_min: 6.0
+  audio_stereo_width_min: 0.05
+  picture_dynamic_range_min: 0.50
+  picture_clipping_max: 0.05
   voice_to_music_db_min: 12
   voice_to_music_db_max: 26
   source_mark_max: 0.004

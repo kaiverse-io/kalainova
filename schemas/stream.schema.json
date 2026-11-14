@@ -146,6 +146,10 @@
         }
       }
     },
+    "engine_version": {
+      "type": "string",
+      "description": "Pinned engine version for this stream."
+    },
     "autonomy": {
       "type": "object",
       "description": "Autonomy level per review gate: human (default), by-exception, audit. Publish is fixed at human.",

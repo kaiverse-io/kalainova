@@ -111,7 +111,32 @@ def add_file(root: Path, kit_id: str, slot: str, src: Path, *, label: str = "") 
     if src.is_file() and src.stat().st_size > MAX_REFERENCE_BYTES:
         raise ContractError(f"{src.name} is over {MAX_REFERENCE_BYTES >> 20} MB; downscale it")
     owner = _slot_owner(kit, slot)
-    owner["refs"] = [*(owner.get("refs") or []), put(root, src, label=label)]
+    new_entry = put(root, src, label=label)
+    refs = list(owner.get("refs") or [])
+    if label:
+        idx = next((i for i, r in enumerate(refs) if r.get("label") == label), None)
+        if idx is not None:
+            refs[idx] = new_entry
+        else:
+            refs.append(new_entry)
+    else:
+        refs.append(new_entry)
+    owner["refs"] = refs
+    group, _, name = slot.partition(".")
+    if name:
+        kit[group][name] = owner
+    else:
+        kit[group] = owner
+    write_draft(root, kit_id, kit)
+    return kit
+
+
+def remove_reference(root: Path, kit_id: str, slot: str, label: str) -> Kit:
+    """Remove a reference with the specified label from an image slot in the draft."""
+    kit = read_draft(root, kit_id)
+    owner = _slot_owner(kit, slot)
+    refs = [r for r in owner.get("refs") or [] if r.get("label") != label]
+    owner["refs"] = refs
     group, _, name = slot.partition(".")
     if name:
         kit[group][name] = owner
@@ -123,6 +148,18 @@ def add_file(root: Path, kit_id: str, slot: str, src: Path, *, label: str = "") 
 
 def merge(root: Path, kit_id: str, fields: dict[str, Any]) -> Kit:
     """Merge text fields into the draft, such as persona, style text, or origin."""
+    origin = fields.get("origin")
+    if isinstance(origin, dict) and origin.get("real_person") is True:
+        msg = (
+            "A kit cannot represent a real person. Every character is invented, "
+            "fictional, and an adult."
+        )
+        raise ContractError(msg)
+    persona = fields.get("persona")
+    if isinstance(persona, dict) and "age" in persona:
+        age_val = persona["age"]
+        if isinstance(age_val, (int, float)) and age_val < 18:
+            raise ContractError(f"A kit character must be an adult (age >= 18), got {age_val}")
     kit = read_draft(root, kit_id)
     for key, value in fields.items():
         if key in ("schema_version", "kit_id", "version", "frozen_at", "frozen_by"):

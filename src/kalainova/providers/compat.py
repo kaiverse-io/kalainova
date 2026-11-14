@@ -50,8 +50,8 @@ class OpenAICompat(Provider):
     def free(self) -> bool:  # type: ignore[override]  # reason: the base class keeps a plain flag
         return bool(config.price_for(self.name, "llm").get("free"))
 
-    def missing_env(self) -> list[str]:
-        missing = super().missing_env()
+    def missing_env(self, capability: str = "") -> list[str]:
+        missing = super().missing_env(capability)
         if not config.model_for(self.name, "llm"):
             missing.append(f"models.{self.name}.llm in config/studio.yaml")
         return missing

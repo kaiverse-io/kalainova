@@ -52,7 +52,7 @@ class Spaces(Provider):
     capabilities = ("song",)
     free = True
 
-    def missing_env(self) -> list[str]:
+    def missing_env(self, capability: str = "") -> list[str]:
         if importlib.util.find_spec("gradio_client"):
             return []
         return ["gradio_client (install the spaces extra)"]

@@ -28,6 +28,10 @@ def add_parsers(sub: Any) -> None:
     add.add_argument("slot", help="identity, style, looks.<name>, music.theme, voice.sample, ...")
     add.add_argument("file")
     add.add_argument("--label", default="")
+    rem = kit.add_parser("remove")
+    rem.add_argument("kit")
+    rem.add_argument("slot", help="identity, style, looks.<name>, ...")
+    rem.add_argument("label")
     setter = kit.add_parser("set")
     setter.add_argument("kit")
     setter.add_argument("file", help="a JSON file of fields to merge into the draft")
@@ -88,6 +92,13 @@ def add_parsers(sub: Any) -> None:
     req.add_argument("--amplify", default="")
     req.add_argument("--duration", type=int)
 
+    sc = sub.add_parser("scorecards", help="rate providers and models from operational traces")
+    sc.add_argument("capability", nargs="?", help="optional capability to filter by")
+    sc.add_argument("--json", action="store_true", help="output JSON format")
+
+    ai = sub.add_parser("audit-independence", help="audit single-vendor lock-in")
+    ai.add_argument("--json", action="store_true", help="output JSON format")
+
 
 def _pairs(items: list[str], what: str) -> dict[str, str]:
     out = {}
@@ -118,6 +129,9 @@ def _kit(a: argparse.Namespace, root: Path) -> int:
     elif a.action == "add":
         kits.add_file(root, a.kit, a.slot, Path(a.file), label=a.label)
         print(f"added to {a.kit} draft: {a.slot}")
+    elif a.action == "remove":
+        kits.remove_reference(root, a.kit, a.slot, a.label)
+        print(f"removed {a.label!r} from {a.kit} draft: {a.slot}")
     elif a.action == "set":
         kits.merge(root, a.kit, json.loads(Path(a.file).read_text()))
         print(f"merged into {a.kit} draft")
@@ -208,5 +222,23 @@ def dispatch(a: argparse.Namespace) -> int | None:
         )
         print(job.folder)
         print(f"next: kalainova make {job.folder}")
+        return 0
+    if a.cmd == "scorecards":
+        from . import scorecard
+
+        rep = scorecard.scorecard_report(root, capability=a.capability)
+        if getattr(a, "json", False):
+            print(json.dumps(rep, indent=2))
+        else:
+            print(scorecard.format_table(rep, capability=a.capability))
+        return 0
+    if a.cmd == "audit-independence":
+        from . import audit
+
+        rep = audit.audit_provider_independence()
+        if getattr(a, "json", False):
+            print(json.dumps(rep, indent=2))
+        else:
+            print(audit.format_table(rep))
         return 0
     return None

@@ -474,6 +474,11 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ intake ────▶ media, render
     ├─▶ stock
     ├─▶ router ─────▶ trace
+    ├─▶ fingerprint ─▶ jobfs
+    ├─▶ host ────────▶ config
+    ├─▶ scorecard ───▶ jobfs
+    ├─▶ audit ───────▶ config
+    ├─▶ calibration
     ├─▶ prompts, captions, look, motion, media: imported throughout, and import no stage
     └─▶ jobfs, config: the foundation, imported throughout
 ```
@@ -685,6 +690,21 @@ The job folder, schema validation, the ledger, and the private home.
 
 ### config
 The model and price table.
+
+### fingerprint
+Engine version, git commit, prompts hash, and studio config fingerprinting. Pins jobs to exact engine releases and verifies stream compatibility during approval.
+
+### host
+Operator hardware capability and prerequisite detection. Validates Python version, ffmpeg/ffprobe binaries, GPU accelerators, and adapter presence.
+
+### scorecard
+Provider and model scorecard aggregation from operational telemetry traces. Computes empirical latency, spend, and reliability metrics per capability and model.
+
+### audit
+Provider independence audit. Analyzes preference chains and provider fallbacks in config/studio.yaml to report single-vendor lock-in risks across capabilities.
+
+### calibration
+Agreement reporting between deterministic readings, model judges, and human operator verdicts. Evaluates alignment and identifies uncalibrated checks.
 
 ## Cockpit
 
