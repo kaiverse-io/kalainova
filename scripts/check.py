@@ -377,6 +377,8 @@ def _check_stream(path: Path, stream: dict, frozen: dict[str, dict]) -> None:
     shape(stream, "stream", path)
     if stream.get("stream_id") != path.parent.name:
         fail(f"{rel(path)}: stream_id must equal its folder name")
+    if "silent" in stream and not isinstance(stream["silent"], bool):
+        fail(f"{rel(path)}: silent must be a boolean")
     has_character = False
     for role, pin in (stream.get("kits") or {}).items():
         if pin not in frozen:

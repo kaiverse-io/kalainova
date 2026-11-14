@@ -53,6 +53,9 @@ def add_parsers(sub: Any) -> None:
     make.add_argument("--max-per-day", type=int, default=1)
     make.add_argument("--cost-cap", type=float, required=True)
     make.add_argument("--skip-funded", action="store_true")
+    make.add_argument(
+        "--silent", action="store_true", help="every piece has no spoken lines or narration"
+    )
     stream.add_parser("show").add_argument("stream")
     canon = stream.add_parser("canon")
     canon.add_argument("stream")
@@ -150,6 +153,8 @@ def _new_stream(a: argparse.Namespace, root: Path) -> None:
         data["generators"] = pins
     if a.skip_funded:
         data["skip_funded"] = True
+    if a.silent:
+        data["silent"] = True
     resolved = consistency.resolve(root, data)
     consistency.preflight(resolved, data, list(resolved.characters))
     print(streams.create(root, data))

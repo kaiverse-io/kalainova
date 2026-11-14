@@ -33,7 +33,11 @@ RULES = (
     Rule("looks", "sent only when the beat names one", "beat must name one the kit has"),
     Rule("locations", "sent only when the beat names one", "beat must name one the kit has"),
     Rule("props", "sent only when the beat names one", "beat must name one the kit has"),
-    Rule("voice", "pinned provider, voice id, model, settings", "fails if missing or different"),
+    Rule(
+        "voice",
+        "pinned provider, voice id, model, settings",
+        "fails if missing or different; skipped if the stream is silent",
+    ),
     Rule("persona", "loaded into the script step", "never_say blocks; vision judge reads script"),
     Rule("style", "fixed text and references on every shot", "vision check"),
     Rule("music", "the same file is reused, never regenerated", "hash match"),
@@ -53,6 +57,7 @@ class Resolved:
     shared: dict[str, Any]
     named: dict[str, dict[str, dict[str, Any]]]
     canon: list[str]
+    silent: bool = False
 
 
 def _claim(table: dict[str, str], slot: str, role: str) -> None:
@@ -99,7 +104,7 @@ def resolve(root: Path, stream: dict[str, Any]) -> Resolved:
         if canon_file.exists()
         else []
     )
-    return Resolved(root, loaded, characters, shared, named, canon)
+    return Resolved(root, loaded, characters, shared, named, canon, bool(stream.get("silent")))
 
 
 def choose_cast(resolved: Resolved, wanted: list[str] | None) -> list[str]:
@@ -146,7 +151,7 @@ def preflight(resolved: Resolved, stream: dict[str, Any], cast: list[str]) -> No
                     f"{pins[capability]['model']} holds {support['max_characters']} characters "
                     f"at once; this job asks for {len(cast)}"
                 )
-    if media & {"audio", "video"}:
+    if (media & {"audio", "video"}) and not stream.get("silent"):
         speakers = [c for c in cast if "voice" in resolved.characters[c]]
         if not speakers and "voice" not in resolved.shared:
             raise ContractError(
@@ -167,7 +172,7 @@ def _canon(resolved: Resolved, stream_id: str) -> dict[str, Any]:
 def build_lock(
     resolved: Resolved, stream: dict[str, Any], job_id: str, cast: list[str]
 ) -> dict[str, Any]:
-    return {
+    lock: dict[str, Any] = {
         "schema_version": "0.1",
         "job_id": job_id,
         "stream": stream["stream_id"],
@@ -184,6 +189,9 @@ def build_lock(
         },
         "canon": _canon(resolved, stream["stream_id"]),
     }
+    if stream.get("silent"):
+        lock["silent"] = True
+    return lock
 
 
 def _home(job: Job) -> Path:
@@ -197,7 +205,14 @@ def for_job(job: Job) -> tuple[Resolved, dict[str, Any]] | None:
     root = _home(job)
     lock = job.read("kit_lock")
     pins = {r: f"{k['kit_id']}@{k['version']}" for r, k in lock["kits"].items()}
-    resolved = resolve(root, {"stream_id": lock["stream"], "kits": pins})
+    stream_file = root / "streams" / lock["stream"] / "stream.json"
+    silent = bool(lock.get("silent"))
+    if not silent and stream_file.exists():
+        silent = bool(json.loads(stream_file.read_text()).get("silent"))
+    stream_arg: dict[str, Any] = {"stream_id": lock["stream"], "kits": pins}
+    if silent:
+        stream_arg["silent"] = True
+    resolved = resolve(root, stream_arg)
     bad = []
     for role, kit in resolved.kits.items():
         if kit["content_sha256"] != lock["kits"][role]["content_sha256"]:
@@ -251,6 +266,13 @@ def _script_text(packet: dict[str, Any]) -> list[str]:
 def _beat_problems(resolved: Resolved, beat: dict[str, Any], cast: list[str]) -> list[str]:
     out = []
     bid = beat.get("id", "?")
+    if resolved.silent:
+        if beat.get("speaker"):
+            out.append(
+                f"{bid}: this stream is silent, so a beat cannot name speaker {beat['speaker']!r}"
+            )
+        if beat.get("text", "").strip():
+            out.append(f"{bid}: this stream is silent, so a beat cannot have a spoken line")
     members = beat.get("cast") or []
     for role in members:
         if role not in cast:
@@ -261,7 +283,7 @@ def _beat_problems(resolved: Resolved, beat: dict[str, Any], cast: list[str]) ->
             out.append(f"{bid}: names a look for {role}, who is not in the beat")
         elif look not in (kit.get("looks") or {}):
             out.append(f"{bid}: {role} has no look named {look}")
-    return [*out, *_place_problems(resolved, beat), *_speaker_problems(beat, cast)]
+    return [*out, *_place_problems(resolved, beat), *_speaker_problems(resolved, beat, cast)]
 
 
 def _place_problems(resolved: Resolved, beat: dict[str, Any]) -> list[str]:
@@ -276,7 +298,9 @@ def _place_problems(resolved: Resolved, beat: dict[str, Any]) -> list[str]:
     return out
 
 
-def _speaker_problems(beat: dict[str, Any], cast: list[str]) -> list[str]:
+def _speaker_problems(resolved: Resolved, beat: dict[str, Any], cast: list[str]) -> list[str]:
+    if resolved.silent:
+        return []
     bid = beat.get("id", "?")
     speaker = beat.get("speaker")
     if speaker and speaker not in cast:
@@ -385,6 +409,8 @@ def shot_prompt(resolved: Resolved, beat: dict[str, Any], fallback_style: str) -
 
 
 def voice_for(resolved: Resolved, beat: dict[str, Any], cast: list[str]) -> dict[str, Any]:
+    if resolved.silent:
+        raise ContractError(f"{beat.get('id')}: this stream is silent, so it has no voice")
     speaker = beat.get("speaker") or (cast[0] if len(cast) == 1 else None)
     if speaker and "voice" in resolved.characters[speaker]:
         return dict(resolved.characters[speaker]["voice"])

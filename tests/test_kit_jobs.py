@@ -317,3 +317,113 @@ def test_job_without_a_stream_is_unchanged(tmp_path):
         },
     )
     assert consistency.for_job(job) is None
+
+
+# ------------------------------------------------------------------ silent stream
+def _make_voiceless_character(root, kit_id="voiceless"):
+    kits.new(root, kit_id)
+    char = {
+        "origin": {"invented": True, "real_person": False, "attested_by": "operator"},
+        "person": {"fictional": True, "adult": True, "age": 28},
+        "identity": {"description": "calm expression"},
+        "persona": {"traits": ["observant"], "never_say": ["buy now"]},
+    }
+    kits.merge(root, kit_id, char)
+    kits.add_file(root, kit_id, "identity", picture(root, f"{kit_id}-f.png"), label="front")
+    return kits.freeze(root, kit_id, by="operator")
+
+
+def test_silent_stream_needs_no_voice_in_kit(root):
+    _make_voiceless_character(root, "dj")
+    stream = make_stream(root, "dj-stream", roles={"lead": "dj@1"}, silent=True)
+    assert stream.get("silent") is True
+    job = streams.request(root, "dj-stream", "make music video")
+    resolved, lock = consistency.for_job(job)
+    assert resolved.silent is True
+    assert lock.get("silent") is True
+
+
+def test_non_silent_stream_without_voice_is_refused(root):
+    _make_voiceless_character(root, "dj")
+    make_stream(root, "vocal-stream", roles={"lead": "dj@1"})
+    with pytest.raises(ContractError, match="no kit on this stream fills voice"):
+        streams.request(root, "vocal-stream", "x")
+
+
+def test_silent_stream_refuses_spoken_line_or_speaker(root):
+    _make_voiceless_character(root, "dj")
+    make_stream(root, "dj-stream", roles={"lead": "dj@1"}, silent=True)
+    job = streams.request(root, "dj-stream", "music video")
+    resolved, lock = consistency.for_job(job)
+
+    # Valid silent script (no speaker, empty text) passes
+    silent_script = packet(job.id, text="", speaker=None)
+    assert consistency.script_problems(resolved, silent_script, lock["cast"]) == []
+    consistency.check_script(job, resolved, silent_script, lock["cast"])
+
+    # Spoken line is refused
+    spoken = packet(job.id, text="Hello everybody!")
+    problems = consistency.script_problems(resolved, spoken, lock["cast"])
+    assert any("silent, so a beat cannot have a spoken line" in p for p in problems)
+    with pytest.raises(ContractError, match="the script breaks its kits"):
+        consistency.check_script(job, resolved, spoken, lock["cast"])
+
+    # Named speaker is refused
+    with_speaker = packet(job.id, text="", speaker="lead")
+    speaker_problems = consistency.script_problems(resolved, with_speaker, lock["cast"])
+    assert any("silent, so a beat cannot name speaker" in p for p in speaker_problems)
+    with pytest.raises(ContractError, match="the script breaks its kits"):
+        consistency.check_script(job, resolved, with_speaker, lock["cast"])
+
+
+def test_stream_new_cli_supports_silent(root):
+    _make_voiceless_character(root, "dj")
+    from kalainova.__main__ import main
+
+    rc = main(
+        [
+            "stream",
+            "new",
+            "silent-chan",
+            "--identity",
+            "dj-id",
+            "--cost-cap",
+            "5",
+            "--kit",
+            "lead=dj@1",
+            "--image",
+            "stub:img-ref",
+            "--video",
+            "stub:vid-ref",
+            "--silent",
+        ]
+    )
+    assert rc == 0
+    data = streams.load(root, "silent-chan")
+    assert data["silent"] is True
+
+
+def test_stream_new_cli_refuses_non_silent_stream_without_voice(root, capsys):
+    _make_voiceless_character(root, "dj")
+    from kalainova.__main__ import main
+
+    rc = main(
+        [
+            "stream",
+            "new",
+            "vocal-chan",
+            "--identity",
+            "dj-id",
+            "--cost-cap",
+            "5",
+            "--kit",
+            "lead=dj@1",
+            "--image",
+            "stub:img-ref",
+            "--video",
+            "stub:vid-ref",
+        ]
+    )
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "no kit on this stream fills voice" in err
