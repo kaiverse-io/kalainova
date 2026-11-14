@@ -61,6 +61,10 @@ def main() -> None:
     parser.add_argument("--key")
     parser.add_argument("--language", default="en")
     parser.add_argument("--instrumental", action="store_true")
+    parser.add_argument("--task-type", default="text2music", choices=["text2music", "repaint"])
+    parser.add_argument("--src-audio")
+    parser.add_argument("--repainting-start", type=float, default=0.0)
+    parser.add_argument("--repainting-end", type=float, default=0.0)
     args = parser.parse_args()
     handler = AceStepHandler()
     handler.initialize_service(project_root=args.checkpoint, config_path=DIT, device="auto")
@@ -75,7 +79,10 @@ def main() -> None:
         duration=args.seconds,
         inference_steps=STEPS,
         seed=args.seed,
-        task_type="text2music",
+        task_type=args.task_type,
+        src_audio_path=args.src_audio,
+        repainting_start=args.repainting_start,
+        repainting_end=args.repainting_end,
         thinking=planner is not None,
     )
     config = GenerationConfig(

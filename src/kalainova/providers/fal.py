@@ -64,7 +64,16 @@ class Fal(Provider):
     """Aggregator for image and video models via the fal queue API."""
 
     name = "fal"
-    capabilities = ("image", "video", "music", "song", "transcribe", "lipsync", "separate")
+    capabilities = (
+        "image",
+        "video",
+        "motion",
+        "music",
+        "song",
+        "transcribe",
+        "lipsync",
+        "separate",
+    )
     env_key = "FAL_KEY"
 
     def price_key(self, capability: str, request: Fields) -> str:
@@ -260,6 +269,18 @@ class Fal(Provider):
         }
         data = self._run(model, payload, timeout=1800)
         cost = media.duration(video) / 60 * price_for("fal", "lipsync").get("per_min", 0)
+        self._fetch(data["video"]["url"], dst, cost)
+        return Result(path=dst, cost=cost, model=model)
+
+    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+        """Animate the character image using the driving video."""
+        model = kw.get("model") or model_for("fal", "motion")
+        payload = {
+            "image_url": self._upload(character_image),
+            "video_url": self._upload(driving_video),
+        }
+        data = self._run(model, payload, timeout=1800)
+        cost = price_for("fal", "motion", model).get("cost_usd", 0.02)
         self._fetch(data["video"]["url"], dst, cost)
         return Result(path=dst, cost=cost, model=model)
 

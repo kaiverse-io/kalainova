@@ -13,6 +13,7 @@ import random
 import re
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from .. import media
 from .base import Provider, Result, register
@@ -59,7 +60,7 @@ def estimate_words(text: str, total: float, offset: float = 0.0) -> list[dict]:
 @register
 class LocalProvider(Provider):
     name = "local"
-    capabilities = ("voice", "image", "music", "song", "sfx")
+    capabilities = ("voice", "image", "motion", "music", "song", "sfx")
     env_key = None
     synthetic = True
     free = True
@@ -68,6 +69,15 @@ class LocalProvider(Provider):
     def reference_support(self, capability: str, model: str) -> dict:
         """Takes and ignores references, so the line can be tested. approve refuses its output."""
         return {"max_images": 99, "max_characters": 99} if capability == "image" else {}
+
+    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+        """Copy the driving clip as a placeholder; this provider has no motion model."""
+        media.run(["-i", str(driving_video), "-map", "0", "-c", "copy", str(dst)])
+        return Result(
+            path=dst,
+            model="liveportrait-placeholder",
+            meta={"placeholder": True, "character_image": character_image.name},
+        )
 
     # flite voices bundled with ffmpeg's libflite
     VOICES = ("slt", "awb", "rms", "kal16", "kal")

@@ -103,6 +103,22 @@
                 },
                 "words": {
                   "type": "array"
+                },
+                "repaired_from": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "repair_section": {
+                  "type": ["string", "null"]
+                },
+                "repair_span": {
+                  "type": "array",
+                  "prefixItems": [
+                    {"type": "number", "minimum": 0},
+                    {"type": "number", "exclusiveMinimum": 0}
+                  ],
+                  "minItems": 2,
+                  "maxItems": 2
                 }
               }
             }

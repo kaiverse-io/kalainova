@@ -23,6 +23,7 @@ from .bar.readings import summarise
 from .jobfs import ContractError, Job
 from .providers import router
 from .render import release
+from .song_repair import repair_take as repair_take
 
 Song = dict[str, Any]
 Cue = dict[str, Any]

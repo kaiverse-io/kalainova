@@ -128,5 +128,6 @@ def estimate(
         + p.get("per_image", 0)
         + p.get("per_track", 0)
         + p.get("per_call", 0)
+        + p.get("cost_usd", 0)
         + (4000 / 1e6 * p.get("input_per_mtok", 0) + 4000 / 1e6 * p.get("output_per_mtok", 0))
     )

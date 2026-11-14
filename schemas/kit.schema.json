@@ -151,6 +151,21 @@
         },
         "sample": {
           "$ref": "#/$defs/file"
+        },
+        "references": {
+          "type": "array",
+          "description": "Owned reference audio recordings in the kit from which a voice can be cloned",
+          "items": {
+            "type": "object",
+            "required": ["file", "rights"],
+            "additionalProperties": false,
+            "properties": {
+              "file": {"type": "string"},
+              "rights": {"type": "string", "enum": ["owned", "licensed", "funded-brief"]},
+              "transcript": {"type": "string"},
+              "duration_sec": {"type": "number"}
+            }
+          }
         }
       }
     },

@@ -140,10 +140,13 @@ def _song_options(kw: dict[str, Any]) -> list[str]:
 @register
 class Mac(Provider):
     name = "mac"
-    capabilities = ("voice", "image", "video", "music", "song", "separate", "transcribe")
+    capabilities = ("voice", "image", "video", "motion", "music", "song", "separate", "transcribe")
     env_key = PYTHON_ENV
     free = True
     self_timed = True
+
+    def supports_song_repaint(self) -> bool:
+        return model_for("mac", "song") == "ace-step"
 
     def missing_env(self, capability: str = "") -> list[str]:
         missing = super().missing_env(capability)
@@ -239,6 +242,22 @@ class Mac(Provider):
         raw.replace(dst)
         return Result(path=dst, model=model, meta=_made_by(model, seed))
 
+    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+        model = model_for("mac", "motion")
+        _run(
+            [
+                str(_python().with_name(model)),
+                "--source",
+                str(character_image),
+                "--driving",
+                str(driving_video),
+                "--output",
+                str(dst),
+            ],
+            kw.get("deadline_sec"),
+        )
+        return Result(path=dst, model=model, meta={"character_image": character_image.name})
+
     def music(self, prompt: str, dst: Path, *, duration: float, **kw: Any) -> Result:
         model = model_for("mac", "music")
         with tempfile.TemporaryDirectory() as tmp:
@@ -291,6 +310,17 @@ class Mac(Provider):
                 "--seed", str(seed),
                 "--out", str(raw),
             ]  # fmt: skip
+            if kw.get("task_type") == "repaint":
+                cmd += [
+                    "--task-type",
+                    "repaint",
+                    "--src-audio",
+                    str(kw["src_audio_path"]),
+                    "--repainting-start",
+                    str(kw["repainting_start"]),
+                    "--repainting-end",
+                    str(kw["repainting_end"]),
+                ]
             _run([*cmd, *_song_options(kw)], kw.get("deadline_sec"))
             media.run(["-i", str(raw), "-ar", "48000", "-ac", "2", str(dst)])
         return Result(path=dst, model=engine, meta={"seed": seed})

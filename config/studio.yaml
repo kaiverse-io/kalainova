@@ -14,6 +14,7 @@ preference:
   transcribe: [fal]
   song: [elevenlabs, fal, local]
   lipsync: [fal]
+  motion: [fal, mac, local]
   separate: []                     # stems cost money, so a job opts in: providers: {separate: [fal]}. "mac" can too
   graphics: [hyperframes]
   search: [exa, wikipedia, openalex]
@@ -65,6 +66,7 @@ models:
     transcribe: fal-ai/whisper     # swap for ElevenLabs Scribe v2 (2.2% WER) when added
     song: minimax/music-3          # a style prompt plus lyrics with section tags. VERIFY
     lipsync: fal-ai/sync-lipsync/v2                 # VERIFY the length limit for long lines
+    motion: fal-ai/live-portrait
     separate: fal-ai/demucs                         # VERIFY the slug and fields before the first paid run
   mac:                             # docs/how-to/run-models-on-a-mac.md; check each licence first
     voice: mlx-community/Kokoro-82M-bf16
@@ -73,6 +75,9 @@ models:
     music: mlx-community/MiniMax-Music3-8bit
     transcribe: mlx-community/whisper-large-v3-turbo-asr-fp16
     song: heartmula                # or ace-step; each runs in KALAINOVA_SONG_PYTHON's environment
+    motion: liveportrait
+  local:
+    motion: liveportrait
   spaces:                          # hosted apps, free and rate limited. Lyrics leave this machine
     song:
       space: mrfakename/HeartMuLa  # a community host; check its terms before releasing anything
@@ -107,6 +112,11 @@ prices:
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007}    # ESTIMATE: per second of the mix. VERIFY on fal's page before a paid run
     lipsync: {per_min: 3.00}       # ESTIMATE
+    motion: {cost_usd: 0.02}
+  mac:
+    motion: {free: true}
+  local:
+    motion: {free: true}
     transcribe: {per_min: 0.01}
   exa:
     search: {per_call: 0.01}       # ESTIMATE
@@ -233,6 +243,7 @@ video_models:
 
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:
+  face_distance_max: 0.40
   stutter_max: 0.08
   cuts_per_min_max: 40
   banding_max: 0.03
