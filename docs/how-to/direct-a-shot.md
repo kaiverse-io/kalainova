@@ -57,7 +57,7 @@ uv run kalainova takes <job>     # every take, and how each read
 uv run kalainova cutcheck <job>  # a click or a flash at any cut
 ```
 
-A row of the sheet with two nearly identical frames did not move. A shot whose reading misses gets another attempt automatically, up to `brief.max_takes`. Set `brief.takes` to always make more.
+A row of the sheet with two nearly identical frames did not move. A shot whose reading misses gets another attempt automatically, up to `brief.max_takes`, only when the model is free to call. A paid model makes exactly `brief.takes` and stops, and another take is yours to ask for with `kalainova retake`. Set `brief.takes` to plan more up front.
 
 ## Fix one shot
 

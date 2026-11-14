@@ -28,3 +28,7 @@ Whether a motion-first prompt stops clips freezing is a hypothesis until a real 
 - `source.shot_motion` stays a warning at QA, and `shot_motion_min` is not tuned: no human verdict exists to tune it against.
 - A last frame is sent as an image, in the model's own field (`end_image_param` under `video_models`), when the model has one. When it has none, the frame is not written into the prompt, and the shot's record says it was not used.
 - Lip sync pads the line with silence to the clip's length, so the vendor's cut to the shorter input no longer shortens the shot. The clip before the sync is kept beside the synced one. Regrading from a higher-quality mezzanine remains a known limit.
+
+## Amendment, 2026-11-13
+
+A failing reading asks for another attempt only when the attempt was free. A paid model makes exactly the takes the brief planned (`brief.takes`, or the studio's `takes.always`) and stops, and the stage says that no take read well. Another paid take is a person's decision, through `kalainova retake`, which keeps its own limits. `brief.max_takes` and `takes.most` now bound free providers only. The reason is cost: the stages before a paid call exist so that the call is made once, on inputs already accepted, and a loop that pays again on a miss undoes that.

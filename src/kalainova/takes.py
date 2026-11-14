@@ -1,14 +1,17 @@
 """One shot, several attempts. A reading picks among them, and a human can overrule it.
 
 A generated shot is a sample, not a result: the same prompt gives a frozen clip on one seed and a
-living one on the next. So every attempt is kept with its seed and how it read, a failing reading
-asks for another attempt up to a limit, and the piece uses one chosen take at a stable path.
+living one on the next. So every attempt is kept with its seed and how it read, and the piece uses
+one chosen take at a stable path. A failing reading asks for another attempt up to a limit only when
+the attempt cost nothing: a paid model makes the takes that were planned, and another is a person's
+call.
 """
 
 from __future__ import annotations
 
 import hashlib
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -217,8 +220,19 @@ def make_until_good(
     assess: Assess,
     prompt: str = "",
 ) -> Take:
-    """Attempts until one reads well or the limit is reached. Returns the chosen take."""
+    """The planned attempts, then more until one reads well, but only while they are free.
+
+    A paid model makes exactly the takes always made. A reading that misses after that stops here
+    and says so: paying again is a person's decision, never a loop's.
+    """
     always, most = counts(brief)
+    paid = False
+
+    def watched(seed: int, dst: Path) -> tuple[Any, Any]:
+        nonlocal paid
+        provider, res = make(seed, dst)
+        paid = paid or not getattr(provider, "free", False)
+        return provider, res
 
     def made() -> list[
         Take
@@ -227,10 +241,19 @@ def make_until_good(
         return [t for t in found if not t.get("bench")]
 
     while len(made()) < most:
-        if len(made()) >= always and any(t["ok"] for t in made()):
+        done = made()
+        # a take made on an earlier run carries its cost, which is how a paid one is known here
+        charged = paid or any(t.get("cost") for t in done)
+        if len(done) >= always and (charged or any(t["ok"] for t in done)):
             break
         n = next_take_number(job, shot)
-        attempt(job, shot, n, suffix=suffix, make=make, assess=assess, prompt=prompt)
+        attempt(job, shot, n, suffix=suffix, make=watched, assess=assess, prompt=prompt)
+    if paid and not any(t["ok"] for t in made()):
+        print(
+            f"{job.id}: {shot}: no take read well. It was made on a paid model, so no further "
+            "take is made unless a person asks for one.",
+            file=sys.stderr,
+        )
     found = chosen(job, shot)
     if not found:
         raise ContractError(f"{job.id}: no take of {shot} was made")
