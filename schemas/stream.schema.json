@@ -145,6 +145,28 @@
           "type": "string"
         }
       }
+    },
+    "autonomy": {
+      "type": "object",
+      "description": "Autonomy level per review gate: human (default), by-exception, audit. Publish is fixed at human.",
+      "additionalProperties": false,
+      "properties": {
+        "track_pick": {
+          "enum": ["human", "by-exception", "audit"]
+        },
+        "stills": {
+          "enum": ["human", "by-exception", "audit"]
+        },
+        "animatic": {
+          "enum": ["human", "by-exception", "audit"]
+        },
+        "final": {
+          "enum": ["human", "by-exception", "audit"]
+        },
+        "publish": {
+          "const": "human"
+        }
+      }
     }
   }
 }

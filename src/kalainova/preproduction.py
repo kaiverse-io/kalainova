@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import subprocess
+import sys
 import textwrap
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import Any, Protocol
 import numpy as np
 from PIL import Image, ImageDraw
 
-from . import media, motion, shotmake, takes, timeline
+from . import config, media, motion, prompts, shotmake, takes, timeline
 from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 from .providers import router
@@ -111,10 +112,98 @@ def total_of(quotes: list[tuple[str, float | None]]) -> float | None:
 
 
 # ------------------------------------------------------------------ the gate
+def gate_active(job: Job) -> bool:
+    """Whether this job holds video until the animatic is accepted."""
+    data = job.job
+    if "video" not in (data.get("media") or []):
+        return False
+    brief = data.get("brief") or {}
+    if brief.get("max_video_beats") == 0:
+        return False
+    setting = brief.get("animatic_gate")
+    if setting is False:
+        return False
+    if setting is True:
+        return True
+    if data.get("cost_cap") is None:
+        return False
+    if not job.has("script_packet"):
+        return False
+    packet = job.read("script_packet")
+    kinds = set(data.get("media") or [])
+    has_moving = any(moves(beat, kinds) for beat in packet.get("beats", []))
+    if not has_moving:
+        return False
+    p = router.first_usable(job, "video")
+    return bool(p and not getattr(p, "free", False))
+
+
+def waiting_gate(job: Job) -> str | None:
+    """The gate this job is held at, if any."""
+    data = job.job
+    if gate_active(job):
+        review = data.get("animatic_reviewed") or {}
+        if review.get("verdict") != "accept":
+            return "animatic"
+    if data.get("status") == "rendered" and not job.has("approval"):
+        return "human-approval"
+    return None
+
+
+def refuse_shot_still(job: Job, beat: Fields | str, still: Path) -> str | None:
+    """Refuse a moving shot if its start frame does not match the accepted animatic still."""
+    beat_id = beat if isinstance(beat, str) else beat["id"]
+    if isinstance(beat, dict) and beat.get("continues"):
+        return None
+    review = job.job.get("animatic_reviewed") or {}
+    accepted_stills = review.get("stills") or {}
+    expected = accepted_stills.get(beat_id)
+    if not expected:
+        return None
+    actual = sha256_file(still)
+    if actual != expected:
+        return (
+            f"start frame does not match accepted animatic still ({actual[:8]} != {expected[:8]})"
+        )
+    return None
+
+
+def reuse_accepted_still(piece: Any, beat: Fields, still: Path, prompt: str) -> bool:
+    """If the animatic accepted a still for this beat and it exists on disk, reuse it
+    as the asset.
+    """
+    review = piece.data.get("animatic_reviewed") or {}
+    accepted = (review.get("stills") or {}).get(beat["id"])
+    if not accepted:
+        return False
+    if not still.is_file():
+        raise ContractError(
+            f"{piece.job.id}: {beat['id']}: accepted animatic still is missing from disk: {still}"
+        )
+    actual = sha256_file(still)
+    if actual != accepted and beat.get("visual_kind") != "video":
+        raise ContractError(
+            f"{piece.job.id}: {beat['id']}: still does not match accepted animatic still"
+        )
+    piece.add(
+        id=f"{beat['id']}.still",
+        kind="still",
+        role="visual",
+        beat_id=beat["id"],
+        path=f"beats/{beat['id']}.still.png",
+        rights=shotmake.rights(piece.data),
+        provider="animatic",
+        model="accepted animatic still",
+        prompt=prompt,
+        synthetic=True,
+        probe=media.summarize(still),
+    )
+    return True
+
+
 def require_review(job: Job) -> None:
     """Refuse before any spend when the brief asks for an animatic and nobody has accepted it."""
-    data = job.job
-    if not (data.get("brief") or {}).get("animatic_gate") or "video" not in data.get("media", []):
+    if not gate_active(job):
         return
     steps = (
         f"`kalainova animatic {job.id}`, watch it, then "
@@ -124,7 +213,7 @@ def require_review(job: Job) -> None:
         raise ContractError(
             f"{job.id}: this job holds video until its animatic is accepted; run {steps}"
         )
-    review = data.get("animatic_reviewed") or {}
+    review = job.job.get("animatic_reviewed") or {}
     if review.get("verdict") != "accept":
         said = review.get("verdict")
         raise ContractError(
@@ -291,3 +380,93 @@ def cost_lines(record: Fields, cap: float | None, committed: float) -> list[str]
         if total > left:
             head += " (OVER THE CAP: raise it, or move fewer shots)"
     return [head, *lines]
+
+
+def refuse_over_the_cap(piece: Any) -> None:
+    """Say what the moving shots cost, and refuse before any spend if the cap cannot hold it."""
+    cost = total_of(moving_quotes(piece))
+    if cost is None:
+        return
+    cap = piece.data.get("cost_cap")
+    if cost:
+        print(
+            f"{piece.job.id}: moving shots: about ${cost:.2f} at the takes planned"
+            " (a paid model makes no further take when a reading misses)",
+            file=sys.stderr,
+        )
+    left = None if cap is None else float(cap) - piece.job.committed()
+    if left is not None and cost > left:
+        raise ContractError(
+            f"{piece.job.id}: the moving shots are estimated at ${cost:.2f} and the job has "
+            f"${max(left, 0):.2f} left under its cap; raise cost_cap, or set brief.max_video_beats "
+            "to move fewer shots"
+        )
+
+
+def still_judge_refusal(job: Job, beat: Fields, still: Path) -> str | None:
+    """Check a still before motion is paid for; if judge flags it, return refusal reason."""
+    if beat.get("visual_kind") != "video":
+        return None
+    if not (router.available(job, "judge") or router.available(job, "llm")):
+        return None
+    cap = "judge" if router.available(job, "judge") else "llm"
+    pref = config.preference(cap, job.job)
+    prov = pref[0] if pref else "fake"
+    judge_model = config.model_for(prov, "judge") or config.model_for(prov, "llm")
+    bid = beat["id"]
+    cue = f"Beat {bid}: {beat.get('text', '')}. Visual cue: {beat.get('visual_cue', '')}"
+    try:
+        from .plan import extract_json
+
+        _, res = router.generate(
+            job,
+            cap,
+            cap,
+            prompts.load("qa_still").format(cue=cue),
+            images=[still],
+            max_tokens=600,
+            model=judge_model,
+            note="qa-still-judge",
+        )
+        data = extract_json(res.text) if res and res.text else {}
+    except Exception as exc:
+        print(f"{job.id}: still judge error on {bid}: {exc}", file=sys.stderr)
+        return None
+
+    is_bad = (
+        data.get("passed") is False
+        or data.get("anatomy_ok") is False
+        or data.get("text_ok") is False
+        or data.get("cue_ok") is False
+    )
+    has_region = bool(data.get("region"))
+    if is_bad and has_region:
+        note = str(data.get("note") or f"still {bid} flagged by judge")
+        shot_finding = {
+            "id": bid,
+            "problems": ["geometry" if data.get("anatomy_ok") is False else "mismatch"],
+            "note": note,
+            **(
+                {"suggested_prompt_change": str(data["retake_prompt"])}
+                if data.get("retake_prompt")
+                else {}
+            ),
+        }
+        existing = job.read("findings") if job.has("findings") else None
+        if existing and existing.get("source") != "judge":
+            return f"still flagged by judge: {note}"
+        finding = existing or {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "source": "judge",
+            "shots": [],
+        }
+        shots = finding.setdefault("shots", [])
+        prior = next((shot for shot in shots if shot.get("id") == bid), None)
+        if prior is None:
+            shots.append(shot_finding)
+        else:
+            prior.update(shot_finding)
+        job.write("findings", finding)
+        return f"still flagged by judge: {note}"
+    return None

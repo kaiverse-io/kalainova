@@ -118,6 +118,7 @@ def test_a_judge_that_saw_a_problem_says_which_shot(tmp_path):
                     "id": "b3",
                     "moved": True,
                     "geometry_ok": False,
+                    "time": 1.5,
                     "note": "the door opens the wrong way",
                 }
             ]

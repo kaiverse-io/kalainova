@@ -70,3 +70,62 @@ def test_a_shot_verdict_with_the_media_gone_leaves_the_sample_out(tmp_path, monk
     job = _shot_job(tmp_path, monkeypatch, "gone.mp4")
     verdicts.record(job, "reject", reviewer="someone", shot="b1")
     assert verdicts.samples(tmp_path / "jobs") == []
+
+
+def test_a_preference_between_two_takes_round_trips_and_appears_in_review_set(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = make_job(tmp_path, job_id="p1")
+    job.path("takes").write_text(json.dumps({"shots": {"b1": {"takes": [{"n": 1}, {"n": 2}]}}}))
+    verdicts.record(
+        job, "accept", reviewer="someone", shot="b1", preferred=2, over=1, note="better rhythm"
+    )
+    text = verdicts.review_set(tmp_path / "jobs")
+    assert "preferred 2 over 1" in text
+    assert "note: better rhythm" in text
+    assert "p1" in text
+    assert verdicts.samples(tmp_path / "jobs") == []
+
+
+def test_a_preference_naming_a_take_that_does_not_exist_is_refused(tmp_path, monkeypatch):
+    import pytest
+
+    from kalainova.jobfs import ContractError
+
+    monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
+    job = make_job(tmp_path, job_id="p1")
+    job.path("takes").write_text(json.dumps({"shots": {"b1": {"takes": [{"n": 1}, {"n": 2}]}}}))
+    with pytest.raises(ContractError, match="has no take 3"):
+        verdicts.record(job, "accept", reviewer="someone", shot="b1", preferred=3, over=1)
+    with pytest.raises(ContractError, match="has no take 4"):
+        verdicts.record(job, "accept", reviewer="someone", shot="b1", preferred=1, over=4)
+    with pytest.raises(ContractError, match="both --preferred and --over"):
+        verdicts.record(job, "accept", reviewer="someone", shot="b1", preferred=1)
+    with pytest.raises(ContractError, match="cannot be preferred over itself"):
+        verdicts.record(job, "accept", reviewer="someone", shot="b1", preferred=1, over=1)
+
+
+@needs_ffmpeg
+def test_kalainova_song_command_ends_with_verdict_prompt(tmp_path, studio, capsys):
+    from kalainova.__main__ import main
+
+    job = make_job(tmp_path, job_id="song-1", media=["song"])
+    job.write(
+        "song",
+        {
+            "schema_version": "0.1",
+            "job_id": "song-1",
+            "title": "A Song",
+            "style": "acoustic indie ballad",
+            "duration_sec": 12,
+            "sections": [
+                {"kind": "verse", "lines": ["line one of words here", "line two of words here"]}
+            ],
+        },
+    )
+    assert main(["song", str(job.folder)]) == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out[-1].startswith(
+        "record verdict: kalainova verdict song-1 accept|fix|reject --reviewer NAME --note"
+    )

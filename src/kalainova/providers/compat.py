@@ -96,6 +96,8 @@ class OpenAICompat(Provider):
         ) / 1e6 * p.get("output_per_mtok", 0)
         return Result(text=text, cost=cost, model=str(model), meta={"usage": u})
 
+    judge = llm
+
 
 def _vendors() -> dict[str, dict[str, str]]:
     merged = {name: dict(spec) for name, spec in DEFAULTS.items()}

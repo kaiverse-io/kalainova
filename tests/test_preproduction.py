@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from fakes import make_job, needs_ffmpeg
+from fakes import Studio, make_job, needs_ffmpeg
 from kit_fixtures import Stub, make_character
 from PIL import Image
 
@@ -258,3 +258,136 @@ def test_test_stills_through_the_command_need_a_model_and_a_cap(root):
 
     make_character(root)
     assert main(["look", "lead", "--stills"]) == 1
+
+
+class PaidVideoStudio(Studio):
+    name = "paid-video"
+    capabilities = ("video",)
+    free = False
+
+    def estimate(self, capability, **request):
+        return 2.0
+
+
+@needs_ffmpeg
+def test_capped_job_with_paid_video_provider_stops_until_animatic_accepted(
+    tmp_path, studio, monkeypatch
+):
+    monkeypatch.setitem(base._REGISTRY, "paid-video", PaidVideoStudio)
+    from fakes import EVERY
+
+    job = _job(
+        tmp_path,
+        cost_cap=50.0,
+        providers={c: ["fake"] for c in EVERY} | {"video": ["paid-video"]},
+    )
+    with pytest.raises(ContractError, match="holds video until its animatic is accepted"):
+        assets.run(job)
+    assert _calls(PaidVideoStudio, "video") == []
+    _make(job)
+    with pytest.raises(ContractError, match="no verdict"):
+        assets.run(job)
+    verdicts.record(job, "accept", reviewer="a person", animatic=True)
+    assets.run(job)
+    assert len(_calls(PaidVideoStudio, "video")) == 3
+
+
+@needs_ffmpeg
+def test_changing_one_still_makes_that_shot_refuse_and_others_run(tmp_path, studio):
+    job = _job(tmp_path, brief={"subject": "a test", "max_video_beats": 9, "animatic_gate": True})
+    _make(job)
+    verdicts.record(job, "accept", reviewer="a person", animatic=True)
+    b2_still = job.work / "beats" / "b2.still.png"
+    Image.new("RGB", (64, 64), color="red").save(b2_still)
+
+    manifest = assets.run(job)
+    video_calls = _calls(studio, "video")
+    assert len(video_calls) == 2
+    assert any(b["beat_id"] == "b2" for b in manifest.get("promise_breaks", []))
+
+
+@needs_ffmpeg
+def test_changing_still_on_still_only_shot_refuses(tmp_path, studio):
+    job = make_job(
+        tmp_path,
+        beats=[_beat(1, visual_kind="still"), _beat(2, visual_kind="still")],
+        brief={"subject": "a test", "animatic_gate": True},
+    )
+    _make(job)
+    verdicts.record(job, "accept", reviewer="a person", animatic=True)
+    b1_still = job.work / "beats" / "b1.still.png"
+    Image.new("RGB", (64, 64), color="blue").save(b1_still)
+    with pytest.raises(ContractError, match="b1: still does not match accepted animatic still"):
+        assets.run(job)
+
+
+@needs_ffmpeg
+def test_job_on_free_providers_runs_straight_through_as_today(tmp_path, studio):
+    assert studio.free is True
+    job = _job(tmp_path, cost_cap=50.0)
+    assets.run(job)
+    assert len(_calls(studio, "video")) == 3
+
+
+@needs_ffmpeg
+def test_animatic_gate_false_in_brief_turns_gate_off_and_shows_in_job_record(
+    tmp_path, studio, monkeypatch
+):
+    monkeypatch.setitem(base._REGISTRY, "paid-video", PaidVideoStudio)
+    from fakes import EVERY
+
+    job = _job(
+        tmp_path,
+        cost_cap=50.0,
+        providers={c: ["fake"] for c in EVERY} | {"video": ["paid-video"]},
+        brief={"subject": "test", "animatic_gate": False},
+    )
+    assets.run(job)
+    assert len(_calls(PaidVideoStudio, "video")) == 3
+    assert job.job["brief"]["animatic_gate"] is False
+
+
+@needs_ffmpeg
+def test_status_command_shows_which_gate_a_job_is_waiting_at(tmp_path, studio, monkeypatch, capsys):
+    from fakes import EVERY
+
+    from kalainova.__main__ import main
+
+    monkeypatch.setitem(base._REGISTRY, "paid-video", PaidVideoStudio)
+    job = _job(
+        tmp_path,
+        cost_cap=50.0,
+        providers={c: ["fake"] for c in EVERY} | {"video": ["paid-video"]},
+    )
+    assert main(["status", str(job.folder)]) == 0
+    out = capsys.readouterr().out
+    assert "gate=animatic" in out or "waiting at gate: animatic" in out
+
+    _make(job)
+    verdicts.record(job, "accept", reviewer="someone", animatic=True)
+    assert main(["status", str(job.folder)]) == 0
+    out2 = capsys.readouterr().out
+    assert "gate=animatic" not in out2
+
+
+def test_missing_accepted_animatic_still_raises_contract_error(tmp_path, studio):
+    job = _job(tmp_path, cost_cap=50.0)
+    _make(job)
+    verdicts.record(job, "accept", reviewer="someone", animatic=True)
+    (job.work / "beats" / "b1.still.png").unlink()
+    with pytest.raises(ContractError, match="b1: accepted animatic still is missing from disk"):
+        assets.run(job)
+
+
+def test_refuse_shot_still_exempts_continuation_beats(tmp_path, studio):
+    job = _job(tmp_path, cost_cap=50.0)
+    _make(job)
+    verdicts.record(job, "accept", reviewer="someone", animatic=True)
+    still = job.work / "beats" / "b1.still.png"
+    # Overwrite still with different data
+    still.write_bytes(b"altered-frame-content")
+    # A standard beat fails the check
+    assert preproduction.refuse_shot_still(job, "b1", still) is not None
+    assert preproduction.refuse_shot_still(job, {"id": "b1"}, still) is not None
+    # A chained/continuation beat is exempt
+    assert preproduction.refuse_shot_still(job, {"id": "b1", "continues": True}, still) is None

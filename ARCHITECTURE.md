@@ -473,6 +473,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
     ├─▶ intake ────▶ media, render
     ├─▶ stock
+    ├─▶ router ─────▶ trace
     ├─▶ prompts, captions, look, motion, media: imported throughout, and import no stage
     └─▶ jobfs, config: the foundation, imported throughout
 ```
@@ -496,6 +497,11 @@ Kit lifecycle: draft, add a file, freeze, bump, load, and verify stored bytes.
 
 ### blobstore
 Local cache plus optional S3-compatible durable copy, addressed by hash.
+
+## Trace
+Best-effort per-provider-call telemetry in each job's `trace.jsonl`, including timing, outcome,
+provider/model identity, and estimated and settled cost. The provider router writes rows without
+letting telemetry failures interrupt generation.
 
 ### streams
 Stream records, canon, the schedule packet, and `request`, which turns a stream and a brief into a locked job.

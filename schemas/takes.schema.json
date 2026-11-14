@@ -36,7 +36,8 @@
           "chosen_by": {
             "enum": [
               "reading",
-              "human"
+              "human",
+              "none_passed"
             ]
           },
           "takes": {

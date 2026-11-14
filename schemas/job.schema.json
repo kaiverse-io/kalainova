@@ -200,7 +200,12 @@
         "verdict": {"enum": ["accept", "fix", "reject"]},
         "reviewer": {"type": "string", "minLength": 1},
         "at": {"type": "string"},
-        "animatic_sha256": {"type": "string"}
+        "animatic_sha256": {"type": "string"},
+        "stills": {
+          "type": "object",
+          "description": "sha256 hash of each accepted still at the time of animatic review.",
+          "additionalProperties": {"type": "string"}
+        }
       }
     },
     "edit": {

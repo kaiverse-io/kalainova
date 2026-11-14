@@ -103,6 +103,7 @@ def _make(a) -> int:
     print(f"{qachecks.headline(report)}  ->  {job.artifact()}")
     _print_bar(report)
     print(f"spent {job.spent():.4f} of cap {job.job.get('cost_cap')}")
+    print(f'record verdict: kalainova verdict {job.id} accept|fix|reject --reviewer NAME --note ""')
     return 0 if report["passed"] else 2
 
 
@@ -402,9 +403,16 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if a.cmd == "status":
             job = open_job(a.job)
+            from . import preproduction
             from .jobfs import CONTRACT_FILES
 
-            print(f"{job.id}: status={job.job['status']} spent={job.spent():.4f}")
+            gate = preproduction.waiting_gate(job)
+            line = f"{job.id}: status={job.job['status']} spent={job.spent():.4f}"
+            if gate:
+                line += f" gate={gate}"
+            print(line)
+            if gate:
+                print(f"  waiting at gate: {gate}")
             for k, v in CONTRACT_FILES.items():
                 print(f"  {'x' if job.has(k) else ' '} {v}")
             return 0

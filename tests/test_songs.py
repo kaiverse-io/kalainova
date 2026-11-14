@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from fakes import make_job, needs_ffmpeg
 
-from kalainova import media, publish, qa, songs, takes, writers
+from kalainova import bar, media, publish, qa, songs, takes, writers
 from kalainova.bar import song as musicbar
 from kalainova.editor import beats
 from kalainova.jobfs import ContractError, Job
@@ -111,11 +111,31 @@ def test_the_finished_file_is_a_master_at_its_target_level(tmp_path, studio):
 
 
 def test_a_song_is_faded_so_it_does_not_stop_dead(tmp_path, studio):
-    from kalainova import bar
-
     final = songs.run(_job(tmp_path))
     left, right, sr = media.decode_stereo(final)
     assert bar.ending_drop_db((left + right) / 2, sr) < -12
+
+
+def test_silence_after_a_take_is_cut_from_its_master(tmp_path, studio):
+    job = _job(tmp_path)
+    songs.run(job)
+    take = job.work / takes.chosen(job, "song")["file"]
+    padded = take.with_name("padded.wav")
+    media.run(["-i", str(take), "-af", "apad=pad_dur=3", str(padded)])
+    padded.replace(take)
+    final = songs._finish(job, take, _song())
+    left, right, sr = media.decode_stereo(final)
+    assert np.max(np.abs(((left + right) / 2)[-sr // 10 :])) > 1 / 32768
+
+
+def test_a_mid_phrase_take_fades_to_a_passing_ending(tmp_path, studio):
+    job = _job(tmp_path)
+    songs.run(job)
+    take = job.work / takes.chosen(job, "song")["file"]
+    final = songs._finish(job, take, _song())
+    left, right, sr = media.decode_stereo(final)
+    reading = bar.ending_drop_db((left + right) / 2, sr)
+    assert reading <= bar.limits()["ending_drop_db_max"]
 
 
 def test_lyrics_are_timed_to_what_was_heard_when_something_can_hear_them(tmp_path, studio):
@@ -174,6 +194,25 @@ def test_qa_binds_the_exact_file_and_a_person_can_then_approve_it(tmp_path, stud
     assert "song.taste" in {c["id"] for c in report["checks"]}
     assert "conformance" in report["bar"]
     assert publish.approve(job, "human", platforms=["youtube"])["reviewer"] == "human"
+
+
+def test_song_qa_and_bar_share_the_audio_readings(tmp_path, studio):
+    job = _job(tmp_path)
+    final = songs.run(job)
+    qa_audio = {c["id"]: c["detail"].split(" (limit")[0] for c in qa.run(job)["checks"]}
+    bar_audio = {
+        r["id"]: str(r["value"])
+        for r in bar.measure(final)["readings"]
+        if r["id"].startswith("audio.")
+    }
+    assert {key: qa_audio[key] for key in bar_audio} == bar_audio
+
+
+def test_three_failed_takes_record_that_none_passed(tmp_path):
+    job = _job(tmp_path)
+    for n in range(3):
+        takes.record(job, "song", {"n": n, "seed": n, "file": f"take-{n}.wav", "ok": False})
+    assert takes.load(job)["shots"]["song"]["chosen_by"] == "none_passed"
 
 
 def test_a_placeholder_song_can_never_be_approved(tmp_path, monkeypatch, studio):
@@ -266,6 +305,16 @@ def test_a_finished_song_opens_a_job_that_cuts_a_video_to_it(tmp_path, monkeypat
     assert (
         packet["beats"][0]["visual_cue"] == "paper boats on a floor" or packet["beats"][0]["text"]
     )
+
+
+def test_video_from_song_reuses_its_saved_grid(tmp_path, monkeypatch, studio):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    job = _job(tmp_path)
+    songs.run(job)
+    take = job.work / takes.chosen(job, "song")["file"]
+    assert take.with_suffix(".grid.json").exists()
+    monkeypatch.setattr(beats, "beat_grid", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+    songs.video_job(job, "p1-video")
 
 
 def test_a_video_of_a_song_runs_the_line_with_no_voice_and_the_track_unchanged(
