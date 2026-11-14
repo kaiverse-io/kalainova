@@ -49,6 +49,26 @@ def _language_model(checkpoint: str):  # type: ignore[no-untyped-def]  # the pac
     return handler
 
 
+def _task_fields(args: argparse.Namespace) -> dict[str, object]:
+    """The task, and for a repaint the source file and span, under GenerationParams' own names.
+
+    A text-to-music take sends no repaint fields at all. A repaint keeps the source outside the
+    span and remakes what is inside it.
+    """
+    if args.task_type != "repaint":
+        return {"task_type": "text2music"}
+    if not args.src_audio or not Path(args.src_audio).is_file():
+        raise SystemExit(f"repaint needs --src-audio pointing at a file, not {args.src_audio!r}")
+    if args.repainting_end <= args.repainting_start:
+        raise SystemExit("repaint needs --repainting-end after --repainting-start")
+    return {
+        "task_type": "repaint",
+        "src_audio": args.src_audio,
+        "repainting_start": args.repainting_start,
+        "repainting_end": args.repainting_end,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -66,6 +86,8 @@ def main() -> None:
     parser.add_argument("--repainting-start", type=float, default=0.0)
     parser.add_argument("--repainting-end", type=float, default=0.0)
     args = parser.parse_args()
+    # Checked before a model loads: a wrong field name would otherwise fail only after minutes
+    params_kw = _task_fields(args)
     handler = AceStepHandler()
     handler.initialize_service(project_root=args.checkpoint, config_path=DIT, device="auto")
     planner = _language_model(args.checkpoint)
@@ -79,11 +101,8 @@ def main() -> None:
         duration=args.seconds,
         inference_steps=STEPS,
         seed=args.seed,
-        task_type=args.task_type,
-        src_audio_path=args.src_audio,
-        repainting_start=args.repainting_start,
-        repainting_end=args.repainting_end,
         thinking=planner is not None,
+        **params_kw,
     )
     config = GenerationConfig(
         batch_size=1, use_random_seed=False, seeds=[args.seed], audio_format="wav"

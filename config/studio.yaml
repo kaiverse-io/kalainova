@@ -256,7 +256,7 @@ bar:
   hard_cuts_per_min_max: 6
   digital_silence_sec_max: 0.2
   ending_drop_db_max: -12
-  audio_groove_steadiness_min: 0.70
+  audio_groove_steadiness_min: 0.50    # pulse clarity: steady grooves read near 1, 30 ms of jitter about 0.4, random onsets under 0.1. Warns; not calibrated on verdicts
   audio_pitch_snapping_max: 0.85
   audio_crest_factor_min: 6.0
   audio_stereo_width_min: 0.05

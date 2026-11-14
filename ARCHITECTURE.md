@@ -471,7 +471,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ verdicts ──▶ bar, media, jobfs
     ├─▶ publish ───▶ blobstore, consistency, preproduction, streams, stock
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
-    ├─▶ song_repair ─▶ jobfs, takes, providers, songs
+    ├─▶ song_repair ─▶ config, media, jobfs, takes, bar, providers, songs
     ├─▶ intake ────▶ media, render
     ├─▶ variants ──▶ jobfs
     ├─▶ templates ─▶ jobfs
@@ -606,7 +606,7 @@ edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
 Lyrics to takes of a song, readings that pick among them, a master, lyric files, release files for a distributor (`render/release.py`: WAV, FLAC and MP3 with tags, cover and lyrics), optional stems through a `separate` provider, a refusal before spending when a song asks for more than the model states it can make (`router.refuse_too_long`), and a job that cuts a video to the finished track (ADR 0014).
 
 ### song_repair
-Repaints a single section of a chosen song take into a new take beside it, without re-rolling the whole track. Depends on `jobfs`, `takes`, `providers.router`, and `songs`.
+Repaints a single section of a chosen song take into a new take beside it, without re-rolling the whole track. The first ready song provider that can repaint does it (on the Mac, ACE-Step's `repaint` task); when none can, the repair is refused before any work, and nothing is copied or recorded. The new take is measured with the same readings as any take. Depends on `config`, `media`, `jobfs`, `takes`, `bar.song`, `providers`, and `songs`.
 
 ### dub
 A piece in another language as a job of its own: its music and effects stem under new voices, and captions in the new language, with its own human gate.
