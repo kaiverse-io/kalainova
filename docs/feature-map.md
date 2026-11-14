@@ -48,3 +48,4 @@
 | Open models on this machine | `providers: {"video": ["mac"]}` | `providers/mac.py`, `providers/runners/` | `tests/test_mac_provider.py` |
 | Real word times from the `whisper-cli` command | `preference.transcribe: [whispercpp]`, `KALAINOVA_WHISPER_CPP_MODEL` | `providers/whispercpp.py` | `tests/test_whispercpp.py`; tried on real audio: `docs/how-to/try-the-open-tools.md` |
 | Incremental render | `kalainova make --from edit` | `render/cache.py` | `tests/test_rendercache.py` |
+| A stream's fixed sound identity: tempo, keys, drum kit, mastering target | Python API `sound_identity.load_sound_identity`, `sound_identity.check_track` | `sound_identity.py` | `tests/test_sound_identity.py` |

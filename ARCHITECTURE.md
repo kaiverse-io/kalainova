@@ -482,6 +482,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ scorecard ───▶ jobfs
     ├─▶ audit ───────▶ config
     ├─▶ calibration
+    ├─▶ sound_identity
     ├─▶ prompts, captions, look, motion, media: imported throughout, and import no stage
     └─▶ jobfs, config: the foundation, imported throughout
 ```
@@ -720,6 +721,9 @@ Provider independence audit. Analyzes preference chains and provider fallbacks i
 
 ### calibration
 Agreement reporting between deterministic readings, model judges, and human operator verdicts. Evaluates alignment and identifies uncalibrated checks.
+
+### sound_identity
+A stream's fixed sound identity — drum kit, tempo range, keys, and a mastering target — as the song-side equivalent of a face kit. `check_track` reads a rendered track's metadata against it and never reaches a model.
 
 ## Cockpit
 

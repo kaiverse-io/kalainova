@@ -9,51 +9,42 @@ from __future__ import annotations
 import json
 import math
 import zipfile
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
 from PIL import Image, ImageDraw, ImageFont
 
 from . import captions, consistency, render, shotmake
+from .bar import identity
 from .jobfs import ContractError, Job
+from .kits import blob_path
 from .providers import router
 
 Arr = npt.NDArray[Any]
 
 PAGE_W, PAGE_H = 1988, 3075  # 6.625 x 10.25 inches at 300 dpi, a standard comic trim
-MARGIN, GUTTER = 110, 34
-SCROLL_W = 800
+MARGIN, GUTTER, SCROLL_W = 110, 34, 800
 PX_PER_PT = 300 / 72
 LETTER_PT, MIN_LETTER_PT = 10.0, 7.5  # below this a printed comic is hard to read
 ART_SHAPES = ((1, 1), (4, 3), (3, 4), (3, 2), (2, 3), (16, 9), (9, 16), (21, 9))
 NO_LETTERING = "no text, no letters, no speech bubbles, no captions, no watermark, no logo"
 LETTER_FACE, SFX_FACE = "ComicNeue-Bold.ttf", "Bangers-Regular.ttf"
-PAPER = (255, 255, 255)
-CAPTION_FILL = (250, 244, 222)
-INK = (12, 12, 14)
-PANEL_RULE = 6
-BALLOON_RULE = 5
-INSET = 18
-OVERSAMPLE = 2
-EXPONENT = 2.6  # between an ellipse and a rectangle, which holds lettered text well
-TAIL_REACH = 0.7  # past the balloon's edge, as a share of its height
-TAIL_SHARE = 0.6  # of the way to a speaker who is close
+PAPER, CAPTION_FILL, INK = (255, 255, 255), (250, 244, 222), (12, 12, 14)
+PANEL_RULE, BALLOON_RULE, INSET, OVERSAMPLE = 6, 5, 18, 2
+EXPONENT, TAIL_REACH, TAIL_SHARE = 2.6, 0.7, 0.6
 
 
-@dataclass(frozen=True)
-class Rect:
+class Rect(NamedTuple):
     x: int
     y: int
     w: int
     h: int
 
 
-@dataclass(frozen=True)
-class Block:
+class Block(NamedTuple):
     lines: list[str]
     size: int
     width: float
@@ -90,9 +81,11 @@ def art_size(width: int, height: int) -> tuple[int, int]:
     target = width / height
     a, b = min(ART_SHAPES, key=lambda s: abs(math.log((s[0] / s[1]) / target)))
     ratio = a / b
-    if ratio >= target:
-        return math.ceil(height * ratio), height
-    return width, math.ceil(width / ratio)
+    return (
+        (math.ceil(height * ratio), height)
+        if ratio >= target
+        else (width, math.ceil(width / ratio))
+    )
 
 
 @lru_cache(maxsize=32)
@@ -125,19 +118,17 @@ def letter_block(text: str, size: int, *, max_width: float) -> Block:
         if len(narrower) > len(lines) or any(text_width(x, size) > width for x in narrower):
             break
         lines, width = narrower, width * 0.96
-    widest = max(text_width(line, size) for line in lines)
-    return Block(lines, size, widest, len(lines) * size * 1.14)
+    return Block(
+        lines, size, max(text_width(line, size) for line in lines), len(lines) * size * 1.14
+    )
 
 
 def fit_lettering(text: str, panel: Rect) -> Block:
     """The largest readable lettering that fits. Too many words is the script's fault."""
-    pt = LETTER_PT
-    while pt >= MIN_LETTER_PT:
-        size = round(pt * PX_PER_PT)
-        block = letter_block(text, size, max_width=panel.w * 0.66)
+    for pt in np.arange(LETTER_PT, MIN_LETTER_PT - 0.1, -0.5):
+        block = letter_block(text, round(pt * PX_PER_PT), max_width=panel.w * 0.66)
         if block.height <= panel.h * 0.5 and block.width <= panel.w * 0.8:
             return block
-        pt -= 0.5
     raise ContractError(f"too much text for a {panel.w}x{panel.h} panel: {text[:60]}")
 
 
@@ -170,31 +161,29 @@ def place(art: Arr, panel: Rect, w: int, h: int, *, taken: list[Rect]) -> Rect:
 
 
 def _busy(table: Arr, spot: Rect, panel: Rect) -> float:
-    x0, y0 = spot.x - panel.x, spot.y - panel.y
-    x1, y1 = min(x0 + spot.w, table.shape[1]) - 1, min(y0 + spot.h, table.shape[0]) - 1
-    total = float(table[y1, x1])
-    if x0 > 0:
-        total -= float(table[y1, x0 - 1])
-    if y0 > 0:
-        total -= float(table[y0 - 1, x1])
-    if x0 > 0 and y0 > 0:
-        total += float(table[y0 - 1, x0 - 1])
+    x0, y0 = max(0, spot.x - panel.x), max(0, spot.y - panel.y)
+    x1, y1 = (
+        min(spot.x - panel.x + spot.w, table.shape[1]) - 1,
+        min(spot.y - panel.y + spot.h, table.shape[0]) - 1,
+    )
+    total = (
+        float(table[y1, x1])
+        - (float(table[y1, x0 - 1]) if x0 > 0 else 0.0)
+        - (float(table[y0 - 1, x1]) if y0 > 0 else 0.0)
+        + (float(table[y0 - 1, x0 - 1]) if x0 > 0 and y0 > 0 else 0.0)
+    )
     return float(total / max((x1 - x0 + 1) * (y1 - y0 + 1), 1))
 
 
 # ------------------------------------------------------------------ drawing
 def _superellipse(cx: float, cy: float, a: float, b: float) -> list[tuple[float, float]]:
-    points = []
-    for i in range(160):
-        t = 2 * math.pi * i / 160
-        c, s = math.cos(t), math.sin(t)
-        points.append(
-            (
-                cx + a * math.copysign(abs(c) ** (2 / EXPONENT), c),
-                cy + b * math.copysign(abs(s) ** (2 / EXPONENT), s),
-            )
+    return [
+        (
+            cx + a * math.copysign(abs(math.cos(t)) ** (2 / EXPONENT), math.cos(t)),
+            cy + b * math.copysign(abs(math.sin(t)) ** (2 / EXPONENT), math.sin(t)),
         )
-    return points
+        for t in (2 * math.pi * i / 160 for i in range(160))
+    ]
 
 
 def tail_tip(spot: Rect, speaker: tuple[float, float]) -> tuple[float, float] | None:
@@ -215,8 +204,7 @@ def _balloon_shapes(spot: Rect, tip: tuple[float, float] | None) -> list[list[tu
     cx, cy = spot.x + spot.w / 2, spot.y + spot.h / 2
     shapes = [_superellipse(cx, cy, spot.w / 2, spot.h / 2)]
     if tip:
-        angle = math.atan2(tip[1] - cy, tip[0] - cx)
-        base = min(spot.w, spot.h) * 0.16
+        angle, base = math.atan2(tip[1] - cy, tip[0] - cx), min(spot.w, spot.h) * 0.16
         px, py = -math.sin(angle) * base, math.cos(angle) * base
         shapes.append([(cx + px, cy + py), tip, (cx - px, cy - py)])
     return shapes
@@ -224,8 +212,7 @@ def _balloon_shapes(spot: Rect, tip: tuple[float, float] | None) -> list[list[tu
 
 def _ink_balloon(page: Image.Image, spot: Rect, tip: tuple[float, float] | None) -> None:
     """Rule first, then the fill on top, so the tail joins the balloon with no line across it."""
-    box = Rect(0, 0, page.width, page.height)
-    rule = Image.new("L", (box.w * OVERSAMPLE, box.h * OVERSAMPLE), 0)
+    rule = Image.new("L", (page.width * OVERSAMPLE, page.height * OVERSAMPLE), 0)
     fill = Image.new("L", rule.size, 0)
     draw_rule, draw_fill = ImageDraw.Draw(rule), ImageDraw.Draw(fill)
     for shape in _balloon_shapes(spot, tip):
@@ -260,13 +247,12 @@ def _ink_caption(page: Image.Image, panel: Rect, block: Block, row: int) -> Rect
 
 def _ink_sfx(page: Image.Image, art: Arr, panel: Rect, text: str, taken: list[Rect]) -> Rect:
     size = max(panel.h // 6, 60)
-    word = text.upper()
-    w, h = int(text_width(word, size, SFX_FACE) * 1.1), int(size * 1.2)
+    w, h = int(text_width(text.upper(), size, SFX_FACE) * 1.1), int(size * 1.2)
     spot = place(art, panel, min(w, panel.w - 2 * INSET), h, taken=taken)
     layer = Image.new("RGBA", (w + 40, h + 40), (0, 0, 0, 0))
     ImageDraw.Draw(layer).text(
         (20, 20),
-        word,
+        text.upper(),
         font=_font(SFX_FACE, size),
         fill=(255, 214, 60, 255),
         stroke_width=max(size // 14, 4),
@@ -297,10 +283,9 @@ def _letter_panel(page: Image.Image, panel: Rect, lines: list[dict[str, Any]]) -
             continue
         w, h = int(block.width * 1.42), int(block.height * 1.62)
         spot = place(art, panel, w, h, taken=taken)
-        at = line.get("speaker_at")
         tip = (
             tail_tip(spot, (panel.x + at[0] * panel.w, panel.y + at[1] * panel.h))
-            if at and kind == "speech"
+            if (at := line.get("speaker_at")) and kind == "speech"
             else None
         )
         _ink_balloon(page, spot, tip)
@@ -338,32 +323,37 @@ def _make_art(job: Job, panel: dict[str, Any], rect: Rect, ctx: dict[str, Any]) 
     refs = shotmake.shot_kw(ctx["resolved"], ctx["lock"], "image", beat)
     prompt = _art_prompt(ctx["resolved"], panel, ctx["style"])
     provider, res = router.generate(job, "image", "image", prompt, dst, width=w, height=h, **refs)
-    record = {
-        "id": panel["id"],
-        "kind": "still",
-        "role": "visual",
-        "beat_id": panel["id"],
-        "path": f"panels/{dst.name}",
-        "rights": job.job.get("rights", "owned"),
-        "provider": provider.name,
-        "model": res.model,
-        "prompt": prompt,
-        "synthetic": True,
+    return {
+        k: v
+        for k, v in {
+            "id": panel["id"],
+            "kind": "still",
+            "role": "visual",
+            "beat_id": panel["id"],
+            "path": f"panels/{dst.name}",
+            "rights": job.job.get("rights", "owned"),
+            "provider": provider.name,
+            "model": res.model,
+            "prompt": prompt,
+            "synthetic": True,
+        }.items()
+        if v
     }
-    return {k: v for k, v in record.items() if v}
 
 
 def _page(
     job: Job, spec: dict[str, Any], ctx: dict[str, Any], records: list[dict[str, Any]]
 ) -> tuple[Image.Image, float]:
-    rects = panel_rects(spec["rows"], PAGE_W, PAGE_H, margin=MARGIN, gutter=GUTTER)
-    if len(rects) != len(spec["panels"]):
+    rects, panels = (
+        panel_rects(spec["rows"], PAGE_W, PAGE_H, margin=MARGIN, gutter=GUTTER),
+        spec["panels"],
+    )
+    if len(rects) != len(panels):
         raise ContractError(
-            f"{job.id}: a page lays out {len(rects)} panels and lists {len(spec['panels'])}"
+            f"{job.id}: a page lays out {len(rects)} panels and lists {len(panels)}"
         )
-    page = Image.new("RGB", (PAGE_W, PAGE_H), PAPER)
-    smallest = LETTER_PT
-    for rect, panel in zip(rects, spec["panels"], strict=True):
+    page, smallest = Image.new("RGB", (PAGE_W, PAGE_H), PAPER), LETTER_PT
+    for rect, panel in zip(rects, panels, strict=True):
         record = _make_art(job, panel, rect, ctx)
         records.append(record)
         page.paste(_cover(job.work / record["path"], rect.w, rect.h), (rect.x, rect.y))
@@ -377,17 +367,15 @@ def _page(
 
 def _scroll(pages: list[Image.Image], rects_by_page: list[list[Rect]]) -> Image.Image:
     """Panels stacked one above the next for a phone, each with its lettering in place."""
-    strips = []
-    for page, rects in zip(pages, rects_by_page, strict=True):
-        for r in rects:
-            crop = page.crop((r.x, r.y, r.x + r.w, r.y + r.h))
-            strips.append(
-                crop.resize((SCROLL_W, round(r.h * SCROLL_W / r.w)), Image.Resampling.LANCZOS)
-            )
-    gap = 48
-    tall = sum(s.height for s in strips) + gap * (len(strips) + 1)
-    out = Image.new("RGB", (SCROLL_W, tall), PAPER)
-    y = gap
+    strips = [
+        page.crop((r.x, r.y, r.x + r.w, r.y + r.h)).resize(
+            (SCROLL_W, round(r.h * SCROLL_W / r.w)), Image.Resampling.LANCZOS
+        )
+        for page, rects in zip(pages, rects_by_page, strict=True)
+        for r in rects
+    ]
+    gap, tall = 48, sum(s.height for s in strips) + 48 * (len(strips) + 1)
+    out, y = Image.new("RGB", (SCROLL_W, tall), PAPER), gap
     for s in strips:
         out.paste(s, (0, y))
         y += s.height + gap
@@ -403,15 +391,17 @@ def empty_page_folder(folder: Path) -> None:
 
 def preflight(job: Job, script: dict[str, Any]) -> None:
     """Refuse a script that cannot be lettered before any art is paid for."""
-    for number, spec in enumerate(script["pages"], 1):
-        rects = panel_rects(spec["rows"], PAGE_W, PAGE_H, margin=MARGIN, gutter=GUTTER)
-        panels = spec["panels"]
+    for num, spec in enumerate(script["pages"], 1):
+        rects, panels = (
+            panel_rects(spec["rows"], PAGE_W, PAGE_H, margin=MARGIN, gutter=GUTTER),
+            spec["panels"],
+        )
         if len(rects) != len(panels):
             raise ContractError(
-                f"{job.id}: page {number} lays out {len(rects)} panels and lists {len(panels)}"
+                f"{job.id}: page {num} lays out {len(rects)} panels and lists {len(panels)}"
             )
-        for rect, panel in zip(rects, panels, strict=True):
-            for line in panel.get("lines") or []:
+        for rect, p in zip(rects, panels, strict=True):
+            for line in p.get("lines") or []:
                 if line["kind"] != "sfx":
                     fit_lettering(line["text"], rect)
 
@@ -428,10 +418,9 @@ def run(job: Job) -> Path:
     pages = [p for p, _ in built]
     folder = job.work / "pages"
     empty_page_folder(folder)
-    names = []
-    for n, page in enumerate(pages, 1):
-        names.append(f"{n:03d}.png")
-        page.save(folder / names[-1], dpi=(300, 300))
+    names = [f"{n:03d}.png" for n in range(1, len(pages) + 1)]
+    for name, page in zip(names, pages, strict=True):
+        page.save(folder / name, dpi=(300, 300))
     final = job.work / "final.pdf"
     pages[0].save(final, save_all=True, append_images=pages[1:], resolution=300.0)
     with zipfile.ZipFile(job.work / "final.cbz", "w", zipfile.ZIP_STORED) as cbz:
@@ -455,24 +444,56 @@ def run(job: Job) -> Path:
     return final
 
 
+def comic_character_consistency(job: Any) -> tuple[str, str]:
+    """Measure character face consistency across comic panels against kit references."""
+    panels, kdir = sorted((job.work / "panels").glob("*.png")), job.folder / "kit"
+    exts = {".png", ".jpg", ".jpeg"}
+    refs = (
+        [p for p in kdir.rglob("*") if p.is_file() and p.suffix.lower() in exts]
+        if kdir.is_dir()
+        else []
+    )
+    if job.job.get("stream") and job.has("kit_lock"):
+        locked = consistency.for_job(job)
+        if locked:
+            resolved, _ = locked
+            for k in resolved.characters.values():
+                refs.extend(
+                    blob_path(resolved.root, e) for e in (k.get("identity") or {}).get("refs", [])
+                )
+    dists = (
+        [min(identity.face_distance(p, r) for r in refs) for p in panels] if panels and refs else []
+    )
+    if not dists:
+        return "pass", "no character kit attached"
+    st = "pass" if max(dists) <= 0.45 else "warn"
+    return st, f"maximum character reference distance {max(dists):.3f} (limit 0.45)"
+
+
+def _chk(cid: str, st: str, dt: str) -> dict[str, str]:
+    return {"id": cid, "status": st, "detail": dt}
+
+
 def checks(job: Job) -> list[dict[str, str]]:
     """What can be proved about a lettered comic. A human still reads every page."""
-    report = json.loads((job.work / "comic_report.json").read_text())
+    report_path = job.work / "comic_report.json"
+    if not report_path.is_file():
+        return [_chk("comic.character_consistency", "fail", "comic_report.json is missing")]
+    report = json.loads(report_path.read_text())
     smallest = float(report["smallest_letter_pt"])
+    st, dt = comic_character_consistency(job)
+    ok_sz = "pass" if smallest >= MIN_LETTER_PT else "fail"
     return [
-        {
-            "id": "comic.lettering_size",
-            "status": "pass" if smallest >= MIN_LETTER_PT else "fail",
-            "detail": f"smallest lettering {smallest:.1f} pt (at least {MIN_LETTER_PT} pt)",
-        },
-        {
-            "id": "comic.pages",
-            "status": "pass",
-            "detail": f"{report['pages']} pages, {report['panels']} panels",
-        },
-        {
-            "id": "comic.art_lettering",
-            "status": "warn",
-            "detail": "art is requested with no words; a human checks no model drew any",
-        },
+        _chk("comic.character_consistency", st, dt),
+        _chk(
+            "comic.lettering_size",
+            ok_sz,
+            f"smallest lettering {smallest:.1f} pt (at least {MIN_LETTER_PT} pt)",
+        ),
+        _chk("comic.pages", "pass", f"{report['pages']} pages, {report['panels']} panels"),
+        _chk(
+            "comic.art_lettering",
+            "warn",
+            "art is requested with no words; a human checks no model drew any",
+        ),
     ]
