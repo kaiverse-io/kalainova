@@ -119,7 +119,7 @@ flowchart TB
     subgraph footage["Footage path"]
         stockmod["stock.py"]
         analyze["editor/analyze.py<br/>shots and scores"]
-        direct["editor/direct.py<br/>choose.py"]
+        direct["editor/direct.py<br/>choose.py, patch.py"]
         notes["editor/notes.py"]
         beats["editor/beats.py"]
         speech["editor/speech.py<br/>clips.py, auto_editor.py"]
@@ -473,6 +473,8 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
     ├─▶ song_repair ─▶ jobfs, takes, providers, songs
     ├─▶ intake ────▶ media, render
+    ├─▶ variants ──▶ jobfs
+    ├─▶ templates ─▶ jobfs
     ├─▶ stock
     ├─▶ router ─────▶ trace
     ├─▶ fingerprint ─▶ jobfs
@@ -503,6 +505,15 @@ Kit lifecycle: draft, add a file, freeze, bump, load, and verify stored bytes.
 
 ### blobstore
 Local cache plus optional S3-compatible durable copy, addressed by hash.
+
+### variants
+Opening variants clone a parent's edit and asset manifests into a child job, share its source files,
+and change only the opening shot or hook card.
+
+### templates
+`fill_template` turns a template (brief, claims, cards, each with `{field}` placeholders) and a
+data file into a new job: refuses stale data, hydrates every placeholder, and writes `job.json`
+and `script_packet.json` with each claim's source carried through.
 
 ## Trace
 Best-effort per-provider-call telemetry in each job's `trace.jsonl`, including timing, outcome,
@@ -675,7 +686,7 @@ Approve, publish, and measure. Binds approval to the bytes and a stream piece to
 The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
 
 ### editor
-The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording (starting on a sentence start, with opening fillers dropped, and optionally opening and closing on a drawn title card from the graphics provider), chooses the crop through one seam with two adapters (the in-house motion centre, and a face detector the operator names as a command in `config/studio.yaml`), refusing a job whose `brief.source` does not say where the file came from and which file in the job folder covers its use. `musiccuts` turns a beat grid into bars, phrases, sections and the biggest rise in energy, and says so when there is no steady pulse; `musicvideo` builds the job that cuts a video to a track, with an excerpt, character cutaways under the shot ceiling, and the cost said first. `beats` is a seam: `adapters.beats` in `config/studio.yaml` picks its own onset-and-comb grid (default) or `beat_this`, which `beat_this.py` runs as a command and which adds downbeats. `speech_cuts` is a second seam: `speech.keep_spans` (called by `direct` for each take with sound) follows `adapters.speech_cuts`, which picks the in-house cuts at gaps between words (a silence detector when there is no transcript, the default) or `auto_editor`, which runs the `auto-editor` command, keeps the loud spans it reports, and lays any words over them. `auto_editor.py` follows the adapter contract in `opentools`, and keeps its result by the file's bytes and options. A seam is built only with its second adapter, and a missing command stops the step with its name.
+The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording (starting on a sentence start, with opening fillers dropped, and optionally opening and closing on a drawn title card from the graphics provider), chooses the crop through one seam with two adapters (the in-house motion centre, and a face detector the operator names as a command in `config/studio.yaml`), refusing a job whose `brief.source` does not say where the file came from and which file in the job folder covers its use. `patch` updates one cut in an existing `edit_manifest` (source, in point, title), voids any approval, and records the change in `direction.json` when that file is present. `musiccuts` turns a beat grid into bars, phrases, sections and the biggest rise in energy, and says so when there is no steady pulse; `musicvideo` builds the job that cuts a video to a track, with an excerpt, character cutaways under the shot ceiling, and the cost said first. `beats` is a seam: `adapters.beats` in `config/studio.yaml` picks its own onset-and-comb grid (default) or `beat_this`, which `beat_this.py` runs as a command and which adds downbeats. `speech_cuts` is a second seam: `speech.keep_spans` (called by `direct` for each take with sound) follows `adapters.speech_cuts`, which picks the in-house cuts at gaps between words (a silence detector when there is no transcript, the default) or `auto_editor`, which runs the `auto-editor` command, keeps the loud spans it reports, and lays any words over them. `auto_editor.py` follows the adapter contract in `opentools`, and keeps its result by the file's bytes and options. A seam is built only with its second adapter, and a missing command stops the step with its name.
 
 ### stock
 Free-license footage with credits.
