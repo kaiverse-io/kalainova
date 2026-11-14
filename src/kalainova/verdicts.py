@@ -52,7 +52,7 @@ def _check_record_args(
         raise ContractError("a verdict names the person who gave it")
     if (preferred is not None and over is None) or (over is not None and preferred is None):
         raise ContractError("a preference needs both --preferred and --over")
-    if preferred is not None:
+    if preferred is not None and over is not None:
         if preferred == over:
             raise ContractError("a take cannot be preferred over itself")
         _known_take(job, shot, preferred)
