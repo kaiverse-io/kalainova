@@ -345,7 +345,7 @@ def _moving_shot(piece: _Piece, beat: Fields, still: Path, prompt: str, span: fl
     if piece.video_budget <= 0:
         piece.breaks.append({"beat_id": bid, "reason": "over the video budget"})
         return None
-    refusal = preproduction.refuse_shot_still(piece.job, bid, still)
+    refusal = preproduction.refuse_shot_still(piece.job, beat, still)
     if refusal:
         piece.breaks.append({"beat_id": bid, "reason": refusal})
         print(f"{piece.job.id}: {bid}: {refusal}", file=sys.stderr)

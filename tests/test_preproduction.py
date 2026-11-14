@@ -368,3 +368,26 @@ def test_status_command_shows_which_gate_a_job_is_waiting_at(tmp_path, studio, m
     assert main(["status", str(job.folder)]) == 0
     out2 = capsys.readouterr().out
     assert "gate=animatic" not in out2
+
+
+def test_missing_accepted_animatic_still_raises_contract_error(tmp_path, studio):
+    job = _job(tmp_path, cost_cap=50.0)
+    _make(job)
+    verdicts.record(job, "accept", reviewer="someone", animatic=True)
+    (job.work / "beats" / "b1.still.png").unlink()
+    with pytest.raises(ContractError, match="b1: accepted animatic still is missing from disk"):
+        assets.run(job)
+
+
+def test_refuse_shot_still_exempts_continuation_beats(tmp_path, studio):
+    job = _job(tmp_path, cost_cap=50.0)
+    _make(job)
+    verdicts.record(job, "accept", reviewer="someone", animatic=True)
+    still = job.work / "beats" / "b1.still.png"
+    # Overwrite still with different data
+    still.write_bytes(b"altered-frame-content")
+    # A standard beat fails the check
+    assert preproduction.refuse_shot_still(job, "b1", still) is not None
+    assert preproduction.refuse_shot_still(job, {"id": "b1"}, still) is not None
+    # A chained/continuation beat is exempt
+    assert preproduction.refuse_shot_still(job, {"id": "b1", "continues": True}, still) is None

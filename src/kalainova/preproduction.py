@@ -147,8 +147,11 @@ def waiting_gate(job: Job) -> str | None:
     return None
 
 
-def refuse_shot_still(job: Job, beat_id: str, still: Path) -> str | None:
+def refuse_shot_still(job: Job, beat: Fields | str, still: Path) -> str | None:
     """Refuse a moving shot if its start frame does not match the accepted animatic still."""
+    beat_id = beat if isinstance(beat, str) else beat["id"]
+    if isinstance(beat, dict) and beat.get("continues"):
+        return None
     review = job.job.get("animatic_reviewed") or {}
     accepted_stills = review.get("stills") or {}
     expected = accepted_stills.get(beat_id)
@@ -168,8 +171,12 @@ def reuse_accepted_still(piece: Any, beat: Fields, still: Path, prompt: str) -> 
     """
     review = piece.data.get("animatic_reviewed") or {}
     accepted = (review.get("stills") or {}).get(beat["id"])
-    if not (still.is_file() and accepted):
+    if not accepted:
         return False
+    if not still.is_file():
+        raise ContractError(
+            f"{piece.job.id}: {beat['id']}: accepted animatic still is missing from disk: {still}"
+        )
     actual = sha256_file(still)
     if actual != accepted and beat.get("visual_kind") != "video":
         raise ContractError(
