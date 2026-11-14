@@ -127,7 +127,7 @@ def run_file(job: Job) -> dict:
             "detail": "no content review for this file; human reviews it",
         }
     )
-    from .publish import sha256_file
+    from .blobstore import sha256_file
 
     report = {
         "schema_version": "0.1",
@@ -145,7 +145,7 @@ def run_file(job: Job) -> dict:
 def run_song(job: Job) -> dict:
     """A song: its level blocks, its readings inform, and a person listens. Bound to the exact file."""
     from . import songs
-    from .publish import sha256_file
+    from .blobstore import sha256_file
 
     data, final = job.job, job.artifact()
     checks: list[dict] = []
@@ -178,7 +178,7 @@ def run_song(job: Job) -> dict:
 def run_document(job: Job) -> dict:
     """A comic or a book: its own checks, bound to the exact file like any other piece."""
     from . import comic, story
-    from .publish import sha256_file
+    from .blobstore import sha256_file
 
     data, final = job.job, job.artifact()
     made_for = comic if "comic" in data.get("media", []) else story
@@ -443,7 +443,7 @@ def run(job: Job) -> dict:
     studio_bar = bar.measure_job(job.work, em, am)
     checks.extend(bar.as_checks(studio_bar))
     passed = all(c["status"] != "fail" for c in checks)
-    from .publish import sha256_file
+    from .blobstore import sha256_file
 
     master = job.work / "final.master.mov"
     report = {
