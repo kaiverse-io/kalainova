@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 
 VERDICTS_FILE = "verdicts.jsonl"
@@ -75,11 +76,18 @@ def record(
 def _note_animatic(job: Job, entry: dict[str, Any]) -> None:
     """The job's own field for it: a person watched this cut, and said this."""
     data = job.job
+    animatic_rec = job.read("animatic")
+    stills = {}
+    for shot in animatic_rec.get("shots", []):
+        rel = shot.get("still")
+        if rel and (job.work / rel).is_file():
+            stills[shot["beat_id"]] = sha256_file(job.work / rel)
     data["animatic_reviewed"] = {
         "verdict": entry["verdict"],
         "reviewer": entry["reviewer"],
         "at": entry["at"],
-        "animatic_sha256": job.read("animatic")["sha256"],
+        "animatic_sha256": animatic_rec["sha256"],
+        **({"stills": stills} if stills else {}),
     }
     job.write("job", data)
 

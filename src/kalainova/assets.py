@@ -27,10 +27,6 @@ def _pause(text: str) -> float:
     return PAUSE_AFTER.get(text.rstrip()[-1:], PAUSE_DEFAULT)
 
 
-def _can_narrate(brief: Fields) -> bool:
-    return brief.get("narration", True) is not False
-
-
 @dataclass
 class _Piece:
     """One run of this stage: what it was asked for, and what it has made so far."""
@@ -72,8 +68,7 @@ class _Piece:
 def _open_piece(job: Job, force: bool) -> _Piece:
     data = job.job
     brief = data.get("brief") or {}
-    locked = consistency.for_job(job)
-    resolved, lock = locked if locked else (None, {})
+    resolved, lock = consistency.for_job(job) or (None, {})
     return _Piece(
         job=job,
         force=force,
@@ -155,10 +150,11 @@ def _voice_request(piece: _Piece, n: int) -> Fields:
         }
         if fixed.get("settings"):
             request["settings"] = fixed["settings"]
-    # neighbouring lines let a model keep one read across the cuts
-    request["previous_text"] = beats[n - 1]["text"] if n else None
-    request["next_text"] = beats[n + 1]["text"] if n + 1 < len(beats) else None
-    return request
+    return {
+        **request,
+        "previous_text": beats[n - 1]["text"] if n else None,
+        "next_text": beats[n + 1]["text"] if n + 1 < len(beats) else None,
+    }
 
 
 def _say_line(piece: _Piece, n: int, at: float, lines: _Narration) -> float:
@@ -174,12 +170,8 @@ def _say_line(piece: _Piece, n: int, at: float, lines: _Narration) -> float:
         **_voice_request(piece, n),
     )
     piece.words += [
-        {
-            **word,
-            "start_sec": round(word["start_sec"] + at, 3),
-            "end_sec": round(word["end_sec"] + at, 3),
-        }
-        for word in res.words
+        {**w, "start_sec": round(w["start_sec"] + at, 3), "end_sec": round(w["end_sec"] + at, 3)}
+        for w in res.words
     ]
     lines.parts.append(dst)
     lines.makers.append((made, res))
@@ -221,7 +213,7 @@ def _join_voice(piece: _Piece, lines: _Narration, opening_ms: int) -> None:
 def _make_voice(piece: _Piece) -> float:
     """Every line, and the timeline they set. Returns the length of the whole piece."""
     # a film opens on picture and music, and holds after its last word; a reel starts on the words
-    narrated = _can_narrate(piece.brief)  # a piece cut to a finished track starts when it does
+    narrated = piece.brief.get("narration", True) is not False  # a cut track starts when it does
     at = float(piece.prof.get("open_sec", 0.0)) if narrated else 0.0
     closing = float(piece.prof.get("close_sec", 0.0)) if narrated else 0.0
     opening_ms = int(at * 1000)
@@ -266,6 +258,8 @@ def _chained_still(piece: _Piece, beat: Fields, previous: Path, still: Path) -> 
 
 
 def _new_still(piece: _Piece, i: int, beat: Fields, prompt: str, still: Path) -> None:
+    if preproduction.reuse_accepted_still(piece, beat, still, prompt):
+        return
     kw = shotmake.shot_kw(piece.resolved, piece.lock, "image", beat)
     made, res = piece.gen(
         "image",
@@ -350,6 +344,11 @@ def _moving_shot(piece: _Piece, beat: Fields, still: Path, prompt: str, span: fl
         return None
     if piece.video_budget <= 0:
         piece.breaks.append({"beat_id": bid, "reason": "over the video budget"})
+        return None
+    refusal = preproduction.refuse_shot_still(piece.job, bid, still)
+    if refusal:
+        piece.breaks.append({"beat_id": bid, "reason": refusal})
+        print(f"{piece.job.id}: {bid}: {refusal}", file=sys.stderr)
         return None
     clip = piece.job.work / "beats" / f"{bid}.video.mp4"
     try:
@@ -481,8 +480,7 @@ def run(job: Job, *, force: bool = False, animatic: bool = False) -> Fields:
     if animatic:
         return _run_animatic(job, force)
     if job.has("asset_manifest") and not force:
-        found: Fields = job.read("asset_manifest")
-        return found
+        return job.read("asset_manifest")
     preproduction.require_review(job)
     (job.work / "beats").mkdir(exist_ok=True)
     if force:

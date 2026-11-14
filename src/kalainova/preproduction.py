@@ -111,10 +111,89 @@ def total_of(quotes: list[tuple[str, float | None]]) -> float | None:
 
 
 # ------------------------------------------------------------------ the gate
+def gate_active(job: Job) -> bool:
+    """Whether this job holds video until the animatic is accepted."""
+    data = job.job
+    if "video" not in (data.get("media") or []):
+        return False
+    brief = data.get("brief") or {}
+    setting = brief.get("animatic_gate")
+    if setting is False:
+        return False
+    if setting is True:
+        return True
+    if data.get("cost_cap") is None:
+        return False
+    if not job.has("script_packet"):
+        return False
+    packet = job.read("script_packet")
+    kinds = set(data.get("media") or [])
+    has_moving = any(moves(beat, kinds) for beat in packet.get("beats", []))
+    if not has_moving:
+        return False
+    p = router.first_usable(job, "video")
+    return bool(p and not getattr(p, "free", False))
+
+
+def waiting_gate(job: Job) -> str | None:
+    """The gate this job is held at, if any."""
+    data = job.job
+    if gate_active(job):
+        review = data.get("animatic_reviewed") or {}
+        if review.get("verdict") != "accept":
+            return "animatic"
+    if data.get("status") == "rendered" and not job.has("approval"):
+        return "human-approval"
+    return None
+
+
+def refuse_shot_still(job: Job, beat_id: str, still: Path) -> str | None:
+    """Refuse a moving shot if its start frame does not match the accepted animatic still."""
+    review = job.job.get("animatic_reviewed") or {}
+    accepted_stills = review.get("stills") or {}
+    expected = accepted_stills.get(beat_id)
+    if not expected:
+        return None
+    actual = sha256_file(still)
+    if actual != expected:
+        return (
+            f"start frame does not match accepted animatic still ({actual[:8]} != {expected[:8]})"
+        )
+    return None
+
+
+def reuse_accepted_still(piece: Any, beat: Fields, still: Path, prompt: str) -> bool:
+    """If the animatic accepted a still for this beat and it exists on disk, reuse it
+    as the asset.
+    """
+    review = piece.data.get("animatic_reviewed") or {}
+    accepted = (review.get("stills") or {}).get(beat["id"])
+    if not (still.is_file() and accepted):
+        return False
+    actual = sha256_file(still)
+    if actual != accepted and beat.get("visual_kind") != "video":
+        raise ContractError(
+            f"{piece.job.id}: {beat['id']}: still does not match accepted animatic still"
+        )
+    piece.add(
+        id=f"{beat['id']}.still",
+        kind="still",
+        role="visual",
+        beat_id=beat["id"],
+        path=f"beats/{beat['id']}.still.png",
+        rights=shotmake.rights(piece.data),
+        provider="animatic",
+        model="accepted animatic still",
+        prompt=prompt,
+        synthetic=True,
+        probe=media.summarize(still),
+    )
+    return True
+
+
 def require_review(job: Job) -> None:
     """Refuse before any spend when the brief asks for an animatic and nobody has accepted it."""
-    data = job.job
-    if not (data.get("brief") or {}).get("animatic_gate") or "video" not in data.get("media", []):
+    if not gate_active(job):
         return
     steps = (
         f"`kalainova animatic {job.id}`, watch it, then "
@@ -124,7 +203,7 @@ def require_review(job: Job) -> None:
         raise ContractError(
             f"{job.id}: this job holds video until its animatic is accepted; run {steps}"
         )
-    review = data.get("animatic_reviewed") or {}
+    review = job.job.get("animatic_reviewed") or {}
     if review.get("verdict") != "accept":
         said = review.get("verdict")
         raise ContractError(
