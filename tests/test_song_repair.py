@@ -136,6 +136,43 @@ def test_repairing_a_named_take_number_instead_of_the_chosen_one(tmp_path, studi
     assert repaired["repaired_from"] == other["n"]
 
 
+def test_a_repair_asks_the_model_to_repaint_the_span_of_the_chosen_take(tmp_path, studio):
+    job = _ready(tmp_path)
+    original = takes.chosen(job, "song")
+    studio.calls.clear()
+
+    songs.repair_take(job, start_sec=4.0, end_sec=12.0)
+
+    (call,) = [c for c in studio.calls if c["capability"] == "song"]
+    assert call["kw"]["task_type"] == "repaint"
+    assert call["kw"]["src_audio_path"] == job.work / original["file"]
+    assert (call["kw"]["repainting_start"], call["kw"]["repainting_end"]) == (4.0, 12.0)
+
+
+def test_a_repaired_take_is_measured_like_any_take(tmp_path, studio):
+    job = _ready(tmp_path)
+    repaired = songs.repair_take(job, section="chorus")
+    ids = {r["id"] for r in repaired["readings"]["readings"]}
+    assert {"audio.ending_drop_db", "song.tempo_drift"} <= ids
+    assert repaired["ok"] == (not repaired["readings"]["misses"])
+
+
+def test_with_no_model_that_can_repaint_a_repair_is_refused_and_nothing_is_copied(
+    tmp_path, studio, monkeypatch
+):
+    job = _ready(tmp_path)
+    before = takes.load(job)["shots"]["song"]["takes"]
+    monkeypatch.setattr(studio, "can_repaint", False)
+    studio.calls.clear()
+
+    with pytest.raises(ContractError, match="can repaint"):
+        songs.repair_take(job, section="chorus")
+
+    assert takes.load(job)["shots"]["song"]["takes"] == before
+    assert not list((job.work / "takes" / "song").glob("*-repaired.wav"))
+    assert [c for c in studio.calls if c["capability"] == "song"] == []
+
+
 def test_repairing_with_no_takes_yet_is_refused(tmp_path, studio):
     job = _job(tmp_path)
     with pytest.raises(ContractError, match="no song takes"):

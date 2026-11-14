@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from kalainova.bar import sound
 
@@ -21,23 +22,70 @@ def test_pitch_snapping() -> None:
     assert drift_score < snap_score
 
 
-def test_groove_steadiness() -> None:
-    sr = 24000
-    # Create regular pulse every 0.5s (120 bpm)
-    x = np.zeros(sr * 3)
-    for onset in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5]:
-        idx = int(onset * sr)
-        x[idx : idx + 200] = 0.8
-    steady_score = sound.groove_steadiness(x, sr)
-    assert steady_score > 0.8
+SR = 24000
 
-    # Irregular pulses
-    x_irreg = np.zeros(sr * 3)
-    for onset in [0.0, 0.2, 0.9, 1.1, 2.3, 2.4]:
-        idx = int(onset * sr)
-        x_irreg[idx : idx + 200] = 0.8
-    irreg_score = sound.groove_steadiness(x_irreg, sr)
-    assert irreg_score < steady_score
+
+def _drums(
+    seconds: float = 24,
+    bpm: float = 120,
+    *,
+    jitter: float = 0.0,
+    swing: bool = False,
+    random_onsets: bool = False,
+    seed: int = 0,
+) -> np.ndarray:
+    """A kick on every beat, a snare on two and four, hats on sixteenths: a real pattern's gaps
+    between neighbouring onsets are uneven even when the groove is metronome steady."""
+    rng = np.random.default_rng(seed)
+    x = np.zeros(int(SR * seconds))
+
+    def hit(at: float, amp: float, length: float, hz: float | None = None) -> None:
+        i, m = int(at * SR), min(int(length * SR), x.size - int(at * SR))
+        if i < 0 or m <= 0:
+            return
+        t = np.arange(m) / SR
+        tone = np.sin(2 * np.pi * hz * t) if hz else rng.standard_normal(m)
+        x[i : i + m] += amp * tone * np.exp(-t / (length / 4))
+
+    beat = 60 / bpm
+    if random_onsets:
+        for at in np.sort(rng.uniform(0, seconds, int(seconds / beat * 3))):
+            hit(at, rng.uniform(0.3, 0.9), 0.05)
+        return x
+    sixteenths = (0, 0.33, 0.5, 0.83) if swing else (0, 0.25, 0.5, 0.75)
+    for n in range(int(seconds / beat)):
+        at = n * beat + rng.uniform(-jitter, jitter)
+        hit(at, 0.9, 0.12, 55)
+        if n % 2:
+            hit(at, 0.6, 0.08)
+        for k, offset in enumerate(sixteenths):
+            hit(at + offset * beat, 0.25 + 0.1 * (k % 2), 0.02)
+    return x
+
+
+@pytest.mark.parametrize("groove", [{}, {"swing": True}, {"bpm": 90}, {"bpm": 128}], ids=str)
+def test_a_steady_pattern_reads_steady_however_busy_it_is(groove) -> None:
+    # A reading that compared the gaps between neighbouring onsets put every such pattern near 0
+    assert sound.groove_steadiness(_drums(**groove), SR) > 0.8
+
+
+@pytest.mark.parametrize("jitter", [0.03, 0.08])
+def test_beats_that_drift_off_the_pulse_read_below_the_limit(jitter) -> None:
+    assert sound.groove_steadiness(_drums(jitter=jitter), SR) < 0.5
+
+
+def test_onsets_with_no_common_period_read_near_zero() -> None:
+    assert sound.groove_steadiness(_drums(random_onsets=True), SR) < 0.2
+
+
+def test_a_breakdown_without_drums_does_not_decide_the_reading() -> None:
+    steady = _drums(seconds=40)
+    steady[int(SR * 16) : int(SR * 24)] = 0.01 * np.sin(np.arange(SR * 8) / 9)  # 8 s pad
+    assert sound.groove_steadiness(steady, SR) > 0.8
+
+
+def test_too_short_to_judge_reads_as_steady() -> None:
+    assert sound.groove_steadiness(_drums(seconds=2), SR) == 1.0
 
 
 def test_mix_balance() -> None:
