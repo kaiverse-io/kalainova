@@ -14,6 +14,8 @@ kalainova cutcheck <job>                         a click or a flash at any cut
 kalainova export <job> [--to fcpxml|otio|edl]    the cut for an editing system
 kalainova timeline-import <job> <file>  an edit saved in FCPXML, EDL or OTIO, read back
 kalainova song <job>                             lyrics to takes to a master
+kalainova song repair <job> [--take N] [--section S|--start S --end S] [--prompt P]
+                                                  repaint one span of a take, beside it
 kalainova song-video <job> <new id> [--excerpt SEC [--start SEC]]  a video cut to the song
 kalainova research <job> "question" [--query q]  sources, snapshots, checked findings
 kalainova research <job> --check                 hold written findings to their sources
@@ -68,81 +70,92 @@ def _card_parser(sub: Any) -> None:
     card.add_argument("job")
     card.add_argument("beat")
     card.add_argument("--kind", required=True, choices=drawn.CARD_KINDS)
-    card.add_argument("--text", default="", help="title or quote text")
-    card.add_argument("--sub", default="", help="a line under a title, or who said a quote")
-    card.add_argument("--value", default="", help="a stat's number, such as 42 or 3.5%%")
-    card.add_argument("--label", default="", help="what a stat counts")
+    for opt, h in [
+        ("--text", "title or quote text"),
+        ("--sub", "a line under a title, or who said a quote"),
+        ("--value", "a stat's number, such as 42 or 3.5%%"),
+        ("--label", "what a stat counts"),
+    ]:
+        card.add_argument(opt, default="", help=h)
     card.add_argument("--seconds", type=float, help="default: the beat's length plus one second")
 
 
 def _shot_parsers(sub: Any) -> None:
     sub.add_parser("shotplan").add_argument("job")
     sub.add_parser("takes").add_argument("job")
-    take = sub.add_parser("take")
-    take.add_argument("job")
-    take.add_argument("shot")
+    take, retake, bench = sub.add_parser("take"), sub.add_parser("retake"), sub.add_parser("bench")
+    for p in (take, retake, bench):
+        p.add_argument("job")
+        p.add_argument("shot")
     take.add_argument("n", type=int)
-    retake = sub.add_parser("retake")
-    retake.add_argument("job")
-    retake.add_argument("shot")
     retake.add_argument("note", nargs="?", default="")
-    bench = sub.add_parser("bench")
-    bench.add_argument("job")
-    bench.add_argument("shot")
-    bench.add_argument("--models", required=True, help="two or more video models, comma separated")
-    bench.add_argument("--takes", type=int, default=1, help="takes of each model (default 1)")
+    bench.add_argument("--models", required=True)
+    bench.add_argument("--takes", type=int, default=1)
 
 
 def _look_parsers(sub: Any) -> None:
     sheet = sub.add_parser("sheet")
     sheet.add_argument("job")
     kind = sheet.add_mutually_exclusive_group()
-    kind.add_argument("--motion", action="store_true", help="frames across the whole of each shot")
-    kind.add_argument("--cuts", action="store_true", help="frames either side of each cut")
+    kind.add_argument("--motion", action="store_true")
+    kind.add_argument("--cuts", action="store_true")
     sub.add_parser("findings").add_argument("job")
     strip = sub.add_parser("filmstrip")
-    strip.add_argument("file")
-    strip.add_argument("start", type=float)
-    strip.add_argument("end", type=float)
+    for a, t in [("file", str), ("start", float), ("end", float)]:
+        strip.add_argument(a, type=t)
     strip.add_argument("--frames", type=int, default=8)
     strip.add_argument("--out", default="")
     sub.add_parser("cutcheck").add_argument("job")
-    export = sub.add_parser("export")
-    export.add_argument("job")
-    export.add_argument("--to", default="fcpxml", choices=nle.FORMATS)
+    exp = sub.add_parser("export")
+    exp.add_argument("job")
+    exp.add_argument("--to", default="fcpxml", choices=nle.FORMATS)
     back = sub.add_parser("timeline-import")
     back.add_argument("job")
     back.add_argument("file", type=Path)
 
 
 def _make_parsers(sub: Any) -> None:
-    sub.add_parser("song").add_argument("job")
+    song = sub.add_parser("song")
+    song_args: list[tuple[str, dict[str, Any]]] = [
+        ("job_or_action", {}),
+        ("repair_job", {"nargs": "?"}),
+        ("--take", {"type": int}),
+        ("--section", {}),
+        ("--start", {"type": float}),
+        ("--end", {"type": float}),
+        ("--prompt", {"default": ""}),
+    ]
+    for opt, kw in song_args:
+        song.add_argument(opt, **kw)
     video = sub.add_parser("song-video")
-    video.add_argument("job")
-    video.add_argument("new_id")
-    video.add_argument("--stream", help="stream to open the video on")
-    video.add_argument("--cast", help="comma-separated character names")
+    for a in ["job", "new_id"]:
+        video.add_argument(a)
+    video.add_argument("--stream")
+    video.add_argument("--cast")
     video.add_argument("--profile", default="landscape")
     video.add_argument("--stills", action="store_true")
-    video.add_argument("--excerpt", type=float, help="seconds: a short from part of the track")
-    video.add_argument("--start", type=float, help="where the excerpt starts; default: strongest")
-    video.add_argument("--phrase-bars", type=int, help="bars per phrase; default 4 or 8 by energy")
+    video.add_argument("--excerpt", type=float)
+    video.add_argument("--start", type=float)
+    video.add_argument("--phrase-bars", type=int)
     found = sub.add_parser("research")
     found.add_argument("job")
     found.add_argument("question", nargs="?", default="")
     found.add_argument("--query", action="append", default=[])
     found.add_argument("--check", action="store_true")
     clips = sub.add_parser("clips")
-    clips.add_argument("job")
-    clips.add_argument("--count", type=int, default=3)
-    clips.add_argument("--open", action="store_true")
-    clips.add_argument("--crop", choices=("motion", "face"), default="motion")
-    clips.add_argument("--hook-card", action="store_true", help="open each clip on its title")
-    clips.add_argument("--close-text", help="close each clip on a card with this text")
+    clips_args: list[tuple[str, dict[str, Any]]] = [
+        ("job", {}),
+        ("--count", {"type": int, "default": 3}),
+        ("--open", {"action": "store_true"}),
+        ("--crop", {"choices": ("motion", "face"), "default": "motion"}),
+        ("--hook-card", {"action": "store_true", "help": "open each clip on its title"}),
+        ("--close-text", {"help": "close each clip on a card with this text"}),
+    ]
+    for a, kw in clips_args:
+        clips.add_argument(a, **kw)
     dub = sub.add_parser("dub")
-    dub.add_argument("job")
-    dub.add_argument("language")
-    dub.add_argument("new_id")
+    for a in ["job", "language", "new_id"]:
+        dub.add_argument(a)
     dub.add_argument("--voice")
 
 
@@ -152,10 +165,10 @@ def _record_parsers(sub: Any) -> None:
     verdict.add_argument("verdict", choices=verdicts.CHOICES)
     verdict.add_argument("--reviewer", required=True)
     verdict.add_argument("--shot")
-    verdict.add_argument("--take", type=int, help="one take of the shot, such as a bench take")
-    verdict.add_argument("--preferred", type=int, help="take preferred")
-    verdict.add_argument("--over", type=int, help="take preferred over")
-    verdict.add_argument("--animatic", action="store_true", help="on the rough cut as a whole")
+    verdict.add_argument("--take", type=int)
+    verdict.add_argument("--preferred", type=int)
+    verdict.add_argument("--over", type=int)
+    verdict.add_argument("--animatic", action="store_true")
     verdict.add_argument("--note", default="")
     sub.add_parser("signals")
     sub.add_parser("review-set")
@@ -296,8 +309,22 @@ def _print_qa(job: Job, final: Path) -> int:
 def _song(a: argparse.Namespace) -> int:
     from . import songs
 
-    job = open_job(a.job)
-    return _print_qa(job, songs.run(job))
+    if a.job_or_action == "repair":
+        if not a.repair_job:
+            raise ContractError("song repair needs a job")
+        take = songs.repair_take(
+            open_job(a.repair_job),
+            take_n=a.take,
+            section=a.section,
+            start_sec=a.start,
+            end_sec=a.end,
+            prompt=a.prompt,
+        )
+        print(json.dumps(take, ensure_ascii=False))
+        return 0
+    if a.repair_job is not None:
+        raise ContractError("use `kalainova song repair <job>` for song repair")
+    return _print_qa(open_job(a.job_or_action), songs.run(open_job(a.job_or_action)))
 
 
 def _song_video(a: argparse.Namespace) -> int:
@@ -454,30 +481,13 @@ def _ledger(a: argparse.Namespace) -> int:
     return 0
 
 
+_NAMES = (
+    "animatic card shotplan takes bench take retake sheet findings filmstrip cutcheck "
+    "export timeline-import song song-video research clips dub verdict signals review-set "
+    "provenance ledger"
+)
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
-    "animatic": _animatic,
-    "card": _card,
-    "shotplan": _shotplan,
-    "takes": _takes,
-    "bench": _bench,
-    "take": _take,
-    "retake": _retake,
-    "sheet": _sheet,
-    "findings": _findings,
-    "filmstrip": _filmstrip,
-    "cutcheck": _cutcheck,
-    "export": _export,
-    "timeline-import": _timeline_import,
-    "song": _song,
-    "song-video": _song_video,
-    "research": _research,
-    "clips": _clips,
-    "dub": _dub,
-    "verdict": _verdict,
-    "signals": _signals,
-    "review-set": _review_set,
-    "provenance": _provenance,
-    "ledger": _ledger,
+    cmd: globals()[f"_{cmd.replace('-', '_')}"] for cmd in _NAMES.split()
 }
 
 

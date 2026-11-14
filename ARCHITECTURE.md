@@ -471,6 +471,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ verdicts ──▶ bar, media, jobfs
     ├─▶ publish ───▶ blobstore, consistency, preproduction, streams, stock
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
+    ├─▶ song_repair ─▶ jobfs, takes, providers, songs
     ├─▶ intake ────▶ media, render
     ├─▶ stock
     ├─▶ router ─────▶ trace
@@ -591,6 +592,9 @@ edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
 
 ### songs
 Lyrics to takes of a song, readings that pick among them, a master, lyric files, release files for a distributor (`render/release.py`: WAV, FLAC and MP3 with tags, cover and lyrics), optional stems through a `separate` provider, a refusal before spending when a song asks for more than the model states it can make (`router.refuse_too_long`), and a job that cuts a video to the finished track (ADR 0014).
+
+### song_repair
+Repaints a single section of a chosen song take into a new take beside it, without re-rolling the whole track. Depends on `jobfs`, `takes`, `providers.router`, and `songs`.
 
 ### dub
 A piece in another language as a job of its own: its music and effects stem under new voices, and captions in the new language, with its own human gate.

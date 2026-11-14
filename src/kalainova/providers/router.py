@@ -40,6 +40,7 @@ OUTPUT_ARG = {
     "song": 1,
     "sfx": 1,
     "lipsync": 2,
+    "motion": 2,
     "separate": 1,
     "graphics": 1,
 }
@@ -47,7 +48,7 @@ OUTPUT_ARG = {
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError, base.RefusalError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = "generations.jsonl"
-PICTURE_OUTPUTS = ("image", "video", "lipsync", "graphics")
+PICTURE_OUTPUTS = ("image", "video", "motion", "lipsync", "graphics")
 SOUND_OUTPUTS = ("song", "music")
 ASPECT_TOLERANCE = 0.03
 MIN_SCALE = 0.5  # the editor can upscale a large image, not rescue a thumbnail
@@ -424,3 +425,19 @@ def generate(
         )
         return p, res
     raise ProviderError(f"{job.id}: every provider failed for {capability}: {'; '.join(errors)}")
+
+
+def motion(job: Job, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Path:
+    """Transfer the driving clip's motion to a character image through the selected provider."""
+    _, result = generate(
+        job,
+        "motion",
+        "motion",
+        character_image,
+        driving_video,
+        dst,
+        est={"duration": media.duration(driving_video)},
+        note="motion transfer",
+        **kw,
+    )
+    return result.path or dst

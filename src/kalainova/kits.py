@@ -131,6 +131,45 @@ def add_file(root: Path, kit_id: str, slot: str, src: Path, *, label: str = "") 
     return kit
 
 
+def add_voice_reference(
+    kit_folder: Path, audio_file: Path, rights: str = "owned", transcript: str = ""
+) -> Path:
+    """Hold an owned voice recording in a kit, for a future voice clone.
+
+    kit_folder is a folder that holds kit.json directly (a draft or frozen version folder).
+    The audio is copied in, not content-addressed: a reference recording is reviewed by name,
+    not by hash, until a clone is trained from it.
+    """
+    if rights not in ("owned", "licensed", "funded-brief"):
+        raise ContractError(
+            f"voice reference rights must be owned, licensed, or funded-brief, not {rights!r}"
+        )
+    if not audio_file.is_file():
+        raise ContractError(f"no file at {audio_file}")
+    kit_path = kit_folder / "kit.json"
+    if not kit_path.is_file():
+        raise ContractError(f"no kit.json at {kit_folder}")
+    kit: Kit = json.loads(kit_path.read_text())
+
+    dest_dir = kit_folder / "voice_references"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / audio_file.name
+    shutil.copyfile(audio_file, dest)
+
+    voice = dict(kit.get("voice") or {})
+    references = list(voice.get("references") or [])
+    entry: dict[str, Any] = {"file": str(dest.relative_to(kit_folder)), "rights": rights}
+    if transcript:
+        entry["transcript"] = transcript
+    references.append(entry)
+    voice["references"] = references
+    kit["voice"] = voice
+
+    validate("kit", kit, str(kit_path))
+    kit_path.write_text(json.dumps(kit, indent=2, ensure_ascii=False) + "\n")
+    return dest
+
+
 def remove_reference(root: Path, kit_id: str, slot: str, label: str) -> Kit:
     """Remove a reference with the specified label from an image slot in the draft."""
     kit = read_draft(root, kit_id)

@@ -16,6 +16,7 @@ from PIL import Image
 
 from .. import media, mediascan
 from . import motion, readings, sources
+from .identity import face_reading
 from .master import measure_master
 from .motion import MOTION_STEP_SEC, MOTION_WIDTH, shot_motion
 from .picture import (
@@ -58,6 +59,7 @@ __all__ = [
     "duplicate_share",
     "ending_drop_db",
     "hard_cuts_per_min",
+    "identity_readings",
     "limits",
     "longest_digital_silence",
     "measure",
@@ -79,6 +81,12 @@ __all__ = [
 MAX_MEASURE_FRAMES = 240
 LONG_WINDOWS = 4  # past one window's length, several short ones spread across the whole piece
 MAX_SHOTS_READ = 24
+
+
+def identity_readings(path: Path, references: list[Path]) -> list[Reading]:
+    """Measure the closest reference image against the configured identity limit."""
+    reading = face_reading(path, references, float(limits()["face_distance_max"]))
+    return [] if reading is None else [reading]
 
 
 def _sample_times(duration: float, count: int) -> list[float]:

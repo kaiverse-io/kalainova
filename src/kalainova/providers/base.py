@@ -4,7 +4,7 @@ A provider turns a request for one capability into a local file plus metadata.
 The engine never cares which vendor made the bytes; it records provider, model,
 prompt, cost, and rights on the asset so the job folder stays the source of truth.
 
-Capabilities: llm, voice, image, video, music, song, sfx, transcribe.
+Capabilities: llm, voice, image, video, motion, music, song, sfx, transcribe.
 
 To add a provider, put a module in this package or name one under provider_modules in
 config/studio.yaml. It registers a Provider subclass, and config/studio.yaml lists it and prices it.
@@ -28,6 +28,7 @@ CAPABILITIES = (
     "voice",
     "image",
     "video",
+    "motion",
     "music",
     "song",
     "sfx",
@@ -76,6 +77,9 @@ class Provider:
     # Keeps its own deadline, so time queued for a shared GPU does not count against the call, and a
     # call that runs out can really be stopped. Python cannot kill a worker thread.
     self_timed = False
+
+    def _unsupported(self, capability: str) -> Result:
+        raise NotImplementedError(f"{self.name} does not implement {capability}")
 
     def missing_env(self, capability: str = "") -> list[str]:
         needed = ((self.env_key,) if self.env_key else ()) + tuple(self.env_keys)
@@ -146,6 +150,9 @@ class Provider:
         **kw,
     ) -> Result:
         raise NotImplementedError
+
+    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+        return self._unsupported("motion")
 
     def music(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
         raise NotImplementedError

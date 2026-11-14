@@ -1,6 +1,6 @@
 """CLI for what stays the same: kits, streams, canon, schedules, and requests.
 
-kalainova kit new|add|set|freeze|bump|show <kit> ...
+kalainova kit new|add|remove|set|voice-ref|freeze|bump|show <kit> ...
 kalainova stream new|show|canon <stream> ...
 kalainova look <kit> [--stills --cost-cap N --image PROVIDER:MODEL]  a sheet to choose a look from
 kalainova schedule <stream> <date> "<brief>" [--cast a,b]
@@ -35,6 +35,13 @@ def add_parsers(sub: Any) -> None:
     setter = kit.add_parser("set")
     setter.add_argument("kit")
     setter.add_argument("file", help="a JSON file of fields to merge into the draft")
+    voice_ref = kit.add_parser("voice-ref")
+    voice_ref.add_argument("kit")
+    voice_ref.add_argument("audio_file")
+    voice_ref.add_argument(
+        "--rights", default="owned", choices=["owned", "licensed", "funded-brief"]
+    )
+    voice_ref.add_argument("--transcript", default="")
     freeze = kit.add_parser("freeze")
     freeze.add_argument("kit")
     freeze.add_argument("--by", required=True, help="the human attesting to this kit")
@@ -132,6 +139,12 @@ def _kit(a: argparse.Namespace, root: Path) -> int:
     elif a.action == "remove":
         kits.remove_reference(root, a.kit, a.slot, a.label)
         print(f"removed {a.label!r} from {a.kit} draft: {a.slot}")
+    elif a.action == "voice-ref":
+        kit_folder = kits.draft_path(root, a.kit).parent
+        dest = kits.add_voice_reference(
+            kit_folder, Path(a.audio_file), rights=a.rights, transcript=a.transcript
+        )
+        print(f"added voice reference to {a.kit} draft: {dest.relative_to(kit_folder)}")
     elif a.action == "set":
         kits.merge(root, a.kit, json.loads(Path(a.file).read_text()))
         print(f"merged into {a.kit} draft")
