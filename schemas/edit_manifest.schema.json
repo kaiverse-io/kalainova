@@ -21,6 +21,15 @@
       "type": "string",
       "minLength": 1
     },
+    "brief": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
     "runtime": {
       "enum": [
         "rented-tool",
