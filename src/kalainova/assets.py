@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config, consistency, media, preproduction, shotmake, shots, soundbed, takes
+from .bar import identity
 from .jobfs import ContractError, Job
 from .providers import router
 
@@ -410,6 +411,7 @@ def _run_animatic(job: Job, force: bool) -> Fields:
         consistency.check_script(job, piece.resolved, piece.packet, piece.lock.get("cast", []))
     total = _make_voice(piece)
     _sketch_pictures(piece)
+    identity.check_cast(job.work, piece.resolved, beats, piece.sketch)  # advises; blocks nothing
     if piece.has_sound and piece.brief.get("track"):
         soundbed.track_from_job(job, piece.brief["track"], total, piece.add, piece.data)
     return {

@@ -133,3 +133,99 @@ def test_a_command_that_leaves_a_picture_out_is_an_error(faces, monkeypatch):
     monkeypatch.setattr(identity.opentools, "run", drop_one)
     with pytest.raises(ContractError, match="said nothing about"):
         identity.face_reading(p["still.png"], [p["ref.png"]])
+
+
+# ---- a video, frame by frame -------------------------------------------------------------------
+@pytest.fixture
+def clip_limits(monkeypatch):
+    monkeypatch.setattr(
+        identity,
+        "_settings",
+        lambda: {"face_command": ["x"], "same_face_min": 0.57, "clip_median_min": 0.5,
+                 "lost_below": 0.45},
+    )  # fmt: skip
+
+
+def test_a_clip_that_keeps_her_through_lighting_dips_holds(clip_limits):
+    # her own clip under haze and pulsing light: every frame between 0.51 and 0.62
+    r = identity.summarise_clip([0.55, 0.59, 0.51, 0.58, 0.62, 0.54], 1.0)
+    assert r["ok"] and r["lost_at"] == [] and r["median_closest"] == pytest.approx(0.565)
+
+
+def test_a_clip_that_drifts_away_from_her_does_not_hold_and_says_where(clip_limits):
+    r = identity.summarise_clip([0.50, 0.28, 0.24, 0.13, 0.55, 0.17], 0.5)
+    assert not r["ok"]
+    assert r["lost_at"] == [(0.5, 1.5), (2.5, 2.5)]
+
+
+def test_frames_with_no_face_are_their_own_stretch_and_do_not_count_as_lost(clip_limits):
+    r = identity.summarise_clip([0.6, None, None, 0.58, None], 1.0)
+    assert r["ok"] and r["lost_at"] == []
+    assert r["no_face_at"] == [(1.0, 2.0), (4.0, 4.0)]
+
+
+def test_a_clip_with_no_face_anywhere_does_not_hold(clip_limits):
+    assert not identity.summarise_clip([None, None], 1.0)["ok"]
+
+
+def test_a_video_is_read_by_its_frames_and_a_picture_by_its_faces(
+    clip_limits, tmp_path, monkeypatch
+):
+    seen = {}
+    monkeypatch.setattr(
+        identity, "clip_report",
+        lambda clip, refs: seen.setdefault("clip", identity.summarise_clip([0.6, 0.6, 0.2], 1.0)),
+    )  # fmt: skip
+    line = identity.kit_line(tmp_path / "set.mp4", [tmp_path / "ref.png"], "lead@1")
+    assert (
+        "clip" in seen and "the character holds" in line and "lost (below 0.45) at 0:02.0" in line
+    )
+
+
+# ---- the animatic's character stills ------------------------------------------------------------
+def test_each_animatic_still_is_checked_against_the_characters_its_shot_names(faces, tmp_path):
+    from types import SimpleNamespace
+
+    p = faces(
+        {
+            "b1.still.png": [(BORIS, 300), (ALICE, 90)],
+            "b2.still.png": [(BORIS, 300)],
+            "b3.still.png": [],
+            "alice.png": [(ALICE, 200)],
+        }
+    )
+    work = tmp_path
+    (work / "beats").mkdir()
+    for name in ("b1", "b2", "b3"):
+        p[f"{name}.still.png"].rename(work / "beats" / f"{name}.still.png")
+    resolved = SimpleNamespace(root=tmp_path, characters={"lead": {"identity": {"refs": ["a"]}}})
+    import kalainova.kits as kits
+
+    real_blob = kits.blob_path
+    kits.blob_path = lambda root, entry: p["alice.png"]
+    try:
+        beats = [{"id": "b1", "cast": ["lead"]}, {"id": "b2", "cast": ["lead"]},
+                 {"id": "b3", "cast": ["lead"]}, {"id": "b4"}]  # fmt: skip
+        rows = [{"beat_id": b, "still": f"beats/{b}.still.png"} for b in ("b1", "b2", "b3", "b4")]
+        results = identity.check_cast(work, resolved, beats, rows)
+    finally:
+        kits.blob_path = real_blob
+
+    assert [(r["beat_id"], r["found"]) for r in results] == [
+        ("b1", True),
+        ("b2", False),
+        ("b3", False),
+    ]
+    lines = identity.cast_lines(work)
+    assert "face check on b1, lead: found" in lines[0]
+    assert "NOT found" in lines[1] and "no face found" in lines[2]
+
+
+def test_with_no_face_check_the_animatic_records_nothing_and_clears_an_old_result(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(identity, "_settings", lambda: {})
+    (tmp_path / identity.CAST_FILE).write_text("[]")
+    assert identity.check_cast(tmp_path, object(), [], []) == []
+    assert not (tmp_path / identity.CAST_FILE).exists()
+    assert identity.cast_lines(tmp_path) == []

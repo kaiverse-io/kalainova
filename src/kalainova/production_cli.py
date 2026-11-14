@@ -52,6 +52,7 @@ from . import (
     timeline,
     verdicts,
 )
+from .bar import identity
 from .jobfs import ContractError, Job, home, open_job
 from .render import drawn
 
@@ -424,7 +425,7 @@ def _animatic(a: argparse.Namespace) -> int:
     record = preproduction.write_record(job, made, preproduction.render(job, made))
     print(job.work / record["file"])
     cost = preproduction.cost_lines(record, job.job.get("cost_cap"), job.committed())
-    for line in [*cost, *preproduction.judge_lines(job)]:
+    for line in [*cost, *preproduction.judge_lines(job), *identity.cast_lines(job.work)]:
         print(line)
     print(
         f"watch it, then: kalainova verdict {job.id} accept|fix|reject --animatic --reviewer NAME"

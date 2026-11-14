@@ -209,7 +209,7 @@ def _bar(a) -> int:
 
 
 def _identity_line(picture: Path, kit: str) -> str:
-    """Every face in a picture against a frozen kit's faces; a gap when no face check is set."""
+    """A picture face by face, or a video frame by frame, against a frozen kit's faces."""
     from . import kits
     from .bar import identity
 
@@ -218,12 +218,7 @@ def _identity_line(picture: Path, kit: str) -> str:
     refs = [
         kits.blob_path(home(), e) for e in kits.load(home(), kit_id, version)["identity"]["refs"]
     ]
-    if not identity.configured():
-        return "identity: not measured; set identity.face_command in config/studio.yaml"
-    found = identity.faces([picture, *refs])
-    cast = identity.reference_faces(found, refs)
-    result = identity.match(found[picture], cast, identity.limit())
-    return f"identity against {kit_id}@{version}: {result.detail(identity.limit())}"
+    return identity.kit_line(picture, refs, f"{kit_id}@{version}")
 
 
 def main(argv: list[str] | None = None) -> int:
