@@ -122,6 +122,10 @@
     "skip_funded": {
       "type": "boolean"
     },
+    "silent": {
+      "type": "boolean",
+      "description": "True when every piece on this stream has no spoken lines or narration. Preflight skips the voice check."
+    },
     "amplification_allowed": {
       "type": "boolean",
       "description": "Off unless the operator opens it. In character, never an ad."

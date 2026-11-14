@@ -63,6 +63,8 @@ uv run kalainova stream new <stream> --identity <account label> --cost-cap 10 \
 uv run kalainova stream show <stream>    # what is fixed, and how
 ```
 
+For a stream whose pieces have no speech (such as music videos or silent pieces), add `--silent`. Preflight skips the voice check, and scripts with spoken lines are refused.
+
 Posting credentials stay in the environment. Each stream reads its own YouTube refresh token from `YOUTUBE_REFRESH_TOKEN_<IDENTITY>`, with the identity in capitals and other characters as `_`. Upload-Post uses the handle in `--account` as its profile.
 
 ## 4. Ask for a piece
@@ -106,7 +108,8 @@ A stream holds up to thirty open slots, within its daily limit. A slot renders o
 | A beat names a look, place, or prop the kit lacks | The script is refused |
 | A line uses a phrase from `never_say` | The script is refused |
 | A shot was made without its references, or by another model | QA fails |
-| A voice differs from the kit, or none is fixed | The request or QA fails |
+| A voice differs from the kit, or none is fixed | The request or QA fails; skipped on a silent stream |
+| A silent stream piece has a spoken line | The script is refused |
 | The vision judge says the face or style does not match | QA fails |
 | The stream has no account on a platform | Approval is refused |
 | The daily limit is reached | The live post is refused |

@@ -75,6 +75,10 @@
           "type": "string"
         }
       }
+    },
+    "silent": {
+      "type": "boolean",
+      "description": "True when every piece on this stream has no spoken lines or narration."
     }
   }
 }

@@ -225,7 +225,8 @@ def _make_voice(piece: _Piece) -> float:
     at = float(piece.prof.get("open_sec", 0.0)) if narrated else 0.0
     closing = float(piece.prof.get("close_sec", 0.0)) if narrated else 0.0
     opening_ms = int(at * 1000)
-    speaks = narrated and piece.has_sound
+    silent = bool(piece.resolved and getattr(piece.resolved, "silent", False))
+    speaks = narrated and piece.has_sound and not silent
     lines = _Narration()
     for n, beat in enumerate(piece.packet["beats"]):
         start = at
