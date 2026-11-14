@@ -8,8 +8,9 @@ import subprocess
 import numpy as np
 import pytest
 from fakes import make_job, needs_ffmpeg
+from kit_fixtures import Stub, make_character, make_stream
 
-from kalainova import media, qachecks, songs
+from kalainova import assets, media, qachecks, songs
 from kalainova.editor import musiccuts as mc
 from kalainova.editor import musicvideo
 from kalainova.jobfs import ContractError, Job
@@ -253,3 +254,118 @@ def test_a_full_length_track_defaults_to_stills_with_a_few_moving_shots(tmp_path
     assert kinds.count("video") == musicvideo.FULL_LENGTH_MOVING and "still" in kinds
     assert any("stills with camera moves" in line for line in said)
     assert songs  # the public entry point lives there
+
+
+def _song_manifest(job_id: str) -> dict:
+    return {
+        "schema_version": "0.1",
+        "job_id": job_id,
+        "assets": [{"id": "a1", "kind": "audio", "path": "final.wav", "model": "fake-song"}],
+    }
+
+
+def test_song_video_opened_with_stream_has_stream_cast_and_kit_lock_and_shots_receive_refs(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    (tmp_path / "jobs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "streams").mkdir(parents=True, exist_ok=True)
+    Stub.calls = []
+
+    make_character(tmp_path)
+    make_stream(tmp_path, "chan", silent=True)
+
+    song_job = make_job(tmp_path, media=["song"], job_id="s1")
+    song_job.write("song", _song())
+    song_job.write("asset_manifest", _song_manifest("s1"))
+    _track(song_job.work / "final.wav", seconds=12.0)
+
+    child_folder = songs.video_job(song_job, "s1-video", stream="chan", profile="short-9x16")
+    child = Job(child_folder)
+
+    assert child.job["stream"] == "chan"
+    assert child.job["cast"] == ["lead"]
+    assert child.has("kit_lock")
+    lock = child.read("kit_lock")
+    assert lock["stream"] == "chan"
+    assert lock["cast"] == ["lead"]
+
+    packet = child.read("script_packet")
+    assert all(b.get("cast") == ["lead"] for b in packet["beats"])
+
+    # Generating the assets passes character references to the video provider
+    assets.run(child)
+    vid_calls = [c for c in Stub.calls if c["capability"] == "video"]
+    assert len(vid_calls) > 0
+    assert all(c.get("references") for c in vid_calls)
+
+
+def test_song_video_stream_with_video_model_taking_no_reference_images_refuses(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    (tmp_path / "jobs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "streams").mkdir(parents=True, exist_ok=True)
+    Stub.calls = []
+
+    make_character(tmp_path)
+    make_stream(
+        tmp_path,
+        "chan-no-ref",
+        silent=True,
+        generators={
+            "image": {"provider": "stub", "model": "img-ref"},
+            "video": {"provider": "stub", "model": "plain-vid"},
+        },
+    )
+
+    # stub only supports reference on vid-ref or when in support dict
+    monkeypatch.setattr(
+        Stub,
+        "reference_support",
+        lambda self, cap, model: (
+            {"max_images": 4}
+            if cap == "image"
+            else ({"max_images": 3} if model == "vid-ref" else {})
+        ),
+    )
+
+    song_job = make_job(tmp_path, media=["song"], job_id="s2")
+    song_job.write("song", _song())
+    song_job.write("asset_manifest", _song_manifest("s2"))
+    _track(song_job.work / "final.wav", seconds=12.0)
+
+    with pytest.raises(ContractError, match="takes no reference images for video"):
+        songs.video_job(song_job, "s2-video", stream="chan-no-ref")
+
+
+def test_song_video_without_stream_is_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    song_job = make_job(tmp_path, media=["song"], job_id="s3")
+    song_job.write("song", _song())
+    song_job.write("asset_manifest", _song_manifest("s3"))
+    _track(song_job.work / "final.wav", seconds=12.0)
+
+    child_folder = songs.video_job(song_job, "s3-video")
+    child = Job(child_folder)
+
+    assert "stream" not in child.job
+    assert "cast" not in child.job
+    assert not child.has("kit_lock")
+
+
+def test_song_video_refuses_if_track_rights_do_not_cover_stream_strategy(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    (tmp_path / "jobs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "streams").mkdir(parents=True, exist_ok=True)
+
+    make_character(tmp_path)
+    make_stream(tmp_path, "chan", silent=True, strategy="generated")
+
+    song_job = make_job(tmp_path, media=["song"], rights="funded-brief", job_id="s4")
+    song_job.write("song", _song())
+    song_job.write("asset_manifest", _song_manifest("s4"))
+    _track(song_job.work / "final.wav", seconds=12.0)
+
+    with pytest.raises(ContractError, match="cannot be used on strategy 'generated'"):
+        songs.video_job(song_job, "s4-video", stream="chan")

@@ -120,6 +120,8 @@ def _make_parsers(sub: Any) -> None:
     video = sub.add_parser("song-video")
     video.add_argument("job")
     video.add_argument("new_id")
+    video.add_argument("--stream", help="stream to open the video on")
+    video.add_argument("--cast", help="comma-separated character names")
     video.add_argument("--profile", default="landscape")
     video.add_argument("--stills", action="store_true")
     video.add_argument("--excerpt", type=float, help="seconds: a short from part of the track")
@@ -300,6 +302,7 @@ def _song_video(a: argparse.Namespace) -> int:
 
     if a.start is not None and not a.excerpt:
         raise ContractError("--start needs --excerpt, the length to cut")
+    cast = [c.strip() for c in a.cast.split(",") if c.strip()] if getattr(a, "cast", None) else None
     folder = songs.video_job(
         open_job(a.job),
         a.new_id,
@@ -307,6 +310,8 @@ def _song_video(a: argparse.Namespace) -> int:
         still_only=a.stills,
         excerpt={"length": a.excerpt, "start": a.start} if a.excerpt else None,
         phrase_bars=a.phrase_bars,
+        stream=getattr(a, "stream", None),
+        cast=cast,
     )
     print(f"{folder}\nMake it with: kalainova make {a.new_id} --from assets")
     return 0
