@@ -461,13 +461,9 @@ def comic_character_consistency(job: Any) -> tuple[str, str]:
                 refs.extend(
                     blob_path(resolved.root, e) for e in (k.get("identity") or {}).get("refs", [])
                 )
-    dists = (
-        [min(identity.face_distance(p, r) for r in refs) for p in panels] if panels and refs else []
-    )
-    if not dists:
+    if not panels or not refs:
         return "pass", "no character kit attached"
-    st = "pass" if max(dists) <= 0.45 else "warn"
-    return st, f"maximum character reference distance {max(dists):.3f} (limit 0.45)"
+    return identity.panels_check(panels, refs)
 
 
 def _chk(cid: str, st: str, dt: str) -> dict[str, str]:

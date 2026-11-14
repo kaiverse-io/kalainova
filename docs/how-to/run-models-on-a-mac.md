@@ -54,6 +54,24 @@ Pin `{"song": ["mac"]}` in the job's `providers`, and set `song: ace-step` under
 - **`kalainova providers` says `mac` is ready for songs whether or not this environment exists.** A missing environment shows up when the job runs.
 - A song with no lyrics must set `"instrumental": true`, and a section's `kind` must be one of the kinds in `schemas/song.schema.json`.
 
+## Faces
+
+The identity check (`bar/identity.py`) finds every face in a picture and compares each with a kit's reference faces. It runs as a command in an environment that has `opencv-python` 4.8 or later; the engine ships no face model.
+
+1. Download `face_detection_yunet_2023mar.onnx` (MIT) and `face_recognition_sface_2021dec.onnx` (Apache 2.0) from the OpenCV model zoo into one folder outside the repo.
+2. Set the command in `config/studio.yaml`:
+
+   ```yaml
+   identity:
+     face_command: [<python with opencv>, <repo>/src/kalainova/providers/runners/face_run.py, --models, <that folder>]
+   ```
+
+3. Measure a picture against a frozen kit: `kalainova bar still.png --kit <kit>`. It prints how many faces it found, how close the nearest comes to the kit's face, and how many reach the limit. With no command set it says the identity was not measured.
+
+It ran in under a second for 25 pictures, at a 0.4 GB peak.
+
+**What it can and cannot tell.** On one character's generated stills, faces of the same character scored 0.60 to 0.73. Clearly different people in other scenes scored 0.05 to 0.27. But other women from the same image model, in the same lighting, scored 0.42 to 0.66, inside the same range. So it catches a different person or no face, and it does not catch a look-alike. It warns and never blocks, and its limit (`identity.same_face_min`, the recognizer's published 0.363) is not yet checked against a person's verdicts.
+
 ## What to expect
 
 | Work | Measured |
