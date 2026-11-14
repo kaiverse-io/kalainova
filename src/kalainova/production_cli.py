@@ -423,7 +423,8 @@ def _animatic(a: argparse.Namespace) -> int:
     made = assets.run(job, animatic=True)
     record = preproduction.write_record(job, made, preproduction.render(job, made))
     print(job.work / record["file"])
-    for line in preproduction.cost_lines(record, job.job.get("cost_cap"), job.committed()):
+    cost = preproduction.cost_lines(record, job.job.get("cost_cap"), job.committed())
+    for line in [*cost, *preproduction.judge_lines(job)]:
         print(line)
     print(
         f"watch it, then: kalainova verdict {job.id} accept|fix|reject --animatic --reviewer NAME"
