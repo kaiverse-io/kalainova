@@ -202,8 +202,9 @@ def _bar(a) -> int:
         mark = "ok  " if r["ok"] else "MISS"
         print(f"{mark} {r['id']:<30} {str(r['value'])[:26]:<28} {r['limit']}")
     print(f"studio bar: {bar.summary_line(report)}")
-    if a.kit:
-        print(_identity_line(target, a.kit))
+    kit = getattr(a, "kit", None)  # callers that predate --kit pass no such field
+    if kit:
+        print(_identity_line(target, kit))
     return 0 if report["passed"] else 2
 
 
