@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -61,42 +60,3 @@ def face_reading(image: Path, references: list[Path], max_distance: float = 0.40
         limit=f"<= {max_distance:.2f}",
         ok=distance <= max_distance,
     )
-
-
-def comic_character_consistency(job: Any) -> tuple[str, str]:
-    """Measure character face consistency across comic panels against kit references."""
-    panels = sorted((job.work / "panels").glob("*.png"))
-    kit_folder = job.folder / "kit"
-    references = (
-        [
-            p
-            for p in kit_folder.rglob("*")
-            if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
-        ]
-        if kit_folder.is_dir()
-        else []
-    )
-    if job.job.get("stream") and job.has("kit_lock"):
-        from .. import consistency
-        from ..kits import blob_path
-
-        locked = consistency.for_job(job)
-        if locked:
-            resolved, _ = locked
-            references.extend(
-                blob_path(resolved.root, entry)
-                for kit in resolved.characters.values()
-                for entry in (kit.get("identity") or {}).get("refs", [])
-            )
-    distances = (
-        [min(face_distance(panel, ref) for ref in references) for panel in panels]
-        if panels and references
-        else []
-    )
-    status = "pass" if not distances or max(distances) <= 0.45 else "warn"
-    detail = (
-        f"maximum character reference distance {max(distances):.3f} (limit 0.45)"
-        if distances
-        else "no character kit attached"
-    )
-    return status, detail
