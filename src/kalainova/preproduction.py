@@ -403,6 +403,23 @@ def refuse_over_the_cap(piece: Any) -> None:
         )
 
 
+def still_was_accepted(job: Job, beat_id: str, still: Path) -> bool:
+    """A person accepted this exact still with the animatic, having seen the model check's note."""
+    accepted = ((job.job.get("animatic_reviewed") or {}).get("stills") or {}).get(beat_id)
+    return bool(accepted and still.is_file() and sha256_file(still) == accepted)
+
+
+def judge_lines(job: Job) -> list[str]:
+    """What the model check said about the stills, for the person deciding on the animatic."""
+    found = job.read("findings") if job.has("findings") else {}
+    if found.get("source") != "judge":
+        return []
+    return [
+        f"  model check on {shot['id']}: {shot.get('note') or ', '.join(shot.get('problems', []))}"
+        for shot in found.get("shots", [])
+    ]
+
+
 def still_judge_refusal(job: Job, beat: Fields, still: Path) -> str | None:
     """Check a still before motion is paid for; if judge flags it, return refusal reason."""
     if beat.get("visual_kind") != "video":

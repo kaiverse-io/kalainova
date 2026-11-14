@@ -95,8 +95,11 @@ models:
 openai_compat: {}
 
 prices:
-  anthropic:
-    llm: {input_per_mtok: 15.0, output_per_mtok: 75.0}
+  anthropic:                       # a model's own row wins over the capability's; a call settles at the model it ran on
+    llm: {input_per_mtok: 4.0, output_per_mtok: 20.0}       # the planner, claude-opus-5-5
+    judge: {input_per_mtok: 1.0, output_per_mtok: 5.0}      # the model check, claude-haiku-4-5. Without a row a capped job refuses it
+    claude-opus-5-5: {input_per_mtok: 4.0, output_per_mtok: 20.0}
+    claude-haiku-4-5: {input_per_mtok: 1.0, output_per_mtok: 5.0}
   elevenlabs:
     voice: {per_kchar: 0.04}       # v4 Turbo $40 / 1M chars
     music: {per_min: 0.80}
@@ -113,11 +116,11 @@ prices:
     separate: {per_sec: 0.0007}    # ESTIMATE: per second of the mix. VERIFY on fal's page before a paid run
     lipsync: {per_min: 3.00}       # ESTIMATE
     motion: {cost_usd: 0.02}
+    transcribe: {per_min: 0.01}
   mac:
     motion: {free: true}
   local:
     motion: {free: true}
-    transcribe: {per_min: 0.01}
   exa:
     search: {per_call: 0.01}       # ESTIMATE
 

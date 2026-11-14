@@ -361,7 +361,11 @@ def _make_pictures(piece: _Piece) -> None:
             _chained_still(piece, beat, previous, still)
         else:
             _new_still(piece, i, beat, prompt, still)
-        still_refusal = preproduction.still_judge_refusal(piece.job, beat, still)
+        # the check advised at the animatic; a still a person accepted there is not judged again
+        accepted = preproduction.still_was_accepted(piece.job, beat["id"], still)
+        still_refusal = (
+            None if accepted else preproduction.still_judge_refusal(piece.job, beat, still)
+        )
         if still_refusal:
             piece.breaks.append({"beat_id": beat["id"], "reason": still_refusal})
             print(f"{piece.job.id}: {beat['id']}: {still_refusal}", file=sys.stderr)
@@ -387,8 +391,13 @@ def _sketch_pictures(piece: _Piece) -> None:
             row["still"] = held
             continue
         prompt = shotmake.picture_prompt(piece.resolved, piece.packet, beat, piece.data)
-        _new_still(piece, i, beat, prompt, piece.job.work / "beats" / f"{beat['id']}.still.png")
+        still = piece.job.work / "beats" / f"{beat['id']}.still.png"
+        _new_still(piece, i, beat, prompt, still)
         held = row["still"] = f"beats/{beat['id']}.still.png"
+        # the model check advises here, before anything is paid for; it blocks nothing
+        flagged = preproduction.still_judge_refusal(piece.job, beat, still)
+        if flagged:
+            print(f"{piece.job.id}: {beat['id']}: {flagged}", file=sys.stderr)
 
 
 def _run_animatic(job: Job, force: bool) -> Fields:

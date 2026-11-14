@@ -381,14 +381,7 @@ def run(job: Job) -> dict:
     checks.extend(qachecks.kit_checks(job, packet, am, sheet))
     judge = None
     try:
-        failed_beats = {
-            b["id"]
-            for b in packet.get("beats", [])
-            if any(
-                c["status"] == "fail" and b["id"] in (c.get("id", "") + " " + c.get("detail", ""))
-                for c in checks
-            )
-        }
+        failed_beats = qachecks.failed_beats(packet, checks)
         passed_beats = [b for b in packet.get("beats", []) if b["id"] not in failed_beats]
         if sheet and passed_beats:
             from .plan import extract_json
