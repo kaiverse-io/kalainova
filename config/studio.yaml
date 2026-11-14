@@ -244,9 +244,18 @@ video_models:
       durations: "4,5,6,8,10,12,15"
       extra: {generate_audio: false}
 
+# Whether a picture shows a kit's character: every face in it, compared with the kit's faces
+# (bar/identity.py). The engine ships no face model. face_command takes `--out FILE` and image
+# paths after it, and writes {path: [{box, score, embedding}]}; providers/runners/face_run.py does
+# this with OpenCV's YuNet and SFace, in an environment with opencv-python, for example:
+#   face_command: [~/models/.venv/bin/python, src/kalainova/providers/runners/face_run.py, --models, ~/models/face]
+# With none set, identity is not measured, and the check says so; it never passes by default.
+identity:
+  face_command: []
+  same_face_min: 0.363     # SFace's published cosine limit. On one character's generated stills against look-alikes from the same image model, same scored 0.60-0.73 and different 0.42-0.66: it warns, and does not block
+
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:
-  face_distance_max: 0.40
   stutter_max: 0.08
   cuts_per_min_max: 40
   banding_max: 0.03
