@@ -381,18 +381,33 @@ def run(job: Job) -> dict:
     checks.extend(qachecks.kit_checks(job, packet, am, sheet))
     judge = None
     try:
-        if sheet:
+        failed_beats = {
+            b["id"]
+            for b in packet.get("beats", [])
+            if any(
+                c["status"] == "fail" and b["id"] in (c.get("id", "") + " " + c.get("detail", ""))
+                for c in checks
+            )
+        }
+        passed_beats = [b for b in packet.get("beats", []) if b["id"] not in failed_beats]
+        if sheet and passed_beats:
             from .plan import extract_json
 
+            cap = "judge" if router.available(job, "judge") else "llm"
+            pref = config.preference(cap, job.job)
+            prov = pref[0] if pref else "fake"
+            judge_model = config.model_for(prov, "judge") or config.model_for(prov, "llm")
             _, res = router.generate(
                 job,
-                "llm",
-                "llm",
+                cap,
+                cap,
                 prompts.load("qa_rubric").format(
-                    shape=qachecks.shape(prof), script=qachecks.judge_script(packet)
+                    shape=qachecks.shape(prof),
+                    script=qachecks.judge_script(packet, exclude_beats=failed_beats),
                 ),
                 images=[job.work / sheet, *([job.work / motion] if motion else [])],
                 max_tokens=1600,
+                model=judge_model,
                 note="qa-judge",
             )
             judge = extract_json(res.text)

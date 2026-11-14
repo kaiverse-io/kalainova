@@ -28,7 +28,7 @@ class Anthropic(Provider):
     """Planner, editor and QA judge. Text and vision."""
 
     name = "anthropic"
-    capabilities = ("llm",)
+    capabilities = ("llm", "judge")
     env_key = "ANTHROPIC_API_KEY"
     synthetic = False
 
@@ -41,7 +41,11 @@ class Anthropic(Provider):
         images: list[Path] | None = None,
         **kw,
     ) -> Result:
-        model = kw.get("model") or model_for("anthropic", "llm")
+        model = (
+            kw.get("model")
+            or model_for("anthropic", "judge" if kw.get("capability") == "judge" else "llm")
+            or model_for("anthropic", "llm")
+        )
         content: list[dict] = []
         for img in images or []:
             content.append(
@@ -85,6 +89,8 @@ class Anthropic(Provider):
             "output_tokens", 0
         ) / 1e6 * p.get("output_per_mtok", 0)
         return Result(text=text, cost=cost, model=model, meta={"usage": u})
+
+    judge = llm
 
 
 # ---------------------------------------------------------------- ElevenLabs

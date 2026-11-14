@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 
 import pytest
+from fakes import needs_ffmpeg
 from kit_fixtures import make_character, make_stream, picture
 
-from kalainova import kitchecks, kits, qachecks, streams
+from kalainova import kitchecks, kits, media, qachecks, streams
 from kalainova.jobfs import ContractError
 from kalainova.providers import router
 
@@ -155,3 +156,259 @@ def test_assets_from_a_placeholder_provider_are_named():
     assert found["id"] == "delivery.placeholder" and found["status"] == "warn"
     assert "1 placeholder" in found["detail"] and "s1" in found["detail"]
     assert qachecks.placeholder_checks({"assets": [{"id": "x", "provider": "operator"}]}) == []
+
+
+def test_an_answer_with_no_cited_region_or_time_is_dropped():
+    # Without region or time, problems are dropped
+    assert qachecks.shot_problems({"id": "b1", "warping": True}) == []
+    assert qachecks.shot_problems({"id": "b1", "geometry_ok": False}) == []
+    assert qachecks.shot_problems({"id": "b1", "action_happened": False}) == []
+    # With region or time, problems are kept
+    assert qachecks.shot_problems(
+        {"id": "b1", "warping": True, "region": [0.1, 0.2, 0.3, 0.4]}
+    ) == ["warping"]
+    assert qachecks.shot_problems({"id": "b1", "geometry_ok": False, "time": 1.5}) == ["geometry"]
+    assert qachecks.shot_problems({"id": "b1", "action_happened": False, "at_sec": 2.0}) == [
+        "action_missing"
+    ]
+
+
+def test_unsure_is_recorded_as_its_own_status_and_does_not_fail_qa():
+    judge = {
+        "version": 3,
+        "policy_risk": "none",
+        "verdict": "ship",
+        "shots": [
+            {"id": "b1", "status": "unsure", "note": "lighting makes it hard to see"},
+            {"id": "b2", "geometry_ok": True, "moved": True, "region": [0, 0, 1, 1]},
+        ],
+    }
+    checks = qachecks.judged_shots(judge)
+    ids = {c["id"]: c["status"] for c in checks}
+    assert ids.get("judge.unsure") == "unsure"
+    # An unsure check does not fail QA
+    assert all(c["status"] != "fail" for c in checks)
+
+
+@needs_ffmpeg
+def test_a_clip_that_failed_a_free_reading_is_not_sent_to_the_judge(tmp_path, studio):
+    from fakes import make_job
+
+    from kalainova import qa
+
+    job = make_job(
+        tmp_path,
+        beats=[
+            {
+                "id": "b1",
+                "role": "hook",
+                "text": "First beat",
+                "visual_cue": "Cue 1",
+                "visual_kind": "video",
+            },
+            {
+                "id": "b2",
+                "role": "body",
+                "text": "Second beat",
+                "visual_cue": "Cue 2",
+                "visual_kind": "video",
+            },
+        ],
+    )
+    # Put a final video
+    media.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=320x180:d=2:r=24",
+            "-pix_fmt",
+            "yuv420p",
+            str(job.work / "final.mp4"),
+        ]
+    )
+    import shutil
+
+    shutil.copy(job.work / "final.mp4", job.work / "b1.video.mp4")
+    picture(job.work, "contact.jpg")
+    job.write(
+        "edit_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "runtime": "ffmpeg",
+            "profile": {"aspect": "9:16", "width": 320, "height": 180, "fps": 24.0},
+            "duration_sec": 2.0,
+            "cuts": [{"id": "c1", "source": "b1.video", "in_sec": 0, "out_sec": 2}],
+        },
+    )
+    job.write(
+        "asset_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "assets": [
+                {
+                    "id": "b1.video",
+                    "kind": "video",
+                    "rights": "owned",
+                    "path": "b1.video.mp4",
+                    "synthetic": True,
+                }
+            ],
+        },
+    )
+    # Studio provides a judge response
+    studio.replies = [
+        json.dumps(
+            {
+                "version": 3,
+                "policy_risk": "none",
+                "verdict": "ship",
+                "shots": [{"id": "b2", "status": "pass", "moved": True, "region": [0, 0, 1, 1]}],
+            }
+        )
+    ]
+
+    # Simulate b1 failing a free reading
+    def mock_checks(*a, **kw):
+        return [{"id": "b1.black_frames", "status": "fail", "detail": "black span"}]
+
+    import kalainova.qachecks as qc
+
+    orig = qc.cut_checks
+    qc.cut_checks = mock_checks
+    try:
+        qa.run(job)
+    finally:
+        qc.cut_checks = orig
+
+    # The judge call was made, but b1 was excluded from the script
+    judge_calls = [c for c in studio.calls if c["capability"] in ("judge", "llm")]
+    if judge_calls:
+        assert "b1" not in judge_calls[0].get("prompt", "")
+
+
+def test_a_still_the_fake_judge_flags_is_reported_at_stills_stage_before_any_video_call(
+    tmp_path, studio
+):
+    from fakes import make_job
+
+    from kalainova import assets
+
+    job = make_job(
+        tmp_path,
+        cost_cap=50.0,
+        beats=[
+            {
+                "id": "b1",
+                "role": "hook",
+                "text": "Line 1",
+                "visual_kind": "video",
+                "visual_cue": "a room",
+            },
+        ],
+    )
+    # Studio returns a flagged still for b1 with cited region
+    studio.replies = [
+        json.dumps(
+            {
+                "version": 1,
+                "passed": False,
+                "anatomy_ok": False,
+                "text_ok": True,
+                "cue_ok": True,
+                "region": [0.1, 0.2, 0.3, 0.4],
+                "note": "garbled hand anatomy",
+            }
+        )
+    ]
+    assets.run(job)
+    # Check that findings.json holds the fault
+    assert job.has("findings")
+    findings = job.read("findings")
+    assert any(s["id"] == "b1" and "garbled hand" in s["note"] for s in findings["shots"])
+    # Video call was NOT made for b1
+    video_calls = [c for c in studio.calls if c["capability"] == "video"]
+    assert len(video_calls) == 0
+
+
+@needs_ffmpeg
+def test_the_judge_uses_the_judge_model_when_configured(tmp_path, studio, monkeypatch):
+    from fakes import make_job
+
+    from kalainova import config, qa
+
+    job = make_job(
+        tmp_path,
+        beats=[
+            {
+                "id": "b1",
+                "role": "hook",
+                "text": "Line 1",
+                "visual_kind": "video",
+                "visual_cue": "a room",
+            }
+        ],
+    )
+    media.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=320x180:d=2:r=24",
+            "-pix_fmt",
+            "yuv420p",
+            str(job.work / "final.mp4"),
+        ]
+    )
+    import shutil
+
+    shutil.copy(job.work / "final.mp4", job.work / "b1.video.mp4")
+    picture(job.work, "contact.jpg")
+    job.write(
+        "edit_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "runtime": "ffmpeg",
+            "profile": {"aspect": "9:16", "width": 320, "height": 180, "fps": 24.0},
+            "duration_sec": 2.0,
+            "cuts": [{"id": "c1", "source": "b1.video", "in_sec": 0, "out_sec": 2}],
+        },
+    )
+    job.write(
+        "asset_manifest",
+        {
+            "schema_version": "0.1",
+            "job_id": job.id,
+            "assets": [
+                {
+                    "id": "b1.video",
+                    "kind": "video",
+                    "rights": "owned",
+                    "path": "b1.video.mp4",
+                    "synthetic": True,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        config,
+        "model_for",
+        lambda prov, cap: "custom-judge-haiku" if cap == "judge" else "opus-llm",
+    )
+    studio.replies = [
+        json.dumps(
+            {
+                "version": 3,
+                "policy_risk": "none",
+                "verdict": "ship",
+                "shots": [{"id": "b1", "status": "pass", "moved": True, "region": [0, 0, 1, 1]}],
+            }
+        )
+    ]
+    qa.run(job)
+    judge_calls = [c for c in studio.calls if c["capability"] in ("judge", "llm")]
+    assert len(judge_calls) == 1
+    assert judge_calls[0].get("model") == "custom-judge-haiku"

@@ -38,7 +38,8 @@
             "enum": [
               "pass",
               "warn",
-              "fail"
+              "fail",
+              "unsure"
             ]
           },
           "detail": {

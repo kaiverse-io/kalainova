@@ -144,7 +144,8 @@ def cut_checks(final: Path, em: Fields) -> list[Fields]:
     return [{"id": "edit.cuts", "status": "warn", "detail": detail}]
 
 
-def judge_script(packet: Fields) -> str:
+def judge_script(packet: Fields, exclude_beats: set[str] | None = None) -> str:
+    excluded = exclude_beats or set()
     return str(
         [
             {
@@ -154,6 +155,7 @@ def judge_script(packet: Fields) -> str:
                 "moves": b.get("visual_kind") == "video",
             }
             for b in packet["beats"]
+            if b["id"] not in excluded
         ]
     )
 
@@ -168,6 +170,12 @@ MOTION_FAULTS = {"warping": "warping", "flicker": "flicker", "objects_change": "
 
 def shot_problems(shot: Fields) -> list[str]:
     """What a judge's reading of one shot says is wrong, in the words findings.json uses."""
+    has_loc = bool(
+        shot.get("region")
+        or shot.get("time") is not None
+        or shot.get("timestamp") is not None
+        or shot.get("at_sec") is not None
+    )
     found = [name for key, name in MOTION_FAULTS.items() if shot.get(key) is True]
     if shot.get("moved") is False or shot.get("action_happened") is False:
         found.append("action_missing")
@@ -175,6 +183,8 @@ def shot_problems(shot: Fields) -> list[str]:
         found.append("geometry")
     if shot.get("matches_previous") is False:
         found.append("mismatch")
+    if found and not has_loc:
+        return []
     return found
 
 
@@ -200,15 +210,29 @@ def findings_from_judge(job_id: str, judge: Fields) -> Fields | None:
 
 
 def judged_shots(judge: Fields) -> list[Fields]:
-    bad = [
-        f"{s.get('id')}: {s.get('note') or 'see the sheet'}"
-        for s in judge.get("shots") or []
-        if shot_problems(s)
-    ]
-    if not judge.get("shots"):
+    shots = judge.get("shots") or []
+    if not shots:
         return []
+    checks: list[Fields] = []
+    bad = []
+    unsure_shots = []
+    for s in shots:
+        probs = shot_problems(s)
+        if probs:
+            bad.append(f"{s.get('id')}: {s.get('note') or 'see the sheet'}")
+        elif s.get("status") == "unsure":
+            unsure_shots.append(s.get("id"))
     detail = "; ".join(bad)[:600] or "every shot read as it should"
-    return [{"id": "judge.shots", "status": "warn" if bad else "pass", "detail": detail}]
+    checks.append({"id": "judge.shots", "status": "warn" if bad else "pass", "detail": detail})
+    if unsure_shots:
+        checks.append(
+            {
+                "id": "judge.unsure",
+                "status": "unsure",
+                "detail": f"unsure on shots: {', '.join(str(i) for i in unsure_shots)}",
+            }
+        )
+    return checks
 
 
 def _caption_anchors(path: Path) -> list[float]:

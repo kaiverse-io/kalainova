@@ -153,6 +153,8 @@ def _record_parsers(sub: Any) -> None:
     verdict.add_argument("--reviewer", required=True)
     verdict.add_argument("--shot")
     verdict.add_argument("--take", type=int, help="one take of the shot, such as a bench take")
+    verdict.add_argument("--preferred", type=int, help="take preferred")
+    verdict.add_argument("--over", type=int, help="take preferred over")
     verdict.add_argument("--animatic", action="store_true", help="on the rough cut as a whole")
     verdict.add_argument("--note", default="")
     sub.add_parser("signals")
@@ -287,6 +289,7 @@ def _print_qa(job: Job, final: Path) -> int:
         if check["status"] != "pass":
             print(f"  [{check['status']}] {check['id']}: {check['detail']}")
     print(f"{qachecks.headline(report)}  ->  {final}")
+    print(f'record verdict: kalainova verdict {job.id} accept|fix|reject --reviewer NAME --note ""')
     return 0 if report["passed"] else 2
 
 
@@ -409,6 +412,8 @@ def _verdict(a: argparse.Namespace) -> int:
         shot=a.shot,
         note=a.note,
         take=a.take,
+        preferred=a.preferred,
+        over=a.over,
         animatic=a.animatic,
     )
     print(json.dumps(entry, ensure_ascii=False))

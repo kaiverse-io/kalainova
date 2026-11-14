@@ -27,6 +27,7 @@ EVERY = (
     "separate",
     "graphics",
     "llm",
+    "judge",
     "search",
 )
 
@@ -168,8 +169,18 @@ class Studio(base.Provider):
         return base.Result(path=dst, model="fake-graphics")
 
     def llm(self, prompt, **kw):
-        self._log("llm", prompt=prompt)
-        return base.Result(text=Studio.replies.pop(0), model="fake-llm")
+        self._log("llm", prompt=prompt, **kw)
+        return base.Result(
+            text=Studio.replies.pop(0) if Studio.replies else "{}",
+            model=kw.get("model") or "fake-llm",
+        )
+
+    def judge(self, prompt, **kw):
+        self._log("judge", prompt=prompt, **kw)
+        return base.Result(
+            text=Studio.replies.pop(0) if Studio.replies else "{}",
+            model=kw.get("model") or "fake-judge",
+        )
 
     def search(self, query, *, limit=5, **kw):
         self._log("search", query=query)

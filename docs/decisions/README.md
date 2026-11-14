@@ -20,3 +20,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0014](0014-songs.md) | Songs are takes of a written song, and readings never reject one on taste |
 | [0015](0015-research-with-checked-quotes.md) | A fact is usable when its quote is found in its source |
 | [0016](0016-refinement-ladder-and-layered-qa.md) | A free draft is accepted before anything is paid for, and checks run cheapest first |
+| [0017](0017-autonomy-level-per-review-gate.md) | An autonomy level per review gate |

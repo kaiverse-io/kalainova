@@ -379,6 +379,18 @@ def _check_stream(path: Path, stream: dict, frozen: dict[str, dict]) -> None:
         fail(f"{rel(path)}: stream_id must equal its folder name")
     if "silent" in stream and not isinstance(stream["silent"], bool):
         fail(f"{rel(path)}: silent must be a boolean")
+    autonomy = stream.get("autonomy")
+    if autonomy is not None:
+        if not isinstance(autonomy, dict):
+            fail(f"{rel(path)}: autonomy must be an object")
+        allowed_gates = {"track_pick", "stills", "animatic", "final", "publish"}
+        for gate in sorted(set(autonomy) - allowed_gates):
+            fail(f"{rel(path)}: unknown autonomy gate {gate!r}")
+        for gate in ("track_pick", "stills", "animatic", "final"):
+            if gate in autonomy and autonomy[gate] not in ("human", "by-exception", "audit"):
+                fail(f"{rel(path)}: {gate} autonomy must be human, by-exception, or audit")
+        if "publish" in autonomy and autonomy["publish"] != "human":
+            fail(f"{rel(path)}: publish autonomy must be human")
     has_character = False
     for role, pin in (stream.get("kits") or {}).items():
         if pin not in frozen:

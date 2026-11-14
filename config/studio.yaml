@@ -5,6 +5,7 @@
 
 preference:
   llm: [anthropic]                 # OpenAI-compatible vendors (gemini, groq, openrouter, zai) join once models.<name>.llm is set; add them here
+  judge: [anthropic]
   voice: [elevenlabs, local]
   image: [fal, local]
   video: [fal]
@@ -27,6 +28,7 @@ adapters:
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:
   llm: 660
+  judge: 120
   voice: 180
   image: 960
   video: 1900
@@ -42,6 +44,7 @@ deadlines_sec:
 models:
   anthropic:
     llm: claude-opus-5-5
+    judge: claude-haiku-4-5
   elevenlabs:
     voice: eleven_v4_turbo            # Eleven v4 Turbo: #2 TTS arena, half v4's price. Premium: eleven_v4. VERIFY id in ElevenLabs docs.
     voice_id: JBFqnCBsd6RMkjVDRZzb   # replace with your house voice

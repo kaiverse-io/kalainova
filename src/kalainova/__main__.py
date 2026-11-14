@@ -103,6 +103,7 @@ def _make(a) -> int:
     print(f"{qachecks.headline(report)}  ->  {job.artifact()}")
     _print_bar(report)
     print(f"spent {job.spent():.4f} of cap {job.job.get('cost_cap')}")
+    print(f'record verdict: kalainova verdict {job.id} accept|fix|reject --reviewer NAME --note ""')
     return 0 if report["passed"] else 2
 
 

@@ -84,27 +84,6 @@ def _open_piece(job: Job, force: bool) -> _Piece:
     )
 
 
-def _refuse_over_the_cap(piece: _Piece) -> None:
-    """Say what the moving shots cost, and refuse before any spend if the cap cannot hold it."""
-    cost = preproduction.total_of(preproduction.moving_quotes(piece))
-    if cost is None:
-        return
-    cap = piece.data.get("cost_cap")
-    if cost:
-        print(
-            f"{piece.job.id}: moving shots: about ${cost:.2f} at the takes planned"
-            " (a paid model makes no further take when a reading misses)",
-            file=sys.stderr,
-        )
-    left = None if cap is None else float(cap) - piece.job.committed()
-    if left is not None and cost > left:
-        raise ContractError(
-            f"{piece.job.id}: the moving shots are estimated at ${cost:.2f} and the job has "
-            f"${max(left, 0):.2f} left under its cap; raise cost_cap, or set brief.max_video_beats "
-            "to move fewer shots"
-        )
-
-
 def _review_the_plan(piece: _Piece, *, hold_to_the_cap: bool = True) -> None:
     """Warn about what can be made badly, and refuse what cannot be made, before any spend."""
     found = shots.review(
@@ -125,7 +104,7 @@ def _review_the_plan(piece: _Piece, *, hold_to_the_cap: bool = True) -> None:
             f"{piece.job.id}: the plan cannot be made as written: " + "; ".join(refused)
         )
     if hold_to_the_cap:
-        _refuse_over_the_cap(piece)
+        preproduction.refuse_over_the_cap(piece)
 
 
 # ------------------------------------------------------------------ voice
@@ -382,6 +361,12 @@ def _make_pictures(piece: _Piece) -> None:
             _chained_still(piece, beat, previous, still)
         else:
             _new_still(piece, i, beat, prompt, still)
+        still_refusal = preproduction.still_judge_refusal(piece.job, beat, still)
+        if still_refusal:
+            piece.breaks.append({"beat_id": beat["id"], "reason": still_refusal})
+            print(f"{piece.job.id}: {beat['id']}: {still_refusal}", file=sys.stderr)
+            previous = None
+            continue
         previous = _moving_shot(piece, beat, still, prompt, span)
 
 

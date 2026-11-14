@@ -38,7 +38,7 @@ DEFAULTS: dict[str, dict[str, str]] = {
 class OpenAICompat(Provider):
     """Text and vision through any OpenAI-compatible chat endpoint."""
 
-    capabilities = ("llm",)
+    capabilities = ("llm", "judge")
     synthetic = False
 
     def __init__(self, name: str, base_url: str, env_key: str) -> None:
@@ -95,6 +95,8 @@ class OpenAICompat(Provider):
             "completion_tokens", 0
         ) / 1e6 * p.get("output_per_mtok", 0)
         return Result(text=text, cost=cost, model=str(model), meta={"usage": u})
+
+    judge = llm
 
 
 def _vendors() -> dict[str, dict[str, str]]:
