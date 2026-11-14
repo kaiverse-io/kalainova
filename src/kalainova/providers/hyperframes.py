@@ -23,7 +23,7 @@ class HyperFrames(Provider):
     free = True
     synthetic = False  # drawn from a composition, not generated
 
-    def missing_env(self) -> list[str]:
+    def missing_env(self, capability: str = "") -> list[str]:
         return [] if shutil.which("npx") else ["npx (Node 22 or newer)"]
 
     def graphics(self, folder: Path, dst: Path, **kw: Any) -> Result:

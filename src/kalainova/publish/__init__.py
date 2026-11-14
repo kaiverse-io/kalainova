@@ -211,6 +211,11 @@ def approve(
     stream = _stream_of(job)
     if stream:
         _kit_bound(job, stream)
+        if stream.get("engine_version"):
+            from .. import fingerprint
+
+            fp = job.job.get("fingerprint") or fingerprint.fingerprint()
+            fingerprint.verify({"fingerprint": fp}, stream["engine_version"])
         if not _is_restricted(stream):
             for platform in platforms:
                 _account(job, stream, platform)

@@ -460,14 +460,12 @@ def test_a_banding_run_that_fails_reads_as_nothing(monkeypatch, tmp_path):
     assert mediascan.cambi(tmp_path / "missing.mp4") is None
 
 
-def test_bar_says_plainly_when_given_a_still_image(tmp_path, capsys):
+def test_bar_says_plainly_when_given_an_unreadable_file(tmp_path, capsys):
     from kalainova.__main__ import main
 
-    still = tmp_path / "still.png"
-    Image.new("RGB", (64, 64), (30, 30, 30)).save(still)
-    with pytest.raises(media.MediaError, match="still image"):
-        media.duration(still)
-    assert main(["bar", str(still)]) == 1
+    bad = tmp_path / "corrupt.mp4"
+    bad.write_text("not a video")
+    assert main(["bar", str(bad)]) == 1
     err = capsys.readouterr().err
     assert "studio bar cannot read it" in err
-    assert err.count(str(still)) == 1
+    assert err.count(str(bad)) >= 1

@@ -1,6 +1,6 @@
 # 0016. A free draft is accepted before anything is paid for, and checks run cheapest first
 
-Status: proposed · 2026-11-12, rewritten 2026-11-13.
+Status: accepted · 2026-11-13.
 
 ## Context
 

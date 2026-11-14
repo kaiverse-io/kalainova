@@ -75,8 +75,8 @@ def _usable(capability: str, names: list[str]) -> tuple[list[base.Provider], lis
             continue
         if capability not in p.capabilities:
             skipped.append(f"{name}: no {capability}")
-        elif not p.available():
-            skipped.append(f"{name}: missing {', '.join(p.missing_env())}")
+        elif not p.available(capability):
+            skipped.append(f"{name}: missing {', '.join(p.missing_env(capability))}")
         else:
             usable.append(p)
     return usable, skipped

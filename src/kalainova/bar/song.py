@@ -22,8 +22,11 @@ from .sound import (
     clipped_share,
     dc_offset,
     ending_drop_db,
+    groove_steadiness,
     hard_cuts_per_min,
     longest_digital_silence,
+    mix_balance,
+    pitch_snapping,
     stereo_correlation,
 )
 
@@ -85,6 +88,7 @@ def words_found(lines: list[str], heard: list[Word]) -> float:
 def _sound_readings(path: Path) -> list[Reading]:
     left, right, sr = media.decode_stereo(path)
     mono = (left + right) / 2
+    mix = mix_balance(left, right, sr)
     return [
         at_most("audio.clipping", clipped_share(mono), "clipped_share_max", blocks=True),
         at_most("audio.dc_offset", dc_offset(mono), "dc_offset_max"),
@@ -96,6 +100,12 @@ def _sound_readings(path: Path) -> list[Reading]:
             "digital_silence_sec_max",
         ),
         at_most("audio.ending_drop_db", ending_drop_db(mono, sr), "ending_drop_db_max"),
+        at_least(
+            "audio.groove_steadiness", groove_steadiness(mono, sr), "audio_groove_steadiness_min"
+        ),
+        at_most("audio.pitch_snapping", pitch_snapping(mono, sr), "audio_pitch_snapping_max"),
+        at_least("audio.crest_factor", mix["crest_factor_db"], "audio_crest_factor_min"),
+        at_least("audio.stereo_width", mix["stereo_width"], "audio_stereo_width_min"),
     ]
 
 

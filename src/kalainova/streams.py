@@ -151,6 +151,8 @@ def _job_record(
     stream: Stream, job_id: str, brief: str, cast: list[str], fmt: dict[str, Any]
 ) -> dict[str, Any]:
     pins = stream.get("generators") or {}
+    from . import fingerprint
+
     record: dict[str, Any] = {
         "schema_version": "0.1",
         "job_id": job_id,
@@ -164,6 +166,7 @@ def _job_record(
         "cast": cast,
         "brief": {"subject": brief},
         "providers": {cap: [pin["provider"]] for cap, pin in pins.items()},
+        "fingerprint": fingerprint.fingerprint(),
     }
     if stream.get("skip_funded"):
         record["skip_funded"] = True

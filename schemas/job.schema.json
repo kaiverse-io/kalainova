@@ -226,6 +226,22 @@
         "type": "string"
       },
       "description": "Character roles from the stream that appear in this job."
+    },
+    "fingerprint": {
+      "type": "object",
+      "description": "Engine and configuration fingerprint recorded for this job.",
+      "required": ["engine_version", "git_sha", "prompts_hash", "config_hash"],
+      "additionalProperties": true,
+      "properties": {
+        "engine_version": {"type": "string"},
+        "git_sha": {"type": "string"},
+        "prompts_hash": {"type": "string"},
+        "config_hash": {"type": "string"},
+        "models": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
     }
   }
 }

@@ -77,12 +77,15 @@ class Provider:
     # call that runs out can really be stopped. Python cannot kill a worker thread.
     self_timed = False
 
-    def missing_env(self) -> list[str]:
+    def missing_env(self, capability: str = "") -> list[str]:
         needed = ((self.env_key,) if self.env_key else ()) + tuple(self.env_keys)
         return [key for key in needed if not os.environ.get(key)]
 
-    def available(self) -> bool:
-        return not self.missing_env()
+    def available(self, capability: str = "") -> bool:
+        try:
+            return not self.missing_env(capability)
+        except TypeError:
+            return not self.missing_env()
 
     def price_key(self, capability: str, request: dict) -> str:
         """The row in config/studio.yaml that prices this request."""
