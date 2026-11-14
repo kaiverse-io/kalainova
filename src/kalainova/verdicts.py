@@ -198,8 +198,9 @@ def samples(jobs_root: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for folder in sorted(p for p in jobs_root.iterdir() if p.is_dir()):
         for entry in load(folder):
-            if entry.get("stage") == "animatic":
-                continue  # a rough cut's verdict says nothing about what the bar reads on the piece
+            if entry.get("stage") == "animatic" or entry.get("preferred") is not None:
+                # Neither rough-cut verdicts nor preferences between takes are binary samples.
+                continue
             shot = entry.get("shot")
             if shot:
                 found = _shot_points(folder, shot, entry["verdict"], entry.get("take"))

@@ -440,23 +440,31 @@ def still_judge_refusal(job: Job, beat: Fields, still: Path) -> str | None:
     has_region = bool(data.get("region"))
     if is_bad and has_region:
         note = str(data.get("note") or f"still {bid} flagged by judge")
-        finding = {
+        shot_finding = {
+            "id": bid,
+            "problems": ["geometry" if data.get("anatomy_ok") is False else "mismatch"],
+            "note": note,
+            **(
+                {"suggested_prompt_change": str(data["retake_prompt"])}
+                if data.get("retake_prompt")
+                else {}
+            ),
+        }
+        existing = job.read("findings") if job.has("findings") else None
+        if existing and existing.get("source") != "judge":
+            return f"still flagged by judge: {note}"
+        finding = existing or {
             "schema_version": "0.1",
             "job_id": job.id,
             "source": "judge",
-            "shots": [
-                {
-                    "id": bid,
-                    "problems": ["geometry" if data.get("anatomy_ok") is False else "mismatch"],
-                    "note": note,
-                    **(
-                        {"suggested_prompt_change": str(data["retake_prompt"])}
-                        if data.get("retake_prompt")
-                        else {}
-                    ),
-                }
-            ],
+            "shots": [],
         }
+        shots = finding.setdefault("shots", [])
+        prior = next((shot for shot in shots if shot.get("id") == bid), None)
+        if prior is None:
+            shots.append(shot_finding)
+        else:
+            prior.update(shot_finding)
         job.write("findings", finding)
         return f"still flagged by judge: {note}"
     return None

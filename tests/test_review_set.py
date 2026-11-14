@@ -85,6 +85,7 @@ def test_a_preference_between_two_takes_round_trips_and_appears_in_review_set(
     assert "preferred 2 over 1" in text
     assert "note: better rhythm" in text
     assert "p1" in text
+    assert verdicts.samples(tmp_path / "jobs") == []
 
 
 def test_a_preference_naming_a_take_that_does_not_exist_is_refused(tmp_path, monkeypatch):

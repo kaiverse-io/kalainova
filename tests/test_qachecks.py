@@ -333,6 +333,68 @@ def test_a_still_the_fake_judge_flags_is_reported_at_stills_stage_before_any_vid
     assert len(video_calls) == 0
 
 
+def test_still_judge_keeps_findings_for_each_flagged_still(tmp_path, monkeypatch):
+    from fakes import make_job
+
+    from kalainova import preproduction
+
+    job = make_job(tmp_path)
+    replies = iter(
+        [
+            {"passed": False, "anatomy_ok": False, "region": [0.1], "note": "bad hand"},
+            {"passed": False, "cue_ok": False, "region": [0.2], "note": "wrong room"},
+        ]
+    )
+    monkeypatch.setattr(preproduction.router, "available", lambda *_: True)
+    monkeypatch.setattr(preproduction.config, "preference", lambda *_: None)
+    monkeypatch.setattr(preproduction.config, "model_for", lambda *_: "judge-model")
+    monkeypatch.setattr(
+        preproduction.router,
+        "generate",
+        lambda *_args, **_kwargs: (None, type("Reply", (), {"text": json.dumps(next(replies))})()),
+    )
+
+    for beat_id in ("b1", "b2"):
+        refusal = preproduction.still_judge_refusal(
+            job,
+            {"id": beat_id, "visual_kind": "video", "text": "A line."},
+            tmp_path / f"{beat_id}.png",
+        )
+        assert refusal and "still flagged by judge" in refusal
+
+    assert {shot["id"] for shot in job.read("findings")["shots"]} == {"b1", "b2"}
+
+
+def test_still_judge_does_not_replace_findings_from_another_source(tmp_path, monkeypatch):
+    from fakes import make_job
+
+    from kalainova import preproduction
+
+    job = make_job(tmp_path)
+    existing = {
+        "schema_version": "0.1",
+        "job_id": job.id,
+        "source": "agent",
+        "shots": [{"id": "b0", "problems": ["mismatch"], "note": "existing"}],
+    }
+    job.write("findings", existing)
+    monkeypatch.setattr(preproduction.router, "available", lambda *_: True)
+    monkeypatch.setattr(preproduction.config, "preference", lambda *_: None)
+    monkeypatch.setattr(preproduction.config, "model_for", lambda *_: "judge-model")
+    reply = {"passed": False, "anatomy_ok": False, "region": [0.1], "note": "bad hand"}
+    monkeypatch.setattr(
+        preproduction.router,
+        "generate",
+        lambda *_args, **_kwargs: (None, type("Reply", (), {"text": json.dumps(reply)})()),
+    )
+
+    preproduction.still_judge_refusal(
+        job, {"id": "b1", "visual_kind": "video", "text": "A line."}, tmp_path / "b1.png"
+    )
+
+    assert job.read("findings") == existing
+
+
 @needs_ffmpeg
 def test_the_judge_uses_the_judge_model_when_configured(tmp_path, studio, monkeypatch):
     from fakes import make_job
