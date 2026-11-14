@@ -38,7 +38,7 @@ DEFAULTS: dict[str, dict[str, str]] = {
 class OpenAICompat(Provider):
     """Text and vision through any OpenAI-compatible chat endpoint."""
 
-    capabilities = ("llm", "judge")
+    capabilities = ("llm",)
     synthetic = False
 
     def __init__(self, name: str, base_url: str, env_key: str) -> None:

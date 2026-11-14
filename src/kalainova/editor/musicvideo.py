@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .. import config, consistency, media, shots, streams
+from .. import config, consistency, media, shots, streams, takes
 from ..jobfs import ContractError, Job, open_child
 from ..providers import router
 from . import musiccuts as mc
@@ -210,7 +210,13 @@ def build(
     )
 
     length = media.duration(final)
-    found = mc.analyse(final, length)
+    take = takes.chosen(job, "song")
+    saved_grid = None
+    if take:
+        gp = (job.work / take["file"]).with_suffix(".grid.json")
+        if gp.exists():
+            saved_grid = json.loads(gp.read_text())
+    found = mc.analyse(final, length, saved_grid=saved_grid)
     by_music = len(cues) < FEW_CUES
     if by_music:
         mc.refuse_if_unclear(found, "cannot cut this track to its music")

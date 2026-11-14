@@ -460,18 +460,21 @@ def _write_manifest(piece: _Piece, total: float) -> Fields:
     return manifest
 
 
+_refuse_over_the_cap = preproduction.refuse_over_the_cap
+
+
 def run(job: Job, *, force: bool = False, animatic: bool = False) -> Fields:
     """Make the assets. With animatic, only the voice and the stills, and no video is asked for."""
     if animatic:
         return _run_animatic(job, force)
     if job.has("asset_manifest") and not force:
         return job.read("asset_manifest")
-    preproduction.require_review(job)
     (job.work / "beats").mkdir(exist_ok=True)
     if force:
         takes.forget(job)
     piece = _open_piece(job, force)
     _review_the_plan(piece)
+    preproduction.require_review(job)
     if piece.resolved:
         consistency.check_script(job, piece.resolved, piece.packet, piece.lock.get("cast", []))
     total = _make_voice(piece)

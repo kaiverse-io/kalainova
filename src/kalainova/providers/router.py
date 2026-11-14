@@ -19,11 +19,14 @@ import json
 import os
 import sys
 import threading
+import time
 import uuid
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .. import config, media
+from .. import config, media, trace
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
 from . import base
@@ -41,7 +44,7 @@ OUTPUT_ARG = {
     "graphics": 1,
 }
 # OSError covers connection, timeout, and HTTP errors. ValueError, KeyError, and IndexError cover a malformed reply.
-PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError)
+PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError, base.RefusalError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = "generations.jsonl"
 PICTURE_OUTPUTS = ("image", "video", "lipsync", "graphics")
@@ -218,6 +221,36 @@ def _record(job: Job, key: str, provider: base.Provider, res: base.Result, dst: 
             fh.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
 
 
+def _trace_attempt(
+    job: Job,
+    capability: str,
+    provider: base.Provider,
+    started_at: str,
+    started: float,
+    *,
+    outcome: str,
+    estimate: float | None,
+    settled: float = 0.0,
+    model_version: str | None = None,
+    error_class: str | None = None,
+) -> None:
+    """Telemetry is best-effort and must not change the provider call's result."""
+    with suppress(Exception):
+        trace.record(
+            job,
+            capability=capability,
+            provider=provider.name,
+            model=config.model_for(provider.name, capability),
+            model_version=model_version,
+            started_at=started_at,
+            elapsed_sec=time.monotonic() - started,
+            outcome=outcome,
+            estimated_cost=estimate or 0.0,
+            settled_cost=settled,
+            error_class=error_class,
+        )
+
+
 def generate(
     job: Job,
     capability: str,
@@ -269,11 +302,24 @@ def generate(
             call_args[OUTPUT_ARG[capability]] = attempt
         limit = _deadline(capability)
         call_kw = {**kw, "deadline_sec": limit} if p.self_timed else kw
+        started = time.monotonic()
+        started_at = datetime.now(UTC).isoformat()
         try:
             res = _call(
                 getattr(p, fn_name), tuple(call_args), call_kw, None if p.self_timed else limit
             )
         except TimeoutError as exc:  # ours, or an adapter's own wait: either may have been billed
+            _trace_attempt(
+                job,
+                capability,
+                p,
+                started_at,
+                started,
+                outcome="timeout",
+                estimate=estimate,
+                settled=estimate or 0.0,
+                error_class=type(exc).__name__,
+            )
             job.charge(
                 p.name,
                 capability,
@@ -283,7 +329,32 @@ def generate(
             )
             errors.append(f"{p.name}: {exc}")
             continue
+        except base.RefusalError as exc:
+            _trace_attempt(
+                job,
+                capability,
+                p,
+                started_at,
+                started,
+                outcome="refused",
+                estimate=estimate,
+                error_class=type(exc).__name__,
+            )
+            job.release(reservation)
+            errors.append(f"{p.name}: {type(exc).__name__}: {str(exc)[:300]}")
+            continue
         except base.BilledError as exc:
+            _trace_attempt(
+                job,
+                capability,
+                p,
+                started_at,
+                started,
+                outcome="error",
+                estimate=estimate,
+                settled=exc.billed,
+                error_class=type(exc).__name__,
+            )
             job.charge(
                 p.name,
                 capability,
@@ -297,6 +368,16 @@ def generate(
             if isinstance(exc, ContractError):  # a rule the engine set, not a vendor's failure
                 job.release(reservation)
                 raise
+            _trace_attempt(
+                job,
+                capability,
+                p,
+                started_at,
+                started,
+                outcome="error",
+                estimate=estimate,
+                error_class=type(exc).__name__,
+            )
             job.release(reservation)
             errors.append(f"{p.name}: {type(exc).__name__}: {str(exc)[:300]}")
             continue
@@ -330,5 +411,16 @@ def generate(
                 f"{job.id}: {capability}: used {p.name} after: {'; '.join(errors)}", file=sys.stderr
             )
         job.charge(p.name, capability, res.cost, note or fn_name, reservation)
+        _trace_attempt(
+            job,
+            capability,
+            p,
+            started_at,
+            started,
+            outcome="ok",
+            estimate=estimate,
+            settled=res.cost,
+            model_version=getattr(res, "version", None),
+        )
         return p, res
     raise ProviderError(f"{job.id}: every provider failed for {capability}: {'; '.join(errors)}")

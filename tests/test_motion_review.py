@@ -87,7 +87,7 @@ def test_the_rubric_asks_about_motion_and_a_versioned_answer():
     from kalainova import prompts
 
     text = prompts.load("qa_rubric").format(shape="vertical", script="[]")
-    for word in ("warping", "flicker", "action_happened", '"version": 2', "retake_prompt"):
+    for word in ("warping", "flicker", "action_happened", '"version": 3', "retake_prompt"):
         assert word in text
 
 
@@ -95,8 +95,14 @@ def test_a_judges_motion_faults_become_findings_a_retake_can_read():
     judge = {
         "shots": [
             {"id": "b1", "moved": True, "geometry_ok": True, "warping": False},
-            {"id": "b2", "moved": True, "warping": True, "retake_prompt": "Keep the face still."},
-            {"id": "b3", "action_happened": False, "note": "nothing happens"},
+            {
+                "id": "b2",
+                "moved": True,
+                "warping": True,
+                "time": 1.0,
+                "retake_prompt": "Keep the face still.",
+            },
+            {"id": "b3", "action_happened": False, "time": 2.0, "note": "nothing happens"},
         ]
     }
     found = qachecks.findings_from_judge("p1", judge)
@@ -117,9 +123,20 @@ def test_qa_sends_the_judge_the_motion_strip_and_keeps_its_findings(tmp_path, st
     render.compile_plan(job)
     render.execute(job)
     seen = {}
-    reply = {"version": 2, "verdict": "ship", "policy_risk": "none",
-             "shots": [{"id": "b2", "flicker": True, "note": "strobing",
-                        "retake_prompt": "Steady light."}]}  # fmt: skip
+    reply = {
+        "version": 3,
+        "policy_risk": "none",
+        "verdict": "ship",
+        "shots": [
+            {
+                "id": "b2",
+                "flicker": True,
+                "time": 0.5,
+                "note": "strobing",
+                "retake_prompt": "Steady light.",
+            }
+        ],
+    }
 
     def judged(job_, capability, fn, text, **kw):
         if kw.get("note") == "qa-judge":

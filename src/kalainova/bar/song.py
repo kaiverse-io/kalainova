@@ -18,7 +18,14 @@ import numpy as np
 from .. import media
 from ..editor import beats
 from .readings import Reading, at_least, at_most, summarise
-from .sound import clipped_share, dc_offset, ending_drop_db, stereo_correlation
+from .sound import (
+    clipped_share,
+    dc_offset,
+    ending_drop_db,
+    hard_cuts_per_min,
+    longest_digital_silence,
+    stereo_correlation,
+)
 
 Song = dict[str, Any]
 Word = dict[str, Any]
@@ -82,6 +89,13 @@ def _sound_readings(path: Path) -> list[Reading]:
         at_most("audio.clipping", clipped_share(mono), "clipped_share_max", blocks=True),
         at_most("audio.dc_offset", dc_offset(mono), "dc_offset_max"),
         at_least("audio.mono_safe", stereo_correlation(left, right), "stereo_correlation_min"),
+        at_most("audio.hard_cuts_per_min", hard_cuts_per_min(mono, sr), "hard_cuts_per_min_max"),
+        at_most(
+            "audio.digital_silence_sec",
+            longest_digital_silence(mono[sr // 4 : -sr // 4], sr),
+            "digital_silence_sec_max",
+        ),
+        at_most("audio.ending_drop_db", ending_drop_db(mono, sr), "ending_drop_db_max"),
     ]
 
 
@@ -123,8 +137,6 @@ def master_readings(path: Path, target: float, ceiling: float) -> list[dict[str,
     """The finished file against its own targets. These do block: a wrong level is not taste."""
     loud = media.loudness(path)
     level, peak = loud["integrated_lufs"], loud["true_peak_dbtp"]
-    left, right, sr = media.decode_stereo(path)
-    mono = (left + right) / 2
     readings = [
         Reading(
             "song.loudness",
@@ -140,6 +152,5 @@ def master_readings(path: Path, target: float, ceiling: float) -> list[dict[str,
             peak is not None and peak <= ceiling + 0.3,
             True,
         ),
-        at_most("audio.ending_drop_db", ending_drop_db(mono, sr), "ending_drop_db_max"),
     ]
     return [asdict(r) for r in readings]

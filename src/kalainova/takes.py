@@ -107,6 +107,9 @@ def record(job: Job, shot: str, take: Take) -> dict[str, Any]:
     )
     entry["takes"] = [t for t in entry["takes"] if t["n"] != take["n"]] + [take]
     entry["takes"].sort(key=lambda t: t["n"])
+    if entry["chosen_by"] != "human":
+        passed = any(t["ok"] for t in entry["takes"] if not t.get("bench"))
+        entry["chosen_by"] = "reading" if passed else "none_passed"
     if entry["chosen_by"] != "human" and not (take.get("bench") and len(entry["takes"]) > 1):
         # someone asked for this take because they saw what a reading cannot, so it is used if it
         # reads well, even when an earlier take reads just as well

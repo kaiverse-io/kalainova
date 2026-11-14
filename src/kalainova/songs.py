@@ -11,6 +11,7 @@ from __future__ import annotations
 import difflib
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -250,13 +251,43 @@ def _finish(job: Job, take_file: Path, song: Song) -> Path:
     prof = config.profile("song")
     target = float(prof.get("target_lufs", -14))
     ceiling = float(prof.get("true_peak_dbtp_max", -1))
-    length = media.duration(take_file)
-    fade = min(FADE_SEC, length / 4)
+    _, end = _sounding_span(take_file)
+    grid_path = take_file.with_suffix(".grid.json")
+    if grid_path.exists():
+        grid = json.loads(grid_path.read_text())
+    else:
+        from .editor import musiccuts
+
+        grid = musiccuts.analyse(take_file, media.duration(take_file))
+    bars = [float(at) for at in grid.get("bars", []) if float(at) <= end]
+    if len(bars) >= 2:
+        bar_interval = float(np.median(np.diff(bars)))
+        if bars[-1] + bar_interval <= end + 0.05:
+            cut_at = bars[-1] + bar_interval
+        else:
+            cut_at = bars[-1]
+        fade = min(2 * bar_interval, cut_at)
+    else:
+        cut_at = end
+        fade = min(FADE_SEC, end / 4)
+    fade_start = max(cut_at - fade, 0.0)
     cleaned = job.work / "song.clean.wav"
     media.run(
-        ["-i", str(take_file),
-         "-af", f"highpass=f=25,afade=t=out:st={length - fade:.3f}:d={fade:.3f}",
-         "-ar", "48000", "-ac", "2", "-c:a", "pcm_s24le", str(cleaned)]
+        [
+            "-i",
+            str(take_file),
+            "-t",
+            f"{cut_at:.3f}",
+            "-af",
+            f"highpass=f=25,afade=t=out:st={fade_start:.3f}:d={fade:.3f}",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-c:a",
+            "pcm_s24le",
+            str(cleaned),
+        ]
     )  # fmt: skip
     final = job.work / "final.wav"
     media.master_loudness(cleaned, final, target, ceiling)
@@ -304,6 +335,20 @@ def run(job: Job) -> Path:
     )
     take = _generate(job, song, brief)
     take_file = job.work / take["file"]
+    from .editor import musiccuts
+
+    grid = musiccuts.analyse(take_file, media.duration(take_file))
+    lyric_cues = timed_lines(take_file, song, _heard(job, take_file))[0]
+    grid.update(
+        section_boundaries=musiccuts.section_boundaries(song.get("sections") or []),
+        timed_lyrics_cues=lyric_cues,
+    )
+    take_file.with_suffix(".grid.json").write_text(json.dumps(grid))
+    if takes.load(job)["shots"][SHOT]["chosen_by"] == "none_passed":
+        print(
+            f"{job.id}: song: no take passed QA readings; using take {take['n']} as candidate",
+            file=sys.stderr,
+        )
     final = _finish(job, take_file, song)
     cues, timing = timed_lines(final, song, _heard(job, take_file))
     _write_lyric_files(job, song, cues)

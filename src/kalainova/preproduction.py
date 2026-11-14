@@ -118,6 +118,8 @@ def gate_active(job: Job) -> bool:
     if "video" not in (data.get("media") or []):
         return False
     brief = data.get("brief") or {}
+    if brief.get("max_video_beats") == 0:
+        return False
     setting = brief.get("animatic_gate")
     if setting is False:
         return False

@@ -50,6 +50,10 @@ class BilledError(RuntimeError):
         self.billed = billed
 
 
+class RefusalError(RuntimeError):
+    """The model or provider declined the request under its policy."""
+
+
 @dataclass
 class Result:
     path: Path | None = None

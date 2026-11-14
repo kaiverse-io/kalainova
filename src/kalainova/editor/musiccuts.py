@@ -28,9 +28,14 @@ HIGH_PHRASE_BARS, LOW_PHRASE_BARS = 4, 8
 WINDOW_DROP_AT = 0.4  # where in an excerpt the rise sits: some build-up first, then the payoff
 
 
-def analyse(path: Path, length: float, bar_beats: int = BAR_BEATS) -> Analysis:
-    grid = beat_tools.beat_grid(path, length)
-    beats = [float(b) for b in grid["beats"]]
+def analyse(
+    path: Path,
+    length: float,
+    bar_beats: int = BAR_BEATS,
+    saved_grid: dict[str, Any] | None = None,
+) -> Analysis:
+    grid = saved_grid if saved_grid is not None else beat_tools.beat_grid(path, length)
+    beats = [float(b) for b in grid["beats"] if float(b) <= length]
     env = beat_tools.onset_envelope(beat_tools._pcm(path))
     fps = beat_tools.SR / beat_tools.HOP
     env = np.concatenate([np.zeros(LAG_FRAMES), env])  # frame n now stamps time n/fps

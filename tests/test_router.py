@@ -9,7 +9,7 @@ import time
 import pytest
 from PIL import Image
 
-from kalainova import media
+from kalainova import media, trace
 from kalainova.jobfs import CostCapExceeded, Job
 from kalainova.providers import base, router
 
@@ -90,6 +90,16 @@ class Impatient(Flaky):
         raise TimeoutError("the model did not answer")
 
 
+class Refusing(Flaky):
+    name = "refusing"
+    calls = 0
+    fails = None
+
+    def llm(self, prompt, **kw):
+        type(self).calls += 1
+        raise base.RefusalError("request declined")
+
+
 class Hung(Flaky):
     name = "hung"
     calls = 0
@@ -108,6 +118,7 @@ PRICES = {
     "hung": {"image": {"per_image": 1.0}},
     "impatient": {"image": {"per_image": 1.0}},
     "priced": {"transcribe": {"per_min": 0.5}},
+    "refusing": {"llm": {"input_per_mtok": 1.0}},
 }
 
 
@@ -115,7 +126,7 @@ PRICES = {
 def providers(monkeypatch, tmp_path):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     base.names()
-    for cls in (Flaky, Backup, Placeholder, Hung, Impatient, Priced):
+    for cls in (Flaky, Backup, Placeholder, Hung, Impatient, Priced, Refusing):
         cls.calls = 0
         cls.fails = None
         cls.wrong_size = cls.corrupt = cls.blank = False
@@ -155,6 +166,36 @@ def job_with(tmp_path, order, cap=None):
 
 def image(job, name="a.png", prompt="p", **kw):
     return router.generate(job, "image", "image", prompt, job.work / name, **kw)
+
+
+def test_a_call_writes_a_trace_row(tmp_path):
+    job = job_with(tmp_path, ["flaky"])
+    router.generate(job, "llm", "llm", "say hello")
+    rows = trace.load(job)
+    assert len(rows) == 1
+    assert rows[0]["capability"] == "llm"
+    assert rows[0]["provider"] == "flaky"
+    assert rows[0]["outcome"] == "ok"
+    assert rows[0]["settled_cost"] == 1.0
+
+
+def test_a_refused_call_writes_refused(tmp_path):
+    job = job_with(tmp_path, ["refusing"])
+    with pytest.raises(router.ProviderError, match="request declined"):
+        router.generate(job, "llm", "llm", "say hello")
+    assert trace.load(job)[0]["outcome"] == "refused"
+
+
+def test_a_trace_write_that_raises_does_not_fail_the_call(tmp_path, monkeypatch):
+    job = job_with(tmp_path, ["flaky"])
+
+    def fail(*args, **kwargs):
+        raise OSError("trace storage unavailable")
+
+    monkeypatch.setattr(trace, "record", fail)
+    provider, result = router.generate(job, "llm", "llm", "say hello")
+    assert provider.name == "flaky"
+    assert result.text == "ok"
 
 
 def test_a_pinned_provider_fails_the_job_and_nothing_is_substituted(tmp_path):

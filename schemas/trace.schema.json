@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kalainova/trace-0.1.json",
+  "title": "Trace Row",
+  "description": "One router call's recorded telemetry in trace.jsonl.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "started_at",
+    "elapsed_sec",
+    "capability",
+    "provider",
+    "model",
+    "outcome"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "stage": {
+      "type": "string"
+    },
+    "capability": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "model_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "started_at": {
+      "type": "string"
+    },
+    "elapsed_sec": {
+      "type": "number",
+      "minimum": 0
+    },
+    "outcome": {
+      "enum": [
+        "ok",
+        "refused",
+        "timeout",
+        "error"
+      ]
+    },
+    "error_class": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "estimated_cost": {
+      "type": "number",
+      "minimum": 0
+    },
+    "settled_cost": {
+      "type": "number",
+      "minimum": 0
+    },
+    "units": {
+      "type": "object"
+    }
+  }
+}

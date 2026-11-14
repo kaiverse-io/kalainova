@@ -21,3 +21,5 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0015](0015-research-with-checked-quotes.md) | A fact is usable when its quote is found in its source |
 | [0016](0016-refinement-ladder-and-layered-qa.md) | A free draft is accepted before anything is paid for, and checks run cheapest first |
 | [0017](0017-autonomy-level-per-review-gate.md) | An autonomy level per review gate |
+| [0018](0018-stream-alternate-provider-and-model.md) | A stream may name one alternate provider and model |
+| [0019](0019-self-hosted-models-workflow-runtime.md) | Self-hosted models through one workflow runtime |
