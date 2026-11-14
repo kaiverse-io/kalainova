@@ -408,6 +408,8 @@ def video_job(
     still_only: bool = False,
     excerpt: dict[str, Any] | None = None,
     phrase_bars: int | None = None,
+    stream: str | None = None,
+    cast: list[str] | None = None,
 ) -> Path:
     """Open a job that cuts a video to this song: every shot on a beat, the lyrics as captions.
 
@@ -436,4 +438,6 @@ def video_job(
         still_only=still_only,
         excerpt=excerpt,
         phrase_bars=phrase_bars,
+        stream=stream,
+        cast=cast,
     )

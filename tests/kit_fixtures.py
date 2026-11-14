@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from PIL import Image
 
-from kalainova import kits, streams
+from kalainova import kits, media, streams
 from kalainova.providers import base
 
 
@@ -32,11 +32,23 @@ class Stub(base.Provider):
 
     def image(self, prompt, dst, *, width, height, **kw):
         Stub.calls.append({"capability": "image", "prompt": prompt, **kw})
-        Image.new("RGB", (width, height)).save(dst, format="PNG")
+        Image.linear_gradient("L").resize((width, height)).convert("RGB").save(dst, format="PNG")
         return base.Result(path=dst, model=kw.get("model") or "stub-plain")
 
     def video(self, prompt, dst, *, duration, aspect, image=None, **kw):
-        return self._note("video", dst, prompt, {"image": image, **kw})
+        Stub.calls.append({"capability": "video", "prompt": prompt, "image": image, **kw})
+        media.run(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc2=s=320x180:d={duration + 0.5:.2f}:r=24",
+                "-pix_fmt",
+                "yuv420p",
+                str(dst),
+            ]
+        )
+        return base.Result(path=dst, model=kw.get("model") or "stub-video")
 
     def music(self, prompt, dst, *, duration, **kw):
         return self._note("music", dst, prompt, kw)
