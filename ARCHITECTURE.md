@@ -471,7 +471,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ verdicts ──▶ bar, media, jobfs
     ├─▶ publish ───▶ blobstore, consistency, preproduction, streams, stock
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
-    ├─▶ song_repair ─▶ jobfs, takes, providers, songs
+    ├─▶ song_repair ─▶ config, media, jobfs, takes, bar, providers, songs
     ├─▶ intake ────▶ media, render
     ├─▶ variants ──▶ jobfs
     ├─▶ templates ─▶ jobfs
@@ -559,7 +559,7 @@ A camera test: one shot made on several models from the same start frame, prompt
 One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A first run and a retake share this code, so they keep the same promise and the same record. A retake is refused past the take limits (`takes.check_retake`), and with no note it reads that shot's finding from `findings.json`.
 
 ### preproduction
-The rough cut before the money, and the gate on it. The assets stage, run with `animatic`, makes the voice and one still per shot and asks for no video. This module prices each moving shot (`moving_quotes`, per shot, at the length asked for), draws the stills under a camera move with the words and the voice into `animatic.mp4` stamped ANIMATIC, and writes `animatic.json`. `require_review` is the gate: with `brief.animatic_gate` set, the assets stage refuses before any spend unless the job's `animatic_reviewed` is an `accept` for the cut that exists now. `publish` refuses an animatic by name and by hash. Depends on `media`, `motion`, `shotmake`, `takes`, `timeline`, and `providers`.
+The rough cut before the money, and the gate on it. The assets stage, run with `animatic`, makes the voice and one still per shot and asks for no video. This module prices each moving shot (`moving_quotes`, per shot, at the length asked for), draws the stills under a camera move with the words and the voice into `animatic.mp4` stamped ANIMATIC, and writes `animatic.json`. `require_review` is the gate: with `brief.animatic_gate` set, or by default for a capped job whose video is paid for, the assets stage refuses before any spend unless the job's `animatic_reviewed` is an `accept` for the cut that exists now. Accepting records each still's hash, and a shot whose still changed after that refuses. The model check (`still_judge_refusal`, `prompts/qa_still.md`, the `judge` model) looks at each moving shot's still while the animatic is made and advises the person through `findings.json` and the animatic's printout (`judge_lines`); it blocks nothing there. In the paid run a still the person accepted is not judged again (`still_was_accepted`); with no accepted animatic, a still the check flags is not sent for motion. `publish` refuses an animatic by name and by hash. Depends on `config`, `media`, `motion`, `prompts`, `shotmake`, `takes`, `timeline`, and `providers`.
 
 ```
  assets(animatic) ─▶ voice + stills ─▶ made{timeline, shots, quotes}
@@ -606,7 +606,7 @@ edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
 Lyrics to takes of a song, readings that pick among them, a master, lyric files, release files for a distributor (`render/release.py`: WAV, FLAC and MP3 with tags, cover and lyrics), optional stems through a `separate` provider, a refusal before spending when a song asks for more than the model states it can make (`router.refuse_too_long`), and a job that cuts a video to the finished track (ADR 0014).
 
 ### song_repair
-Repaints a single section of a chosen song take into a new take beside it, without re-rolling the whole track. Depends on `jobfs`, `takes`, `providers.router`, and `songs`.
+Repaints a single section of a chosen song take into a new take beside it, without re-rolling the whole track. The first ready song provider that can repaint does it (on the Mac, ACE-Step's `repaint` task); when none can, the repair is refused before any work, and nothing is copied or recorded. The new take is measured with the same readings as any take. Depends on `config`, `media`, `jobfs`, `takes`, `bar.song`, `providers`, and `songs`.
 
 ### dub
 A piece in another language as a job of its own: its music and effects stem under new voices, and captions in the new language, with its own human gate.
@@ -663,7 +663,7 @@ A story to a typeset book and a real EPUB with live text. Pages are laid out onc
 A book's pages as a PDF with live text in embedded fonts, at the same places as its page images. The same input gives the same bytes, because approval binds to them.
 
 ### bar
-The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks.
+The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks. `identity` reads whether a picture or a video shows a kit's character: a configured command (`identity.face_command`; `providers/runners/face_run.py` runs OpenCV's YuNet, embedding with SFace or ArcFace) describes every face as an embedding, and each face is compared with the kit's reference faces, so a crowd is read face by face. A video is read from one sampled frame a second, by its median closest face and the stretches where the character is lost (`clip_report`). The animatic checks each still against the characters its shot names (`check_cast`, printed by `kalainova animatic`). With no command set, identity is reported as not measured, never as a pass; it warns and does not block.
 
 ### qa
 Runs the automated checks before the human gate, for a rendered piece, a document, a song, or a file from an outside tool.

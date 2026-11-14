@@ -95,8 +95,11 @@ models:
 openai_compat: {}
 
 prices:
-  anthropic:
-    llm: {input_per_mtok: 15.0, output_per_mtok: 75.0}
+  anthropic:                       # a model's own row wins over the capability's; a call settles at the model it ran on
+    llm: {input_per_mtok: 4.0, output_per_mtok: 20.0}       # the planner, claude-opus-5-5
+    judge: {input_per_mtok: 1.0, output_per_mtok: 5.0}      # the model check, claude-haiku-4-5. Without a row a capped job refuses it
+    claude-opus-5-5: {input_per_mtok: 4.0, output_per_mtok: 20.0}
+    claude-haiku-4-5: {input_per_mtok: 1.0, output_per_mtok: 5.0}
   elevenlabs:
     voice: {per_kchar: 0.04}       # v4 Turbo $40 / 1M chars
     music: {per_min: 0.80}
@@ -113,11 +116,11 @@ prices:
     separate: {per_sec: 0.0007}    # ESTIMATE: per second of the mix. VERIFY on fal's page before a paid run
     lipsync: {per_min: 3.00}       # ESTIMATE
     motion: {cost_usd: 0.02}
+    transcribe: {per_min: 0.01}
   mac:
     motion: {free: true}
   local:
     motion: {free: true}
-    transcribe: {per_min: 0.01}
   exa:
     search: {per_call: 0.01}       # ESTIMATE
 
@@ -241,9 +244,24 @@ video_models:
       durations: "4,5,6,8,10,12,15"
       extra: {generate_audio: false}
 
+# Whether a picture or a video shows a kit's character: every face in it, compared with the kit's
+# faces (bar/identity.py). The engine ships no face model. face_command takes `--out FILE` and
+# image paths after it, and writes {path: [{box, score, embedding}]}. providers/runners/face_run.py
+# does this with OpenCV's YuNet, embedding with SFace, or with ArcFace given --arcface FILE:
+#   face_command: [~/models/.venv/bin/python, src/kalainova/providers/runners/face_run.py, --models, ~/models/face]
+# With none set, identity is not measured, and the check says so; it never passes by default.
+# The limits belong to the recognizer, so set them with the command. Measured on one character's
+# generated stills and clips (docs/how-to/run-models-on-a-mac.md): ArcFace separated her (0.62)
+# from look-alikes of the same image model (0.42-0.52), with same_face_min 0.57, clip_median_min
+# 0.50 and lost_below 0.45; SFace did not separate them. Every reading warns and none blocks.
+identity:
+  face_command: []
+  same_face_min: 0.363     # a face in a picture is the character at or above this (SFace's published limit)
+  clip_median_min: 0.363   # a video holds the character when its sampled frames' median closest face reaches this
+  lost_below: 0.25         # a sampled frame whose closest face is below this has lost the character
+
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:
-  face_distance_max: 0.40
   stutter_max: 0.08
   cuts_per_min_max: 40
   banding_max: 0.03
@@ -256,7 +274,7 @@ bar:
   hard_cuts_per_min_max: 6
   digital_silence_sec_max: 0.2
   ending_drop_db_max: -12
-  audio_groove_steadiness_min: 0.70
+  audio_groove_steadiness_min: 0.50    # pulse clarity: steady grooves read near 1, 30 ms of jitter about 0.4, random onsets under 0.1. Warns; not calibrated on verdicts
   audio_pitch_snapping_max: 0.85
   audio_crest_factor_min: 6.0
   audio_stereo_width_min: 0.05

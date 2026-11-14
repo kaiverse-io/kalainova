@@ -42,6 +42,7 @@ import json
 import shutil
 import sys
 import time
+from pathlib import Path
 
 from . import assets, edit, plan, production_cli, qa, qachecks, render, studio_cli
 from .jobfs import REPO, ContractError, home, open_job
@@ -201,7 +202,23 @@ def _bar(a) -> int:
         mark = "ok  " if r["ok"] else "MISS"
         print(f"{mark} {r['id']:<30} {str(r['value'])[:26]:<28} {r['limit']}")
     print(f"studio bar: {bar.summary_line(report)}")
+    kit = getattr(a, "kit", None)  # callers that predate --kit pass no such field
+    if kit:
+        print(_identity_line(target, kit))
     return 0 if report["passed"] else 2
+
+
+def _identity_line(picture: Path, kit: str) -> str:
+    """A picture face by face, or a video frame by frame, against a frozen kit's faces."""
+    from . import kits
+    from .bar import identity
+
+    kit_id, _, ver = kit.partition("@")
+    version = int(ver) if ver else max(kits.versions(home(), kit_id), default=0)
+    refs = [
+        kits.blob_path(home(), e) for e in kits.load(home(), kit_id, version)["identity"]["refs"]
+    ]
+    return identity.kit_line(picture, refs, f"{kit_id}@{version}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -250,7 +267,9 @@ def main(argv: list[str] | None = None) -> int:
         "job"
     )
     sub.add_parser("story", help="typeset a book and an EPUB from story.json").add_argument("job")
-    sub.add_parser("bar", help="hold a job or any file to the studio bar").add_argument("target")
+    bar_cmd = sub.add_parser("bar", help="hold a job or any file to the studio bar")
+    bar_cmd.add_argument("target")
+    bar_cmd.add_argument("--kit", help="KIT or KIT@VERSION: compare the faces in a picture with it")
     sub.add_parser("host", help="check host system support and prerequisite capabilities")
     pv = sub.add_parser("providers", help="what is ready; --check makes one real, paid call each")
     pv.add_argument("--check", metavar="PROVIDER", help="prove an adapter against the live service")

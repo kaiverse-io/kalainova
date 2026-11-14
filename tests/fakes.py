@@ -54,6 +54,10 @@ class Studio(base.Provider):
     hits: list[dict] = []
     silent_song = False
     end_image = False  # a model that takes the last frame as a picture
+    can_repaint = True  # a song model that remakes one span of a take and keeps the rest
+
+    def supports_song_repaint(self) -> bool:
+        return self.can_repaint
 
     def takes_end_image(self, capability, model=None):
         return Studio.end_image and capability == "video"

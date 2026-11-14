@@ -16,6 +16,19 @@ REPO = Path(__file__).resolve().parents[2]
 SCHEMAS = REPO / "schemas"
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """A reader, or a run that crashes, sees the old file or the new one, never part of one."""
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def home() -> Path:
     """Where operator data lives: jobs, kits, streams. This repo is public, so real work belongs in
     a private directory named by $KALAINOVA_HOME. The engine, schemas, and prompts stay in the repo."""
@@ -113,7 +126,7 @@ class Job:
     def write(self, name: str, data: dict) -> Path:
         validate(name, data, f"{self.id}/{CONTRACT_FILES[name]}")
         path = self.path(name)
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        write_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
         return path
 
     def artifact(self) -> Path:
@@ -133,7 +146,7 @@ class Job:
         return self.work / f"final{AUDIO_SUFFIXES[0]}"
 
     def write_stamp(self, data: dict) -> None:
-        (self.folder / RENDER_STAMP).write_text(json.dumps(data, indent=2) + "\n")
+        write_atomic(self.folder / RENDER_STAMP, json.dumps(data, indent=2) + "\n")
 
     def read_stamp(self) -> dict | None:
         path = self.folder / RENDER_STAMP
@@ -157,10 +170,7 @@ class Job:
         return json.loads(self.ledger_path.read_text()) if self.ledger_path.exists() else []
 
     def _write_ledger(self, entries: list[dict]) -> None:
-        tmp = self.ledger_path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
-        tmp.write_text(json.dumps(entries, indent=2) + "\n")
-        # a reader sees the old ledger or the new one, never part of one
-        os.replace(tmp, self.ledger_path)
+        write_atomic(self.ledger_path, json.dumps(entries, indent=2) + "\n")
 
     def spent(self) -> float:
         """Money the job has settled. Reservations are not spent until they settle."""
@@ -298,7 +308,7 @@ def open_child(
     if providers is not None:
         data["providers"] = providers
     folder.mkdir(parents=True)
-    (folder / "job.json").write_text(dump(data) + "\n")
+    write_atomic(folder / "job.json", dump(data) + "\n")
     child = Job(folder)
     if kit_lock is not None:
         child.write("kit_lock", kit_lock)

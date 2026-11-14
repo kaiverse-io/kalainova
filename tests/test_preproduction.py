@@ -391,3 +391,61 @@ def test_refuse_shot_still_exempts_continuation_beats(tmp_path, studio):
     assert preproduction.refuse_shot_still(job, {"id": "b1"}, still) is not None
     # A chained/continuation beat is exempt
     assert preproduction.refuse_shot_still(job, {"id": "b1", "continues": True}, still) is None
+
+
+# ---- the model check at the stills gate -------------------------------------------------------
+FLAGGED_STILL = json.dumps(
+    {
+        "version": 1,
+        "passed": False,
+        "anatomy_ok": False,
+        "text_ok": True,
+        "cue_ok": True,
+        "region": [0.1, 0.2, 0.3, 0.4],
+        "note": "six fingers on the left hand",
+    }
+)
+
+
+@needs_ffmpeg
+def test_the_model_check_advises_at_the_animatic_before_anything_is_paid_for(
+    tmp_path, studio, capsys
+):
+    from kalainova.__main__ import main
+
+    job = _job(tmp_path, brief={"subject": "a test", "max_video_beats": 9, "animatic_gate": True})
+    studio.replies = [FLAGGED_STILL]
+
+    assert main(["animatic", str(job.folder)]) == 0
+
+    out = capsys.readouterr().out
+    assert "model check on b1: six fingers on the left hand" in out
+    assert _calls(studio, "video") == []
+    assert len(_calls(studio, "judge")) == 3  # one per moving shot, before any motion
+    assert job.read("animatic")["shots"][0]["still"] == "beats/b1.still.png"  # advised, not cut
+
+
+@needs_ffmpeg
+def test_a_still_a_person_accepted_at_the_animatic_is_not_judged_again_and_moves(tmp_path, studio):
+    job = _job(tmp_path, brief={"subject": "a test", "max_video_beats": 9, "animatic_gate": True})
+    studio.replies = [FLAGGED_STILL]
+    _make(job)
+    verdicts.record(job, "accept", reviewer="a person", animatic=True)
+    studio.calls.clear()
+    studio.replies = [FLAGGED_STILL, FLAGGED_STILL, FLAGGED_STILL]
+
+    assets.run(job)
+
+    assert _calls(studio, "judge") == []
+    assert len(_calls(studio, "video")) == 3
+
+
+@needs_ffmpeg
+def test_with_no_animatic_accepted_a_flagged_still_is_not_sent_for_motion(tmp_path, studio):
+    job = _job(tmp_path, brief={"subject": "a test", "max_video_beats": 9, "animatic_gate": False})
+    studio.replies = [FLAGGED_STILL]
+
+    assets.run(job)
+
+    assert len(_calls(studio, "judge")) == 3
+    assert len(_calls(studio, "video")) == 2  # b1 was flagged; b2 and b3 move

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -142,6 +143,16 @@ def cut_checks(final: Path, em: Fields) -> list[Fields]:
     spots = ", ".join(f"{c['at_sec']:.2f}s" for c in bad[:8])
     detail = f"{len(bad)} cuts have a click or a flash: {spots}"
     return [{"id": "edit.cuts", "status": "warn", "detail": detail}]
+
+
+def failed_beats(packet: Fields, checks: list[Fields]) -> set[str]:
+    """Beats a failed free reading names, by whole id: a fault on b1 says nothing about b10."""
+    named: set[str] = set()
+    for check in checks:
+        if check.get("status") == "fail":
+            text = f"{check.get('id', '')} {check.get('detail', '')}"
+            named.update(re.findall(r"[A-Za-z0-9_-]+", text))
+    return {b["id"] for b in packet.get("beats", []) if b["id"] in named}
 
 
 def judge_script(packet: Fields, exclude_beats: set[str] | None = None) -> str:

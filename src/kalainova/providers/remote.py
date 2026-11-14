@@ -41,10 +41,9 @@ class Anthropic(Provider):
         images: list[Path] | None = None,
         **kw,
     ) -> Result:
+        capability = "judge" if kw.get("capability") == "judge" else "llm"
         model = (
-            kw.get("model")
-            or model_for("anthropic", "judge" if kw.get("capability") == "judge" else "llm")
-            or model_for("anthropic", "llm")
+            kw.get("model") or model_for("anthropic", capability) or model_for("anthropic", "llm")
         )
         content: list[dict] = []
         for img in images or []:
@@ -84,13 +83,16 @@ class Anthropic(Provider):
             b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
         )
         u = data.get("usage", {})
-        p = price_for("anthropic", "llm")
+        # settled at the model that answered: a judge on a small model is not charged as a planner
+        p = price_for("anthropic", capability, model)
         cost = u.get("input_tokens", 0) / 1e6 * p.get("input_per_mtok", 0) + u.get(
             "output_tokens", 0
         ) / 1e6 * p.get("output_per_mtok", 0)
         return Result(text=text, cost=cost, model=model, meta={"usage": u})
 
-    judge = llm
+    def judge(self, prompt: str, **kw) -> Result:
+        """The model check: the same call, on the judge model, priced as the judge."""
+        return self.llm(prompt, **{**kw, "capability": "judge"})
 
 
 # ---------------------------------------------------------------- ElevenLabs
