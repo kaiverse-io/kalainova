@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .. import config, media, shots
+from .. import config, consistency, media, shots, streams
 from ..jobfs import ContractError, Job, open_child
 from ..providers import router
 from . import musiccuts as mc
@@ -23,6 +23,11 @@ FULL_LENGTH_SEC = 90.0  # past this, default to stills with a few moving shots
 FULL_LENGTH_MOVING = 6
 FADE_IN_SEC, FADE_OUT_SEC = 0.25, 0.5
 FEW_CUES = 2
+RIGHTS_FOR = {
+    "funded-clip": {"funded-brief"},
+    "owned-derivative": {"owned", "licensed"},
+    "client": {"licensed"},
+}
 
 
 def lyric_spans(
@@ -59,17 +64,26 @@ def _visual(song: dict[str, Any], span: mc.Span) -> str:
     return str(song["style"])
 
 
-def beats_for(song: dict[str, Any], spans: list[mc.Span], kinds: list[str]) -> list[dict[str, Any]]:
+def beats_for(
+    song: dict[str, Any],
+    spans: list[mc.Span],
+    kinds: list[str],
+    cast: list[str] | None = None,
+    silent: bool = False,
+) -> list[dict[str, Any]]:
     out = []
     for n, span in enumerate(spans):
+        text = "" if (silent or song.get("instrumental")) else (span["text"] or song["title"])
         beat: dict[str, Any] = {
             "id": f"s{n:02d}",
             "role": "hook" if n == 0 else ("payoff" if n == len(spans) - 1 else "body"),
-            "text": span["text"] or song["title"],
+            "text": text,
             "visual_cue": _visual(song, span),
             "visual_kind": kinds[n],
             "duration_sec": round(span["end"] - span["start"], 3),
         }
+        if cast:
+            beat["cast"] = list(cast)
         shot: dict[str, str] = {}
         if span.get("angle"):
             shot["size"] = span["angle"]
@@ -91,7 +105,16 @@ def _kinds(spans: list[mc.Span], still_only: bool, moving: int | None) -> list[s
     return ["video" if n in chosen else "still" for n in range(len(spans))]
 
 
-def estimate(job: Job, spans: list[mc.Span], kinds: list[str], pad: float, say: Say) -> float:
+def estimate(
+    job: Job,
+    spans: list[mc.Span],
+    kinds: list[str],
+    pad: float,
+    say: Say,
+    cap: float | None = None,
+    only: list[str] | None = None,
+    model: str | None = None,
+) -> float:
     """Shots, seconds, and the price of the moving ones, said before any call. Refuses past the cap.
     Each clip is priced at its generated length: the slot plus a beat to trim from."""
     moving = [s for s, k in zip(spans, kinds, strict=True) if k == "video"]
@@ -99,7 +122,13 @@ def estimate(job: Job, spans: list[mc.Span], kinds: list[str], pad: float, say: 
     total, unpriced = 0.0, False
     for span in moving:
         quote = router.quote(
-            job, "video", duration=span["end"] - span["start"] + pad, image=True, references=True
+            job,
+            "video",
+            duration=span["end"] - span["start"] + pad,
+            image=True,
+            references=True,
+            only=only,
+            model=model,
         )
         if quote is None or quote[1] is None:
             unpriced = True
@@ -109,10 +138,10 @@ def estimate(job: Job, spans: list[mc.Span], kinds: list[str], pad: float, say: 
         f"{len(spans)} shots, {seconds:.1f}s, {len(moving)} moving: about ${total:.2f}"
         + (" (some shots have no ready, priced provider)" if unpriced else "")
     )
-    cap = job.job.get("cost_cap")
-    if cap is not None and total > float(cap):
+    limit = cap if cap is not None else job.job.get("cost_cap")
+    if limit is not None and total > float(limit):
         raise ContractError(
-            f"{job.id}: this video is estimated at ${total:.2f}, over the ${float(cap):.2f} cap;"
+            f"{job.id}: this video is estimated at ${total:.2f}, over the ${float(limit):.2f} cap;"
             " ask for a shorter excerpt, use --stills, or raise cost_cap"
         )
     return total
@@ -132,6 +161,33 @@ def _excerpt_audio(src: Path, dst: Path, a: float, b: float, profile: str) -> di
     return {**media.loudness(dst), "target_lufs": prof.get("target_lufs", -14)}
 
 
+def _resolve_stream(
+    job: Job, stream: str, new_id: str, cast: list[str] | None
+) -> tuple[dict[str, Any], list[str], dict[str, Any], dict[str, list[str]] | None, str | None]:
+    root = job.folder.parent.parent
+    stream_data = streams.load(root, stream)
+    if "video" not in (stream_data.get("media") or []):
+        raise ContractError(f"stream {stream!r} does not make video")
+    track_rights = job.job.get("rights")
+    strategy = str(stream_data.get("strategy", ""))
+    allowed = RIGHTS_FOR.get(strategy)
+    if allowed and track_rights not in allowed:
+        raise ContractError(
+            f"track rights {track_rights!r} do not cover stream {stream!r} strategy {strategy!r}"
+        )
+    if track_rights == "funded-brief" and strategy != "funded-clip":
+        raise ContractError(f"track rights 'funded-brief' cannot be used on strategy {strategy!r}")
+    resolved = consistency.resolve(root, stream_data)
+    chosen = consistency.choose_cast(resolved, cast)
+    consistency.preflight(resolved, stream_data, chosen)
+    kit_lock = consistency.build_lock(resolved, stream_data, new_id, chosen)
+    pins = stream_data.get("generators") or {}
+    stream_providers = {cap: [pin["provider"]] for cap, pin in pins.items()} if pins else None
+    vpin = pins.get("video")
+    stream_video_model = vpin.get("model") if vpin else None
+    return stream_data, chosen, kit_lock, stream_providers, stream_video_model
+
+
 def build(
     job: Job,
     new_id: str,
@@ -145,8 +201,14 @@ def build(
     still_only: bool,
     excerpt: dict[str, Any] | None = None,
     phrase_bars: int | None = None,
+    stream: str | None = None,
+    cast: list[str] | None = None,
     say: Say = print,
 ) -> Path:
+    stream_data, chosen, kit_lock, stream_providers, stream_video_model = (
+        _resolve_stream(job, stream, new_id, cast) if stream else (None, None, None, None, None)
+    )
+
     length = media.duration(final)
     found = mc.analyse(final, length)
     by_music = len(cues) < FEW_CUES
@@ -158,10 +220,9 @@ def build(
         else lyric_spans(cues, song["title"], length, found["beats"])
     )
     brief_in = job.job.get("brief") or {}
+    stream_id = stream or job.job.get("stream")
     ceiling = (
-        shots.character_ceiling({"profile": profile, "brief": brief_in})
-        if job.job.get("stream")
-        else None
+        shots.character_ceiling({"profile": profile, "brief": brief_in}) if stream_id else None
     )
     if by_music:
         spans = mc.split_for_ceiling(spans, found, ceiling)
@@ -180,7 +241,16 @@ def build(
         )
     kinds = _kinds(spans, still_only, moving)
     pad = (60 / found["bpm"]) if found["bpm"] else 0.5
-    cost = estimate(job, spans, kinds, pad, say)
+    cost = estimate(
+        job,
+        spans,
+        kinds,
+        pad,
+        say,
+        cap=stream_data.get("cost_cap_per_job") if stream_data else None,
+        only=stream_providers.get("video") if stream_providers else None,
+        model=stream_video_model,
+    )
     for note in notes:
         say(f"note: {note}")
     max_moving = kinds.count("video")
@@ -198,7 +268,26 @@ def build(
         "visual_style": brief_in.get("visual_style", ""),
         "music_cuts": True,
     }
-    child = open_child(job, new_id, profile=profile, brief=brief)
+    track_rights = job.job.get("rights")
+    child_rights = (
+        "licensed"
+        if track_rights == "licensed"
+        else (stream_data.get("rights") if stream_data else None)
+    )
+    child = open_child(
+        job,
+        new_id,
+        profile=profile,
+        brief=brief,
+        stream=stream,
+        cast=chosen,
+        strategy=stream_data.get("strategy") if stream_data else None,
+        rights=child_rights,
+        distribution_identity=stream_data.get("distribution_identity") if stream_data else None,
+        cost_cap=stream_data.get("cost_cap_per_job") if stream_data else None,
+        providers=stream_providers,
+        kit_lock=kit_lock,
+    )
     heard: dict[str, Any] = {}
     if excerpt and (a, b) != (0.0, length):
         heard = _excerpt_audio(final, child.work / "track.wav", a, b, profile)
@@ -219,13 +308,28 @@ def build(
             indent=2,
         )
     )
+    hooks_data = (
+        {
+            "hooks": [song["title"], f"{song['title']} (intro)", f"{song['title']} (hook)"],
+            "chosen_hook": 0,
+        }
+        if stream
+        else {}
+    )
     child.write(
         "script_packet",
         {
             "schema_version": "0.1",
             "job_id": new_id,
             "title": song["title"],
-            "beats": beats_for(song, spans, kinds),
+            "beats": beats_for(
+                song,
+                spans,
+                kinds,
+                cast=chosen,
+                silent=bool(stream_data and stream_data.get("silent")),
+            ),
+            **hooks_data,
             **({"publish": song["publish"]} if song.get("publish") else {}),
         },
     )

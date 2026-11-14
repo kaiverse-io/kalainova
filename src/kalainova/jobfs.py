@@ -255,7 +255,21 @@ def open_job(ref: str | Path) -> Job:
     return Job(path.resolve())
 
 
-def open_child(parent: Job, new_id: str, *, profile: str, brief: dict) -> Job:
+def open_child(
+    parent: Job,
+    new_id: str,
+    *,
+    profile: str,
+    brief: dict,
+    stream: str | None = None,
+    cast: list[str] | None = None,
+    strategy: str | None = None,
+    rights: str | None = None,
+    distribution_identity: str | None = None,
+    cost_cap: float | None = None,
+    providers: dict[str, Any] | None = None,
+    kit_lock: dict[str, Any] | None = None,
+) -> Job:
     """A new job made from another: the same rights, identity, and limits, and a line back to it."""
     folder = home() / "jobs" / new_id
     if folder.exists():
@@ -264,12 +278,12 @@ def open_child(parent: Job, new_id: str, *, profile: str, brief: dict) -> Job:
     data = {
         "schema_version": "0.1",
         "job_id": new_id,
-        "strategy": source["strategy"],
+        "strategy": strategy or source["strategy"],
         "media": ["video", "audio"],
-        "rights": source["rights"],
-        "distribution_identity": source.get("distribution_identity"),
+        "rights": rights or source["rights"],
+        "distribution_identity": distribution_identity or source.get("distribution_identity"),
         "status": "draft",
-        "cost_cap": source.get("cost_cap"),
+        "cost_cap": cost_cap if cost_cap is not None else source.get("cost_cap"),
         "parent_job_id": parent.id,
         "profile": profile,
         "brief": brief,
@@ -277,12 +291,18 @@ def open_child(parent: Job, new_id: str, *, profile: str, brief: dict) -> Job:
     for key in ("providers", "skip_funded", "stream", "cast"):
         if key in source:
             data[key] = source[key]
+    if stream is not None:
+        data["stream"] = stream
+    if cast is not None:
+        data["cast"] = cast
+    if providers is not None:
+        data["providers"] = providers
     folder.mkdir(parents=True)
     (folder / "job.json").write_text(dump(data) + "\n")
     child = Job(folder)
-    if source.get("stream") and parent.has(
-        "kit_lock"
-    ):  # the same kits, so shots use their references
+    if kit_lock is not None:
+        child.write("kit_lock", kit_lock)
+    elif (stream or source.get("stream")) and parent.has("kit_lock"):
         child.write("kit_lock", {**parent.read("kit_lock"), "job_id": new_id})
     return child
 
