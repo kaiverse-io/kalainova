@@ -137,7 +137,14 @@ def _lay_new_sound(job: Job, child: Job, lines: list[tuple[Cue, Path]], profile:
     )  # fmt: skip
 
 
-def run(job: Job, language: str, new_id: str, *, voice: str | None = None) -> Job:
+def run(
+    job: Job,
+    language: str,
+    new_id: str,
+    *,
+    voice: str | None = None,
+    lipsync: bool = False,
+) -> Job:
     """Open a new job holding this piece dubbed. The picture is copied; only the sound changes."""
     final = job.work / "final.mp4"
     if not final.exists():
@@ -157,10 +164,29 @@ def run(job: Job, language: str, new_id: str, *, voice: str | None = None) -> Jo
     lines_dir.mkdir(exist_ok=True)
     lines = _voice_lines(child, translated, lines_dir, voice)
     _lay_new_sound(job, child, lines, source.get("profile") or "")
+    if lipsync:
+        _lipsync(job, child)
     _record(child, translated, language, job.id)
     render.stamp(child, child.work / "final.mp4")
     child.set_status("rendered")
     return child
+
+
+def _lipsync(job: Job, child: Job) -> None:
+    """Match mouths on the dubbed picture to the new mix, when a lipsync provider is ready."""
+    if not router.available(child, "lipsync"):
+        raise ContractError(f"{job.id}: lipsync requested but no lipsync provider is configured")
+    synced = child.work / "final.lipsync.mp4"
+    router.generate(
+        child,
+        "lipsync",
+        "lipsync",
+        str(child.work / "final.mp4"),
+        str(child.work / "mix.norm.wav"),
+        synced,
+        note="dub lipsync",
+    )
+    synced.replace(child.work / "final.mp4")
 
 
 def _targets(profile_name: str) -> tuple[float, float]:

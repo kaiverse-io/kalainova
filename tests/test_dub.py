@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fakes import make_job, needs_ffmpeg
@@ -114,3 +115,24 @@ def test_a_piece_must_be_rendered_first(tmp_path, monkeypatch, studio):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
     with pytest.raises(ContractError, match="render the piece"):
         dub.run(make_job(tmp_path), "hi", "p1-hi")
+
+
+def test_a_dub_with_lipsync_swaps_the_picture_for_the_synced_one(tmp_path, monkeypatch, studio):
+    job = _rendered(tmp_path, monkeypatch, studio)
+    studio.replies = [_reply(job)]
+    child = dub.run(job, "hi", "p1-hi", lipsync=True)
+    sync = next(c for c in studio.calls if c["capability"] == "lipsync")
+    assert Path(sync["video"]).name == "final.mp4"
+    assert Path(sync["audio"]).name == "mix.norm.wav"
+    assert (child.work / "final.mp4").is_file()
+    assert not (child.work / "final.lipsync.mp4").exists()
+
+
+def test_a_dub_with_lipsync_refuses_when_no_provider_is_configured(tmp_path, monkeypatch, studio):
+    job = _rendered(tmp_path, monkeypatch, studio)
+    data = job.job
+    data["providers"]["lipsync"] = []
+    job.write("job", data)
+    studio.replies = [_reply(job)]
+    with pytest.raises(ContractError, match="lipsync requested but no lipsync provider"):
+        dub.run(job, "hi", "p1-hi", lipsync=True)

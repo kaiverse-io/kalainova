@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from kalainova import comic, publish, qa
+from kalainova.bar import identity
 from kalainova.jobfs import ContractError, Job
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
@@ -139,6 +140,43 @@ def _job(tmp_path, monkeypatch):
         )
     )
     return Job(folder)
+
+
+def _write_comic_report(job):
+    job.work.mkdir(parents=True, exist_ok=True)
+    (job.work / "comic_report.json").write_text(
+        json.dumps({"pages": 1, "panels": 1, "smallest_letter_pt": 10})
+    )
+
+
+def test_character_consistency_passes_without_a_character_kit_or_panels(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    _write_comic_report(job)
+
+    check = next(c for c in comic.checks(job) if c["id"] == "comic.character_consistency")
+
+    assert check["status"] == "pass"
+    assert check["detail"] == "no character kit attached"
+
+
+@pytest.mark.parametrize(("distance", "status"), [(0.45, "pass"), (0.46, "warn")])
+def test_character_consistency_compares_panels_with_kit_references(
+    tmp_path, monkeypatch, distance, status
+):
+    job = _job(tmp_path, monkeypatch)
+    _write_comic_report(job)
+    panel = job.work / "panels" / "p1.png"
+    panel.parent.mkdir()
+    panel.write_bytes(b"panel")
+    reference = job.folder / "kit" / "face.png"
+    reference.parent.mkdir()
+    reference.write_bytes(b"reference")
+    monkeypatch.setattr(identity, "face_distance", lambda _panel, _reference: distance)
+
+    check = next(c for c in comic.checks(job) if c["id"] == "comic.character_consistency")
+
+    assert check["status"] == status
+    assert "distance" in check["detail"]
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")

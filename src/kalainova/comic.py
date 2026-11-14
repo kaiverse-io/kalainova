@@ -19,6 +19,7 @@ import numpy.typing as npt
 from PIL import Image, ImageDraw, ImageFont
 
 from . import captions, consistency, render, shotmake
+from .bar.identity import comic_character_consistency
 from .jobfs import ContractError, Job
 from .providers import router
 
@@ -457,9 +458,24 @@ def run(job: Job) -> Path:
 
 def checks(job: Job) -> list[dict[str, str]]:
     """What can be proved about a lettered comic. A human still reads every page."""
-    report = json.loads((job.work / "comic_report.json").read_text())
+    report_path = job.work / "comic_report.json"
+    if not report_path.is_file():
+        return [
+            {
+                "id": "comic.character_consistency",
+                "status": "fail",
+                "detail": "comic_report.json is missing",
+            }
+        ]
+    report = json.loads(report_path.read_text())
     smallest = float(report["smallest_letter_pt"])
+    consistency_status, consistency_detail = comic_character_consistency(job)
     return [
+        {
+            "id": "comic.character_consistency",
+            "status": consistency_status,
+            "detail": consistency_detail,
+        },
         {
             "id": "comic.lettering_size",
             "status": "pass" if smallest >= MIN_LETTER_PT else "fail",
