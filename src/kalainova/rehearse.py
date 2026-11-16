@@ -16,14 +16,16 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from . import assets, preproduction, takes
 from .jobfs import ContractError, Job
-from .providers import rehearsal
+from .providers import fal, rehearsal
 
 REPORT = "rehearsal.json"
+Check = Callable[[str, dict[str, Any]], list[str]]
 SKIP = ("jobs", "out")  # the studio's other folders are seen through links, read only
 
 
@@ -68,8 +70,23 @@ def _shots(copy: Job) -> dict[str, Any]:
     return found
 
 
-def run(job: Job) -> dict[str, Any]:
-    """Rehearse the job's stills and moving shots; write what would be sent and what it costs."""
+def _checked(calls: list[dict[str, Any]], check: Check | None) -> list[str]:
+    """Each fal request against the model's live schema, so a field fal would refuse stops the
+    rehearsal instead of the paid run. The verdict is kept on the request."""
+    found: list[str] = []
+    for call in calls:
+        for req in call.get("requests", []):
+            if check is None or call.get("provider") != "fal":
+                continue
+            said = check(req["model"], req.get("payload") or {})
+            req["schema"] = said or "ok"
+            found += [f"request {call['n']}: {s}" for s in said]
+    return found
+
+
+def run(job: Job, check: Check | None = fal.schema_problems) -> dict[str, Any]:
+    """Rehearse the job's stills and moving shots; write what would be sent and what it costs.
+    `check` reads each model's published schema, which is free and needs no key."""
     stopped = ""
     with tempfile.TemporaryDirectory(prefix="kalainova-rehearsal-") as tmp:
         copy = _copy(job, Path(tmp))
@@ -83,6 +100,9 @@ def run(job: Job) -> dict[str, Any]:
                 calls, shots = dry.report(), _shots(copy)
         finally:
             shutil.rmtree(copy.work, ignore_errors=True)
+    refused = _checked(calls, check)
+    if refused and not stopped:
+        stopped = "fal would refuse: " + "; ".join(refused)
     cap = job.job.get("cost_cap")
     total = round(sum(c.get("estimate", 0.0) for c in calls), 6)
     report = {
@@ -106,9 +126,11 @@ def lines(report: dict[str, Any]) -> list[str]:
     for call in report["calls"]:
         for req in call["requests"]:
             fields = ", ".join(sorted(req.get("payload") or {}))
+            schema = req.get("schema")
+            said = "" if schema is None else "  schema ok" if schema == "ok" else "  SCHEMA REFUSES"
             out.append(
                 f"{call['n']:>3} {call['capability']:<6} {req['model']}  "
-                f"${call.get('estimate', 0):.3f}  {call.get('note', '')}  fields: {fields}"
+                f"${call.get('estimate', 0):.3f}  {call.get('note', '')}  fields: {fields}{said}"
             )
     for shot, made in report["shots"].items():
         for take in made:

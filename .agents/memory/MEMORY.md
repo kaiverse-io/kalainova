@@ -17,3 +17,4 @@
 - [Grain must reach the shadows](grain-must-reach-the-shadows.md) — overlay grain leaves near-black gradients to band; a plain low-alpha pass took banding 0.049 to 0.001
 - [One working tree, one writer](one-working-tree-one-writer.md) — a delegated agent's notes were swept into an unrelated commit and pushed; give it its own folder or worktree, stage named paths
 - [Rehearse before the first paid run](rehearse-before-the-first-paid-run.md) — fake-vendor tests passed; a dry run of one real job found ten quote, gate and payload defects
+- [A falling test count is a failure](a-falling-test-count-is-a-failure.md) — a new file overwrote 26 tests and CI stayed green; compare the collected count, not only pass/fail

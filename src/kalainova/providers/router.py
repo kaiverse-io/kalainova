@@ -27,10 +27,10 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from .. import config, media
+from .. import config, media, trace
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
-from . import base, records, rehearsal
+from . import base, prices, records, rehearsal
 
 # capability -> the position of the destination path in the call's arguments
 OUTPUT_ARG = {
@@ -86,6 +86,28 @@ def _rehearses_first(job: Job, capability: str, names: list[str]) -> None:
                 "rehearsal stops before it; pin the job to a provider that can"
             )
         return
+
+
+def _corrected(
+    job: Job, p: base.Provider, capability: str, est: dict[str, Any], model: str | None = None
+) -> float | None:
+    """The provider's estimate, raised where the vendor's list price or this studio's own bills
+    say the price table is low (providers/prices.py). A quote and a reservation both come here."""
+    estimate = p.estimate(capability, **est)
+    try:
+        factor, why = prices.correction(job, p, capability, {"model": model, **est})
+    except Exception as exc:  # noqa: BLE001 - a correction can only raise an estimate, never block it
+        print(
+            f"{job.id}: {capability}: the price check failed ({exc}); the table stands",
+            file=sys.stderr,
+        )
+        return estimate
+    if estimate and factor > 1:
+        print(
+            f"{job.id}: {capability} on {p.name}: estimate x{factor}, from {why}", file=sys.stderr
+        )
+        return round(estimate * factor, 6)
+    return estimate
 
 
 def _usable(capability: str, names: list[str]) -> tuple[list[base.Provider], list[str]]:
@@ -163,7 +185,7 @@ def price(
     p = first_listed(job, capability, only)
     if p is None:
         return None
-    return p.name, p.estimate(capability, **est), p.missing_env(capability)
+    return p.name, _corrected(job, p, capability, est), p.missing_env(capability)
 
 
 def _deadline(capability: str) -> float:
@@ -268,7 +290,7 @@ def generate(
     cap = job.job.get("cost_cap")
     errors = list(skipped)
     for p in usable:
-        estimate = p.estimate(capability, **(est or {}))
+        estimate = _corrected(job, p, capability, est or {}, kw.get("model"))
         if estimate is None and cap is not None:
             errors.append(f"{p.name}: no price for {capability}, and this job has a cost cap")
             continue
@@ -297,6 +319,8 @@ def generate(
         started = time.monotonic()
         started_at = datetime.now(UTC).isoformat()
         traced = partial(records.trace_attempt, job, capability, p, started_at, started, asked, aid)
+        p.request_id = p.charged = p.billed_units = None
+        p.tags = {"job": job.id, "attempt": aid, **trace.labels()}
         try:
             res = _call(
                 getattr(p, fn_name), tuple(call_args), call_kw, None if p.self_timed else limit
@@ -360,6 +384,8 @@ def generate(
         except BaseException:  # a bug in an adapter, or the cap: raised, with nothing left held
             job.release(reservation)
             raise
+        records.settle_at_vendor(p, res)
+        prices.learn(job, p.name, res.model or asked or "", res.meta or {})
         if has_output:
             billed = partial(
                 traced, outcome="error", estimate=estimate, settled=res.cost, meta=res.meta

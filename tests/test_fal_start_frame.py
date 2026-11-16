@@ -152,3 +152,37 @@ def test_fal_keeps_its_request_id_and_what_a_refusal_said(monkeypatch):
     with pytest.raises(requests.HTTPError, match="reference_image_urls"):
         provider._run("some/model", {})
     assert provider.request_id == "req-1"
+
+
+def test_fal_sends_the_labels_and_charges_what_it_billed(monkeypatch):
+    # The vendor's own usage report carries our labels; the ledger settles at its billed units
+    monkeypatch.setenv("FAL_KEY", "k")
+    sent = {}
+
+    def post(url, headers=None, **kw):
+        sent.update(headers or {})
+        return _Reply({"request_id": "req-2", "status_url": "s", "response_url": "r"})
+
+    done = _Reply({"video": {"url": "u"}})
+    done.headers = {"x-fal-billable-units": "5"}
+    replies = {"s": _Reply({"status": "COMPLETED"}), "r": done}
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(requests, "get", lambda url, **kw: replies[url])
+    monkeypatch.setattr(fal, "unit_price", lambda model: 0.14)
+    provider = fal.Fal()
+    provider.tags = {"job": "j1", "stage": "assets", "shot": "s,00", "attempt": "a1"}
+    provider._run("some/model", {})
+    assert sent["X-Fal-Tags"] == "job=j1,stage=assets,shot=s00,attempt=a1"  # no comma in a value
+    assert provider.billed_units == 5 and provider.charged == pytest.approx(0.70)
+
+
+def test_with_no_billed_units_the_price_table_stands(monkeypatch):
+    monkeypatch.setenv("FAL_KEY", "k")
+    monkeypatch.setattr(
+        requests, "post", lambda *a, **kw: _Reply({"status_url": "s", "response_url": "r"})
+    )
+    replies = {"s": _Reply({"status": "COMPLETED"}), "r": _Reply({})}
+    monkeypatch.setattr(requests, "get", lambda url, **kw: replies[url])
+    provider = fal.Fal()
+    provider._run("some/model", {})
+    assert provider.charged is None and provider.billed_units is None

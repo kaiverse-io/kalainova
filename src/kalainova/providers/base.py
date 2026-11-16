@@ -82,6 +82,13 @@ class Provider:
     # The vendor's id for the request this instance last sent, as its bill lists it. The router
     # copies it to the trace row and the ledger entry; an adapter sets it as soon as it has one.
     request_id: str | None = None
+    # What the vendor said this call cost (its billed units times the account's unit price), when
+    # it says. The router settles the ledger at it instead of the price table's figure.
+    charged: float | None = None
+    billed_units: float | None = None
+    # Labels the router hands each call (job, attempt, run, stage, shot); an adapter that can
+    # attach them to the vendor's request does, so the vendor's own usage reports match ours.
+    tags: dict[str, str] | None = None
 
     def _unsupported(self, capability: str) -> Result:
         raise NotImplementedError(f"{self.name} does not implement {capability}")

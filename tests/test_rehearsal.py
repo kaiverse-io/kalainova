@@ -14,6 +14,8 @@ from kalainova.providers import base, fal, rehearsal
 
 pytestmark = needs_ffmpeg
 
+SCHEMA_OK = lambda model, payload: []  # noqa: E731 - the live schema is read in its own test
+
 BEAT = {
     "id": "b1",
     "role": "hook",
@@ -47,7 +49,7 @@ def _job(tmp_path, video):
 
 def test_a_rehearsal_names_each_field_and_price_and_spends_nothing(tmp_path, studio, offline):
     job = _job(tmp_path, ["fal"])
-    report = rehearse.run(job)
+    report = rehearse.run(job, check=SCHEMA_OK)
 
     assert report["stopped"] == ""
     (call,) = [c for c in report["calls"] if c["capability"] == "video"]
@@ -68,7 +70,7 @@ def test_a_rehearsal_names_each_field_and_price_and_spends_nothing(tmp_path, stu
 
 def test_the_real_run_still_waits_for_the_animatic(tmp_path, studio, offline):
     job = _job(tmp_path, ["fal"])
-    rehearse.run(job)
+    rehearse.run(job, check=SCHEMA_OK)
     with pytest.raises(ContractError, match="animatic"):
         assets.run(job)
 
@@ -156,3 +158,16 @@ def test_only_one_rehearsal_runs_at_a_time():
     with rehearsal.opened(), pytest.raises(RuntimeError), rehearsal.opened():
         pass
     assert rehearsal.active() is None
+
+
+def test_a_field_fal_would_refuse_stops_the_rehearsal(tmp_path, studio, offline):
+    # The schema check runs on every rehearsal, so nobody has to remember a script
+    def refuse(model, payload):
+        return [f"not in {model}'s schema: ['tail_image_url']"] if "video" in model else []
+
+    report = rehearse.run(_job(tmp_path, ["fal"]), check=refuse)
+    assert report["stopped"].startswith("fal would refuse: request")
+    assert "tail_image_url" in report["stopped"]
+    (call,) = [c for c in report["calls"] if c["capability"] == "video"]
+    assert call["requests"][0]["schema"] != "ok"
+    assert any("SCHEMA REFUSES" in line for line in rehearse.lines(report))

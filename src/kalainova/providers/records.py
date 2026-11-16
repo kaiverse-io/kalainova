@@ -21,6 +21,23 @@ from ..jobfs import Job
 from . import base
 
 GENERATIONS = "generations.jsonl"
+PRICED = ("price_source", "table_cost", "vendor_cost")  # how a charge was priced, kept beside it
+
+
+def settle_at_vendor(p: base.Provider, res: base.Result) -> None:
+    """Settle at the higher of the price table and what the vendor says it billed (its billed units
+    times the account's unit price), and keep both beside the charge. A vendor's unit price can be a
+    base rate that a resolution multiplies, so neither figure alone is trusted until the vendor's
+    billing record confirms it; the higher one keeps the cost cap safe."""
+    meta = dict(res.meta or {})
+    if p.charged is not None:
+        meta.update(table_cost=round(res.cost, 6), vendor_cost=p.charged)
+        meta.update(billed_units=p.billed_units)
+        meta["price_source"] = "higher of the price table and vendor billed units x unit price"
+        res.cost = max(res.cost, p.charged)
+    elif not p.free:
+        meta["price_source"] = "price table"
+    res.meta = meta
 
 
 def saved(
@@ -45,7 +62,7 @@ def audit(
 ) -> dict[str, Any]:
     """What a ledger entry and a generation record carry so an auditor can join them to the trace
     row (attempt), to the vendor's bill (request_id), and to the part of the line (labels)."""
-    billed = {k: v for k, v in (meta or {}).items() if k.startswith("billed_")}
+    billed = {k: v for k, v in (meta or {}).items() if k.startswith("billed_") or k in PRICED}
     rid = getattr(p, "request_id", None)
     return {**trace.labels(), "attempt": aid, "model": model, "request_id": rid, **billed}
 
