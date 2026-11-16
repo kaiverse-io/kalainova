@@ -17,6 +17,7 @@ import requests
 
 from .. import media
 from ..config import audio_spec, model_for, price_for, reference_spec, video_spec
+from . import rehearsal
 from .base import BilledError, Provider, Result, register
 
 TIMEOUT = 120
@@ -75,6 +76,7 @@ class Fal(Provider):
         "separate",
     )
     env_key = "FAL_KEY"
+    rehearses = True  # _run, _upload and _fetch are its only ways out
 
     def price_key(self, capability: str, request: Fields) -> str:
         if capability == "video" and request.get("references"):
@@ -85,7 +87,10 @@ class Fal(Provider):
         """A clip is billed at the length the model allows, which is never shorter than the ask."""
         if capability == "video" and request.get("duration"):
             key = self.price_key(capability, request)
-            spec = video_spec("fal", request.get("model") or model_for("fal", key))
+            name = request.get("model") or model_for("fal", key)
+            spec = (
+                reference_spec("fal", "video", name) if request.get("references") else {}
+            ) or video_spec("fal", name)
             if spec:
                 request = {
                     **request,
@@ -144,6 +149,9 @@ class Fal(Provider):
         return f"{prompt}. References: {'; '.join(guide)}.", payload, spec
 
     def _run(self, model: str, payload: Fields, timeout: float = 900) -> Fields:
+        dry = rehearsal.active()
+        if dry is not None:
+            return dry.request(model, payload)
         h = {"Authorization": f"Key {os.environ[self.env_key]}", "content-type": "application/json"}
         r = requests.post(
             f"https://queue.fal.run/{model}", headers=h, json=payload, timeout=TIMEOUT
@@ -168,6 +176,9 @@ class Fal(Provider):
 
     def _upload(self, path: Path) -> str:
         """A URL for an input file. Small files travel inline; the rest go through fal's storage."""
+        dry = rehearsal.active()
+        if dry is not None:
+            return dry.upload(path)
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if path.stat().st_size <= INLINE_MOST_BYTES:
             return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
@@ -188,6 +199,10 @@ class Fal(Provider):
     @staticmethod
     def _fetch(url: str, dst: Path, billed: float) -> None:
         """Bring a finished file down. The vendor has charged already, so a failure is billed."""
+        dry = rehearsal.active()
+        if dry is not None and url.startswith(rehearsal.SCHEME):
+            dry.stand_in(url, dst)
+            return
         try:
             _download(url, dst)
         except OSError as exc:
@@ -259,7 +274,8 @@ class Fal(Provider):
         end_used = bool(end and spec.get("end_image_param"))
         if end is not None and end_used:
             payload[spec["end_image_param"]] = self._upload(end)
-        if seed is not None:
+        seeded = seed is not None and spec.get("takes_seed", True)
+        if seeded:
             payload["seed"] = seed
         data = self._run(model, payload, timeout=1800)
         cost = billed * price_for("fal", key, model).get("per_sec", 0)
@@ -268,7 +284,8 @@ class Fal(Provider):
             "billed_sec": billed,
             "start_frame_sent": start_sent,
             "end_frame_sent": end_used,
-            **_seed_of(data, seed),
+            # a model whose schema has no seed was sent none, so the take cannot be remade by it
+            **(_seed_of(data, seed) if seeded else {"seed_sent": False}),
         }
         return Result(path=dst, cost=cost, model=model, meta=meta)
 

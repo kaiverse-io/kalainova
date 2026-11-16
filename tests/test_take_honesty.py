@@ -99,3 +99,35 @@ def test_the_judges_time_and_region_reach_the_findings():
     first, second = found["shots"]
     assert (first["time"], first["region"]) == (2.4, "left hand")
     assert second["time"] == "1.0-1.6" and "region" not in second
+
+
+@needs_ffmpeg
+def test_every_take_records_the_size_its_model_made(tmp_path):
+    clip = tmp_path / "clip.mp4"
+    media.run(
+        ["-f", "lavfi", "-i", "testsrc2=s=320x180:d=2:r=24", "-pix_fmt", "yuv420p", str(clip)]
+    )
+    readings, _ = takes.assess_clip(clip)
+    assert (readings["width"], readings["height"]) == (320, 180)
+
+
+def test_a_character_take_under_the_source_size_does_not_pass(tmp_path, monkeypatch):
+    made = {"score": 0.3, "shot_motion": 0.3, "width": 1280, "height": 720}
+    monkeypatch.setattr(takes, "assess_clip", lambda path: (dict(made), True))
+    readings, ok = takes.held_to(1080)(tmp_path / "clip.mp4")
+    assert ok is False
+    assert readings["below_source_floor"] == "1280x720, under 1080px a side"
+    made.update(width=1080, height=1920)
+    assert takes.held_to(1080)(tmp_path / "clip.mp4")[1] is True
+
+
+def test_a_small_take_breaks_the_promise_even_where_stills_are_allowed(tmp_path):
+    job = make_job(tmp_path)
+    take = _take(job, 0, "a", ok=False)
+    take["readings"]["below_source_floor"] = "1280x720, under 1080px a side"
+    takes.record(job, "b1", take)
+    broken = shotmake.motion_break(job, "b1", take, allow_stills=True)
+    assert broken["reason"].startswith(shotmake.SOURCE_REASON)
+    assert "1280x720" in broken["reason"]
+    takes.choose(job, "b1", 0)  # a person keeps it anyway
+    assert shotmake.motion_break(job, "b1", take, allow_stills=True) is None

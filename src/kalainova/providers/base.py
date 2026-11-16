@@ -77,11 +77,17 @@ class Provider:
     # Keeps its own deadline, so time queued for a shared GPU does not count against the call, and a
     # call that runs out can really be stopped. Python cannot kill a worker thread.
     self_timed = False
+    # Can write down what it would send instead of sending it (providers/rehearsal.py)
+    rehearses = False
 
     def _unsupported(self, capability: str) -> Result:
         raise NotImplementedError(f"{self.name} does not implement {capability}")
 
     def missing_env(self, capability: str = "") -> list[str]:
+        from . import rehearsal
+
+        if self.rehearses and rehearsal.active() is not None:
+            return []  # a rehearsal sends nothing, so it needs no key
         needed = ((self.env_key,) if self.env_key else ()) + tuple(self.env_keys)
         return [key for key in needed if not os.environ.get(key)]
 

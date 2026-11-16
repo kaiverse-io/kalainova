@@ -84,20 +84,22 @@ def moving_quotes(
 
 
 def _shot_cost(piece: _Scene, beat: Fields, length: float, always: int) -> float | None:
-    quote = router.quote(
-        piece.job, "video", duration=length, image=True, references=bool(piece.resolved)
-    )
+    """Priced as the shot will be asked for: a shot with a character on the pinned reference model,
+    one without (B-roll) on the plain one. A price needs no key."""
+    kw = shotmake.shot_kw(piece.resolved, piece.lock, "video", beat)
+    model = {"model": kw["model"]} if kw.get("model") else {}
+    asked = {"duration": length, "image": True, "references": bool(kw.get("references")), **model}
+    quote = router.price(piece.job, "video", **asked)
     if quote is None or quote[1] is None:
         return None
     total = quote[1] * always
     if beat.get("on_camera"):
-        sync = router.quote(piece.job, "lipsync", duration=length)
+        sync = router.price(piece.job, "lipsync", duration=length)
         if sync is not None and sync[1] is None:
             return None
         total += sync[1] if sync and sync[1] else 0.0
-    kw = shotmake.shot_kw(piece.resolved, piece.lock, "video", beat)
     if shotmake.end_frame_used(piece.job, beat, kw):
-        end = router.quote(piece.job, "image")
+        end = router.price(piece.job, "image")
         if end is None or end[1] is None:
             return None
         total += end[1]
@@ -134,7 +136,7 @@ def gate_active(job: Job) -> bool:
     has_moving = any(moves(beat, kinds) for beat in packet.get("beats", []))
     if not has_moving:
         return False
-    p = router.first_usable(job, "video")
+    p = router.first_listed(job, "video")  # a missing key does not make the video free
     return bool(p and not getattr(p, "free", False))
 
 
@@ -203,8 +205,10 @@ def reuse_accepted_still(piece: Any, beat: Fields, still: Path, prompt: str) -> 
 
 def require_review(job: Job) -> None:
     """Refuse before any spend when the brief asks for an animatic and nobody has accepted it."""
-    if not gate_active(job):
-        return
+    from .providers import rehearsal
+
+    if not gate_active(job) or rehearsal.active() is not None:
+        return  # a rehearsal can spend nothing, and its report says the real run waits here
     steps = (
         f"`kalainova animatic {job.id}`, watch it, then "
         f"`kalainova verdict {job.id} accept --animatic --reviewer NAME`"

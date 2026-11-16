@@ -117,6 +117,10 @@ No reading sees that a door opens the wrong way or that a coat became a jacket. 
 
 Warping, flicker, and an object that changes between frames are not in a first and last frame either. `kalainova sheet --motion` shows several frames across every shot, and `sheet --cuts` shows both sides of every join. The vision judge reads the motion strip with the first sheet and writes what it found to `findings.json`; with no model key the agent looks and writes the same file. These are warnings: they inform the person who decides, and block nothing (ADR 0011). Two more warnings come from `config/studio.yaml`: a shot with a character in it that runs past `character_shot_max_sec`, and burned text or a face outside a vertical profile's `safe_zone`, where interface overlays cover the frame. Both numbers are estimates until a live check.
 
+`kalainova review` puts every take of every moving shot on one page, beside the kit's faces and the shot's start frame, with the faults only eyes can catch listed under each shot ([How to rehearse a paid run, and review its takes](how-to/rehearse-and-review-takes.md)).
+
+A take also records the size its model made it. A profile's `character_source_min_px` is the smallest a shot with a character in it may be made, on its short side, because upscaling cannot add detail the model did not make. A character take under it does not pass. It goes to a person, who can still choose it, and no further take is made by itself.
+
 ## Known gaps
 
 - Stereo only. An honest 5.1 needs a real multichannel mix, and an upmix from stereo does not count.

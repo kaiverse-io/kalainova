@@ -162,6 +162,8 @@ def take_clip(
     )
     if note:
         prompt = f"{prompt} {note}"
+    floor = int(prof.get("character_source_min_px") or 0)
+    assess = takes.held_to(floor) if floor and beat.get("cast") else takes.assess_clip
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
         return gen(
@@ -175,7 +177,12 @@ def take_clip(
             seed=seed,
             audio=wants_sound,
             **({"end_image": end} if end else {}),
-            est={"duration": span, "image": True, "references": bool(clip_kw)},
+            est={
+                "duration": span,
+                "image": True,
+                "references": bool(clip_kw),
+                **({"model": clip_kw["model"]} if clip_kw.get("model") else {}),
+            },
             **clip_kw,
         )
 
@@ -187,7 +194,7 @@ def take_clip(
             n,
             suffix=".mp4",
             make=make,
-            assess=takes.assess_clip,
+            assess=assess,
             prompt=prompt,
             note=note,
             extra={"retake": True},
@@ -199,7 +206,7 @@ def take_clip(
             brief,
             suffix=".mp4",
             make=make,
-            assess=takes.assess_clip,
+            assess=assess,
             prompt=prompt,
         )
     taken = takes.place(job, beat["id"], clip)
@@ -311,17 +318,23 @@ def retake(job: Job, bid: str, note: str = "") -> Fields:
 
 
 MOTION_REASON = "no take moved enough"
+SOURCE_REASON = "no take was made at the profile's source size"
 
 
 def motion_break(job: Job, bid: str, take: Fields, allow_stills: bool) -> Fields | None:
     """A shot whose chosen take did not pass the motion reading broke its promise, unless a person
-    accepted stills or chose that take. The failing clip stays on disk for a person to look at."""
-    if take.get("ok") or allow_stills:
+    accepted stills or chose that take. The failing clip stays on disk for a person to look at.
+    A character take made under the profile's source size breaks it too, stills allowed or not."""
+    readings = take.get("readings") or {}
+    small = readings.get("below_source_floor")
+    if take.get("ok") or (allow_stills and not small):
         return None
     entry = takes.load(job)["shots"].get(bid) or {}
     if entry.get("chosen_by") == "human":
         return None
-    readings = take.get("readings") or {}
+    if small:
+        why = f"take {take['n']} is {small}; look at it, and choose it only if it holds up"
+        return {"beat_id": bid, "reason": f"{SOURCE_REASON} ({why})"}
     if readings.get("unmeasurable"):
         why = f"take {take['n']} could not be measured: {readings['unmeasurable']}; look at it"
     else:
@@ -338,7 +351,7 @@ def apply_chosen(job: Job, bid: str) -> Fields:
     breaks = [
         b
         for b in manifest.get("promise_breaks") or []
-        if not (b["beat_id"] == bid and str(b["reason"]).startswith(MOTION_REASON))
+        if not (b["beat_id"] == bid and str(b["reason"]).startswith((MOTION_REASON, SOURCE_REASON)))
     ]
     broken = motion_break(job, bid, take, allowed)
     breaks += [broken] if broken else []

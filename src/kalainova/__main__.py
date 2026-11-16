@@ -8,6 +8,8 @@
   uv run kalainova measure <job>
   uv run kalainova status <job>
   uv run kalainova clean <job> [--dry-run]   delete what make can rebuild; the final and assets stay
+  uv run kalainova rehearse <job>      every paid request and its price, with nothing sent
+  uv run kalainova review <job>        a page of every take side by side, to judge by eye
   uv run kalainova bar <job or file>   hold it to the studio bar
   uv run kalainova comic <job>         lay out and letter a comic from comic_script.json
   uv run kalainova story <job>         typeset a book and an EPUB from story.json
@@ -128,6 +130,17 @@ def _clean(a) -> int:
             "  the final, its records, every asset and take stay; `make <job> --from render` remakes these"
         )
     return 0
+
+
+def _rehearse(a) -> int:
+    from . import rehearse
+
+    job = open_job(a.job)
+    report = rehearse.run(job)
+    for line in rehearse.lines(report):
+        print(line)
+    print(job.work / rehearse.REPORT)
+    return 1 if report["stopped"] else 0
 
 
 def _render_edit(job) -> int:
@@ -263,6 +276,9 @@ def main(argv: list[str] | None = None) -> int:
     cl = sub.add_parser("clean", help="delete rebuildable render intermediates")
     cl.add_argument("job")
     cl.add_argument("--dry-run", action="store_true")
+    rh = sub.add_parser("rehearse", help="what a job's paid stage would send and cost, unsent")
+    rh.add_argument("job")
+    sub.add_parser("review", help="a page of every take side by side").add_argument("job")
     sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
         "job"
     )
@@ -318,6 +334,13 @@ def main(argv: list[str] | None = None) -> int:
             return _bar(a)
         if a.cmd == "clean":
             return _clean(a)
+        if a.cmd == "rehearse":
+            return _rehearse(a)
+        if a.cmd == "review":
+            from . import reviewpage
+
+            print(reviewpage.write(open_job(a.job)))
+            return 0
         if a.cmd in ("comic", "story"):
             return _document(a)
         if a.cmd == "stage":

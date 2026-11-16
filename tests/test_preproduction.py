@@ -449,3 +449,9 @@ def test_with_no_animatic_accepted_a_flagged_still_is_not_sent_for_motion(tmp_pa
 
     assert len(_calls(studio, "judge")) == 3
     assert len(_calls(studio, "video")) == 2  # b1 was flagged; b2 and b3 move
+
+
+def test_the_gate_holds_for_a_paid_video_provider_with_no_key_loaded(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    job = _job(tmp_path, cost_cap=5.0, providers={"video": ["fal"], "image": ["fake"]})
+    assert preproduction.gate_active(job), "a missing key does not make the video free"

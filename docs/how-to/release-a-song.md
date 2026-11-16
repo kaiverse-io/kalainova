@@ -16,6 +16,16 @@ In `<out>/<job>/release/`:
 
 `final.wav` in the job's output folder is still the 24-bit, 48 kHz master the checks and the human gate read. The release files are made from it and are not separately checked.
 
+## Before you upload
+
+The engine stops at the files. These are the questions a distributor or a platform asks next, and the engine cannot answer them for you. Their rules change, so read the current ones each time.
+
+1. **What made it.** `kalainova provenance <job>` lists every provider and model behind the song, its stems and its cover. Each one's own terms decide whether its output may be sold, and who owns it.
+2. **The distributor's AI questions.** Answer them from that list. Where a store asks for AI credits, give them.
+3. **The video around it.** A platform may ask for a disclosure when AI-made music or an AI-made person is the focus of a video. Set it on upload. Repetitive or templated videos can lose monetization on some platforms, so vary them.
+4. **No one real.** No real artist's name, voice, or sound-alike in the brief, the lyrics, or the tags (AGENTS.md, hard rules).
+5. **Your approval.** `kalainova approve` binds your decision to the exact bytes you upload.
+
 ## Tags and a cover
 
 Title and artist come from `title` and `byline` in `song.json`. Add an optional `release` block for the rest:

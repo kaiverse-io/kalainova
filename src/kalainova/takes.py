@@ -168,10 +168,26 @@ def assess_clip(path: Path) -> tuple[dict[str, Any], bool]:
         return {"score": 0.0, "unmeasurable": "the clip could not be decoded"}, False
     limit = float(bar.limits()["shot_motion_min"])
     readings: dict[str, Any] = {"score": round(moved or 0.0, 4)}
+    if info.get("width") and info.get("height"):  # what the model made, before any scaling
+        readings.update(width=int(info["width"]), height=int(info["height"]))
     if moved is None:
         return {**readings, "unmeasurable": "too short to read its motion"}, False
     readings["shot_motion"] = round(moved, 4)
     return readings, moved >= limit
+
+
+def held_to(floor: int) -> Assess:
+    """assess_clip, where a clip made under floor pixels on its short side does not pass either.
+    Upscaling cannot add the detail a model did not make, so the take goes to a person."""
+
+    def assess(path: Path) -> tuple[dict[str, Any], bool]:
+        readings, ok = assess_clip(path)
+        w, h = readings.get("width"), readings.get("height")
+        if w and h and min(w, h) < floor:
+            return {**readings, "below_source_floor": f"{w}x{h}, under {floor}px a side"}, False
+        return readings, ok
+
+    return assess
 
 
 def attempt(

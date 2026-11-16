@@ -16,7 +16,7 @@ KINDS = ["video", "still", "video"]
 @pytest.fixture
 def per_clip(monkeypatch):
     """Every moving clip quoted at one dollar."""
-    monkeypatch.setattr(musicvideo.router, "quote", lambda job, cap, **kw: ("fal", 1.0))
+    monkeypatch.setattr(musicvideo.router, "price", lambda job, cap, **kw: ("fal", 1.0, []))
     return SimpleNamespace(id="v1", job={})
 
 
@@ -30,3 +30,35 @@ def test_two_planned_takes_are_quoted_twice(per_clip):
 def test_the_cap_is_held_against_every_planned_take(per_clip):
     with pytest.raises(ContractError, match="over the \\$3.00 cap"):
         musicvideo.estimate(per_clip, SPANS, KINDS, 0.5, lambda _: None, cap=3.0, takes_each=2)
+
+
+def test_a_missing_key_is_said_and_does_not_zero_the_quote(monkeypatch):
+    from kalainova.providers import router
+
+    monkeypatch.setattr(router, "price", lambda job, cap, **kw: ("fal", 1.0, ["FAL_KEY"]))
+    said: list[str] = []
+    spans = [{"start": 0.0, "end": 4.0}]
+    total = musicvideo.estimate(
+        SimpleNamespace(id="v1", job={}), spans, ["video"], 0.0, said.append
+    )
+    assert total == 1.0
+    assert "fal needs FAL_KEY" in said[0]
+
+
+def test_b_roll_is_priced_on_the_plain_model_and_each_shot_pays_for_its_still(monkeypatch):
+    from kalainova.providers import router
+
+    asked: list[tuple] = []
+
+    def price(job, cap, **kw):
+        asked.append((cap, kw.get("references"), kw.get("model")))
+        return ("fal", 0.15 if cap == "image" else (0.5 if kw.get("references") else 1.0), [])
+
+    monkeypatch.setattr(router, "price", price)
+    spans = [{"start": 0.0, "end": 3.0}, {"start": 3.0, "end": 6.0}]
+    total = musicvideo.estimate(
+        SimpleNamespace(id="v1", job={}), spans, ["video", "video"], 0.0, lambda _: None,
+        model="pinned", refs=[True, False], image_only=["fal"],
+    )  # fmt: skip
+    assert total == pytest.approx(0.5 + 1.0 + 2 * 0.15)
+    assert ("video", True, "pinned") in asked and ("video", False, None) in asked

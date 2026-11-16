@@ -138,6 +138,7 @@ def _make_parsers(sub: Any) -> None:
     video.add_argument("--excerpt", type=float)
     video.add_argument("--start", type=float)
     video.add_argument("--phrase-bars", type=int)
+    video.add_argument("--shots", type=Path, help="a shot list, one per line; B-roll: no character")
     found = sub.add_parser("research")
     found.add_argument("job")
     found.add_argument("question", nargs="?", default="")
@@ -343,6 +344,7 @@ def _song_video(a: argparse.Namespace) -> int:
         phrase_bars=a.phrase_bars,
         stream=getattr(a, "stream", None),
         cast=cast,
+        shots=getattr(a, "shots", None),
     )
     print(f"{folder}\nMake it with: kalainova make {a.new_id} --from assets")
     return 0

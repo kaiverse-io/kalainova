@@ -4,7 +4,10 @@ Free: fal serves each model's input schema with no key. Not part of CI (it needs
 Reads whichever config is active (KALAINOVA_CONFIG, else config/studio.yaml) and says which.
 
     uv run python scripts/check_fal_schemas.py
+    uv run python scripts/check_fal_schemas.py --rehearsal <job work>/rehearsal.json
 
+With --rehearsal it checks the requests a rehearsal wrote down (kalainova rehearse): every field
+each one would send is in the model's schema, and every field the schema requires is there.
 Covers request field names only, not reply parsing, prices, or other vendors.
 """
 
@@ -23,19 +26,48 @@ REPO = Path(__file__).resolve().parent.parent
 URL = "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id="
 
 
-def input_fields(model: str) -> set[str]:
+def schema(model: str) -> tuple[set[str], set[str]]:
+    """The request fields a model's input schema lists, and the ones it requires."""
     url = URL + urllib.parse.quote(model, safe="/")
     with urllib.request.urlopen(url, timeout=30) as r:  # noqa: S310 - fixed https host
         schemas = json.load(r)["components"]["schemas"]
     found: set[str] = set()
+    required: set[str] = set()
     for name, body in schemas.items():
         if name.endswith("Input") and "properties" in body and "Element" not in name:
             found |= set(body["properties"])
-    return found
+            required |= set(body.get("required") or [])
+    return found, required
+
+
+def input_fields(model: str) -> set[str]:
+    return schema(model)[0]
+
+
+def check_rehearsal(path: Path) -> int:
+    """Each request a rehearsal wrote down, against its model's live schema."""
+    report = json.loads(path.read_text())
+    bad = 0
+    for call in report.get("calls", []):
+        for req in call.get("requests", []):
+            model, sent = req["model"], set(req.get("payload") or {})
+            try:
+                have, need = schema(model)
+            except Exception as exc:  # noqa: BLE001 - report any network or schema failure per call
+                print(f"  ?  {call['n']} {model}: could not read its schema ({exc})")
+                bad += 1
+                continue
+            problems = [f"not in schema: {sorted(sent - have)}"] if sent - have else []
+            problems += [f"missing required: {sorted(need - sent)}"] if need - sent else []
+            print(f"  {'XX' if problems else 'ok'} {call['n']} {model}  {'; '.join(problems)}")
+            bad += bool(problems)
+    return 1 if bad else 0
 
 
 def _video_names(spec: dict) -> set[str]:
     names = {"prompt", "duration", *spec.get("extra", {})}
+    if spec.get("takes_seed", True):
+        names.add("seed")
     names |= {spec[k] for k in ("image_param", "end_image_param") if spec.get(k)}
     names.add(spec.get("aspect_param", "aspect_ratio"))
     return {n for n in names if n}
@@ -50,6 +82,8 @@ def _reference_names(cap: str, spec: dict) -> set[str]:
     names |= {spec[k] for k in ("start_image_param", "end_image_param") if spec.get(k)}
     if cap == "video":
         names |= {"duration", "aspect_ratio"}
+        if spec.get("takes_seed", True):
+            names.add("seed")
     return names
 
 
@@ -70,6 +104,8 @@ def expected(cfg: dict) -> dict[str, set[str]]:
 
 
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--rehearsal":
+        return check_rehearsal(Path(sys.argv[2]))
     base = REPO / "config" / "studio.yaml"
     cfg = yaml.safe_load(base.read_text())
     private = os.environ.get("KALAINOVA_CONFIG")

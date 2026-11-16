@@ -11,6 +11,7 @@ from kalainova.providers import fal
 
 STARTS_APART = "vendor/refs-and-first-frame"
 REFS_ONLY = "vendor/refs-only"
+UNSEEDED = "vendor/no-seed"
 
 TABLE = {
     "prices": {"fal": {"reference_to_video": {"per_sec": 0.28}, STARTS_APART: {"per_sec": 0.112}}},
@@ -24,6 +25,12 @@ TABLE = {
                     "start_image_param": "start_image_url",
                     "end_image_param": "end_image_url",
                     "durations": "5,10",
+                },
+                UNSEEDED: {
+                    "images_param": "image_urls",
+                    "max_images": 4,
+                    "tag": "@Image{n}",
+                    "takes_seed": False,
                 },
                 REFS_ONLY: {
                     "images_param": "reference_image_urls",
@@ -104,3 +111,17 @@ def test_a_reference_model_with_an_end_field_can_be_given_a_last_frame(monkeypat
     monkeypatch.setattr(config, "studio", lambda: TABLE)
     assert fal.Fal().takes_end_image("video", STARTS_APART)
     assert not fal.Fal().takes_end_image("video", REFS_ONLY)
+
+
+def test_a_model_with_no_seed_field_is_sent_none_and_the_take_says_so(sent, tmp_path):
+    result = clip(UNSEEDED, tmp_path, seed=42)
+    assert "seed" not in sent
+    assert result.meta["seed_sent"] is False and "seed" not in result.meta
+    clip(STARTS_APART, tmp_path, seed=42)
+    assert sent["seed"] == 42
+
+
+def test_a_reference_clip_is_priced_at_its_own_rate_and_billed_length(monkeypatch):
+    monkeypatch.setattr(config, "studio", lambda: TABLE)
+    asked = {"duration": 1.9, "image": True, "references": True}
+    assert fal.Fal().estimate("video", model=STARTS_APART, **asked) == pytest.approx(5 * 0.112)

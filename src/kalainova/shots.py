@@ -27,7 +27,9 @@ STILL_WORDS = re.compile(
 )
 _MOTION_WORDS = re.compile(
     r"\b(?:\w+ing|moves?|drifts?|rolls?|sweeps?|turns?|walks?|climbs?|rises?|falls?|flows?|pans?|"
-    r"tilts?|pushes?|pulls?|tracks?|dolly|sways?|runs?|crashes?|breaks?)\b",
+    r"tilts?|pushes?|pulls?|tracks?|dolly|sways?|runs?|crashes?|breaks?|lifts?|leans?|nods?|"
+    r"raises?|waves?|jumps?|spins?|shakes?|bounces?|dances?|claps?|reaches?|flashes?|pulses?|"
+    r"flickers?|flares?)\b",
     re.I,
 )
 ALIKE = 0.7  # cues sharing this much of their words read as the same shot twice

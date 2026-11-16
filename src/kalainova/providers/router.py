@@ -8,6 +8,7 @@ generate() walks the job's provider list and, for each attempt, applies the same
             a bug in an adapter (TypeError, AttributeError) is raised, not hidden
   output    a file must match the request and hold a picture, and only then reaches its destination
   reuse     a paid file is recorded the moment it exists, so a restart does not pay twice
+  rehearsal while one is open, nothing is sent: a paid provider that cannot rehearse refuses
 
 Only providers named in the list are tried. Nothing is added to it here.
 """
@@ -29,7 +30,7 @@ from typing import Any
 from .. import config, media, trace
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
-from . import base
+from . import base, rehearsal
 
 # capability -> the position of the destination path in the call's arguments
 OUTPUT_ARG = {
@@ -119,6 +120,29 @@ def quote(
     if not usable:
         return None
     return usable[0].name, usable[0].estimate(capability, **est)
+
+
+def first_listed(job: Job, capability: str, only: list[str] | None = None) -> base.Provider | None:
+    """The provider the job names first for this capability, whether or not its key is loaded."""
+    for name in only or config.preference(capability, job.job):
+        try:
+            p = base.get(name)
+        except KeyError:
+            continue
+        if capability in p.capabilities:
+            return p
+    return None
+
+
+def price(
+    job: Job, capability: str, *, only: list[str] | None = None, **est
+) -> tuple[str, float | None, list[str]] | None:
+    """What the first listed provider would charge, and what it still needs before a paid run.
+    A price comes from the table, so a quote needs no key. None when no provider is listed."""
+    p = first_listed(job, capability, only)
+    if p is None:
+        return None
+    return p.name, p.estimate(capability, **est), p.missing_env(capability)
 
 
 def _deadline(capability: str) -> float:
@@ -295,12 +319,19 @@ def generate(
                 "the caller must say how much it is asking for"
             )
             continue
+        dry = rehearsal.active()
+        if dry is not None and not (p.free or p.rehearses):
+            raise ContractError(
+                f"{job.id}: {p.name} cannot rehearse {capability}, so the rehearsal stops before it"
+            )
         reservation = job.reserve(p.name, capability, estimate or 0.0)
         call_args = list(args)
         attempt = None
         if has_output:
             attempt = dst.with_name(f".{uuid.uuid4().hex[:8]}.{dst.name}")
             call_args[OUTPUT_ARG[capability]] = attempt
+            if dry is not None and not p.free:
+                dry.begin(attempt, capability, p.name, estimate, note or fn_name)
         limit = _deadline(capability)
         call_kw = {**kw, "deadline_sec": limit} if p.self_timed else kw
         started = time.monotonic()
@@ -403,6 +434,8 @@ def generate(
                 )
                 errors.append(f"{p.name}: rejected output: {str(exc)[:200]}")
                 continue
+            if dry is not None and not p.free:
+                dry.settle(attempt, res.cost, res.model, res.meta)
             os.replace(attempt, dst)
             res.path = dst
             if not p.placeholder:
