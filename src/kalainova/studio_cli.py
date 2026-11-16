@@ -14,11 +14,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import consistency, kits, lookdev, streams
+from . import consistency, gates, kits, lookdev, streams
 from .jobfs import ContractError, home
 
 
 def add_parsers(sub: Any) -> None:
+    halt = sub.add_parser("stop", help="stop every paid call in this studio until resumed")
+    halt.add_argument("--by", required=True)
+    halt.add_argument("--why", default="")
+    sub.add_parser("resume", help="lift a stop").add_argument("--by", required=True)
     kit = sub.add_parser("kit").add_subparsers(dest="action", required=True)
     new = kit.add_parser("new")
     new.add_argument("kit")
@@ -211,15 +215,24 @@ def _look(a: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _spend(a: argparse.Namespace, root: Path) -> int:
+    """The kill switch: stop every paid call in this studio, or lift the stop."""
+    if a.cmd == "stop":
+        print(f"spend stopped: {gates.stop(root, a.by, a.why)}")
+    else:
+        gates.resume(root, a.by)
+        print("spend resumed; every paid call still needs its own gates")
+    return 0
+
+
 def dispatch(a: argparse.Namespace) -> int | None:
     """Run a command from this module, or None if it belongs to another."""
     root = home()
-    if a.cmd == "kit":
-        return _kit(a, root)
-    if a.cmd == "stream":
-        return _stream(a, root)
-    if a.cmd == "look":
-        return _look(a, root)
+    handler = {"stop": _spend, "resume": _spend, "kit": _kit, "stream": _stream, "look": _look}.get(
+        a.cmd
+    )
+    if handler is not None:
+        return handler(a, root)
     if a.cmd == "schedule":
         print(streams.schedule_add(root, a.stream, a.date, a.brief, cast=_names(a.cast)))
         return 0

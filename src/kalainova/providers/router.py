@@ -27,7 +27,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from .. import config, media, trace
+from .. import config, gates, media, trace
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
 from . import base, prices, records, rehearsal
@@ -94,14 +94,15 @@ def _corrected(
     """The provider's estimate, raised where the vendor's list price or this studio's own bills
     say the price table is low (providers/prices.py). A quote and a reservation both come here."""
     estimate = p.estimate(capability, **est)
+    if p.free:
+        return estimate
     try:
         factor, why = prices.correction(job, p, capability, {"model": model, **est})
-    except Exception as exc:  # noqa: BLE001 - a correction can only raise an estimate, never block it
-        print(
-            f"{job.id}: {capability}: the price check failed ({exc}); the table stands",
-            file=sys.stderr,
-        )
-        return estimate
+    except Exception as exc:  # noqa: BLE001 - any failure to check a price refuses the paid call
+        raise ContractError(
+            f"{job.id}: {capability} on {p.name}: the price could not be checked ({exc}), so "
+            "nothing is spent; fix the studio's price records and run again"
+        ) from exc
     if estimate and factor > 1:
         print(
             f"{job.id}: {capability} on {p.name}: estimate x{factor}, from {why}", file=sys.stderr
@@ -306,6 +307,8 @@ def generate(
             raise ContractError(
                 f"{job.id}: {p.name} cannot rehearse {capability}, so the rehearsal stops before it"
             )
+        if not p.free and dry is None:
+            gates.refuse_paid(job, p.name, capability)
         reservation = job.reserve(p.name, capability, estimate or 0.0)
         call_args = list(args)
         attempt, aid, asked = None, uuid.uuid4().hex[:12], kw.get("model")

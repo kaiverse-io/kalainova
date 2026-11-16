@@ -116,6 +116,9 @@ What happens on one model call. The engine depends on the contract, never on a v
  Rehearsal open, and the first listed provider, key or not, costs money and cannot rehearse? ──yes──▶ stop
    │ no
    ▼
+ Paid, and spend is stopped in this studio (gates)? ──yes──▶ refuse, nothing reserved
+   │ no
+   ▼
  Priced, or the job has no cap? ──no──▶ next listed provider
    │ yes
    ▼
@@ -344,6 +347,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ bench ─────▶ consistency, shotmake, shots, takes, timeline, config, providers
     ├─▶ rehearse ──▶ assets, preproduction, takes, providers
     ├─▶ reviewpage ▶ consistency, kits, takes
+    ├─▶ gates ─────▶ jobfs: what must be true before a paid call (router asks it first)
     ├─▶ shots ─────▶ config
     ├─▶ edit ──────▶ config
     ├─▶ render ────▶ bar, captions, look, motion, media, mediascan
@@ -371,7 +375,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ variants ──▶ jobfs
     ├─▶ templates ─▶ jobfs
     ├─▶ stock
-    ├─▶ router ─────▶ trace ─▶ fingerprint: every call's labels, attempt and engine commit
+    ├─▶ router ─────▶ gates, trace ─▶ fingerprint: gates first; every call's labels, attempt, commit
     ├─▶ fingerprint ─▶ jobfs
     ├─▶ host ────────▶ config
     ├─▶ scorecard ───▶ jobfs
@@ -465,6 +469,9 @@ A dry run of a job's paid stage. The job is copied to a throwaway folder that se
                    ▼
    rehearsal.json in the real job's work: requests, fields, estimates, gate, where it stopped
 ```
+
+### gates
+What must be true before money leaves (ADR 0022, proposed). The router asks it before reserving any paid call, and a gate that fails or cannot be read refuses; it never lets the call through. Free providers and rehearsals pass. Built so far: the kill switch. While `<studio>/STOP` exists, every paid call refuses; `kalainova stop --by NAME` and `kalainova resume --by NAME` write and remove it, and log it in `<studio>/gates.log.jsonl`. To come: studio-wide limits, signed packages, and a spend broker that alone holds the vendor key. Depends on `jobfs`.
 
 ### reviewpage
 One local page to judge a piece's takes by eye: the kit's faces, each moving shot's start frame, and every take side by side with its model, seed, cost, size and what its readings flag (unread, under the source size, missed motion, no start frame). Under each shot it lists the faults only a person can see (hands, melting objects, morphing, warped text, face drift) and the `verdict` and `take` commands to record a decision. It writes `review.html` next to the takes and changes nothing else. Depends on `consistency`, `kits`, and `takes`.

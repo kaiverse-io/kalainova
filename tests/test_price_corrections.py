@@ -88,3 +88,22 @@ def test_the_list_price_is_read_at_most_once_a_day(tmp_path, table):
     prices.listed(job, "vendor", MODEL, fetch)
     assert reads == [MODEL, MODEL]
     assert prices.listed(job, "vendor", MODEL, None)["unit_price"] == 0.14  # no reader: the cache
+
+
+def test_a_price_that_cannot_be_checked_refuses_the_paid_call(tmp_path, monkeypatch):
+    # Fail closed: a broken price record must stop spend, not fall back to the table
+    from kalainova.jobfs import ContractError
+    from kalainova.providers import router
+
+    class Paid:
+        name, free = "paid", False
+
+        def estimate(self, capability, **est):
+            return 1.0
+
+    def broken(*a, **kw):
+        raise ValueError("corrupt price record")
+
+    monkeypatch.setattr(prices, "correction", broken)
+    with pytest.raises(ContractError, match="could not be checked"):
+        router._corrected(make_job(tmp_path), Paid(), "video", {}, "m")
