@@ -25,4 +25,5 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0019](0019-self-hosted-models-workflow-runtime.md) | Self-hosted models through one workflow runtime |
 | [0020](0020-a-short-animatic-is-cut-from-its-rented-stills.md) | A short's animatic is cut from its rented stills |
 | [0021](0021-cuts-scenes-and-generations-are-counted-apart.md) | Cuts, scenes and generations are counted apart, and code packs the paid ones |
+| [0022](0022-no-paid-call-without-a-signed-package.md) | No paid call without a person's signature over exactly what it buys |
 | [0023](0023-the-engine-speaks-to-models-in-its-own-terms.md) | The engine speaks to models in its own terms: typed requests, transports, and a contract every adapter passes |

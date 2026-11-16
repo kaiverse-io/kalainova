@@ -9,8 +9,9 @@ uv run kalainova providers --check <provider> --job <job> --spend
 
 1. Use a job with a `cost_cap`. The calls go through the router, so the ledger records them and the cap holds.
 2. The first command prints each call and its estimated cost, then refuses. Read the estimate.
-3. Add `--spend` to make the calls. It never runs when `CI`, `GITHUB_ACTIONS`, or a pytest run is detected, and no recipe in `just ci` calls it.
-4. Keys come from the environment, as `connect-a-provider` describes. Nothing prints one.
+3. Sign for the calls first: an allowance package for that job, capability and provider (`kalainova package <job> allowance ...`, then `kalainova sign`). See [How to sign off paid work](sign-off-paid-work.md).
+4. Add `--spend` to make the calls. It never runs when `CI`, `GITHUB_ACTIONS`, or a pytest run is detected, and no recipe in `just ci` calls it.
+5. Keys come from the environment, as `connect-a-provider` describes. Nothing prints one.
 
 Each capability reports one of:
 

@@ -66,7 +66,8 @@ def estimated_length(beat: Fields) -> float:
 def moving_quotes(
     piece: _Scene, spans: list[float] | None = None
 ) -> list[tuple[str, float | None]]:
-    """What each moving shot should cost at the takes always made, shot by shot.
+    """What each moving shot should still cost at the takes always made, shot by shot. A take an
+    earlier run made, and the lip sync and end frame that went with it, are not paid for again.
 
     None for a shot whose model has no price. The lip sync and the end frame count with the shot
     they belong to. Priced at the length each shot will be asked for: once the voice has set the
@@ -84,21 +85,31 @@ def moving_quotes(
     return out
 
 
+def _made(piece: _Scene, beat: Fields) -> int:
+    """Takes of this shot an earlier run made; a bench take is a camera test and does not count."""
+    found = takes.load(piece.job)["shots"].get(beat["id"], {}).get("takes", [])
+    return len([t for t in found if not t.get("bench")])
+
+
 def _shot_cost(piece: _Scene, beat: Fields, length: float, always: int) -> float | None:
     """Priced as the shot will be asked for: a shot with a character on the pinned reference model,
     one without (B-roll) on the plain one. A price needs no key."""
+    new = max(always - _made(piece, beat), 0)
+    synced = (piece.job.work / "beats" / f"{beat['id']}.video.presync.mp4").is_file()
+    if not new and (synced or not beat.get("on_camera")):
+        return 0.0  # every take is made, and its lip sync with it
     kw = shotmake.shot_kw(piece.resolved, piece.lock, "video", beat)
     asked = Billable(capability="video", duration=length, image=True, references=bool(kw))
     quote = router.price(piece.job, asked, pin=kw.pin)
     if quote is None or quote[1] is None:
         return None
-    total = quote[1] * always
-    if beat.get("on_camera"):
+    total = quote[1] * new
+    if beat.get("on_camera") and not synced:
         sync = router.price(piece.job, Billable(capability="lipsync", duration=length))
         if sync is not None and sync[1] is None:
             return None
         total += sync[1] if sync and sync[1] else 0.0
-    if shotmake.end_frame_used(piece.job, beat, kw):
+    if new and shotmake.end_frame_used(piece.job, beat, kw):
         end = router.price(piece.job, Billable(capability="image"))
         if end is None or end[1] is None:
             return None

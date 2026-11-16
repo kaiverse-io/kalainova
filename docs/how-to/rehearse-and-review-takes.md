@@ -22,9 +22,11 @@ What it cannot tell you:
 
 - How a model will read the request. Stand-ins are test patterns.
 - What a vendor charges beyond its listed price. The estimate is the price table's.
-- Anything about a provider that cannot rehearse. Only `fal` can today. Any other paid provider stops the rehearsal before it is called, and the report says where.
+- Anything about a provider that cannot rehearse. Every rented vendor reaches its service through a transport and can (ADR 0023); a paid provider that cannot stops the rehearsal before it is called, and the report says where.
   That holds even when its key is missing. The real run calls the first listed provider once its key is set, so a rehearsal never steps past it to show a different route.
   To rehearse past it, pin the job to a provider that can, for example `"providers": {"music": ["fal"]}` in `job.json`.
+
+To run what the rehearsal showed, a person signs for it: `uv run kalainova package <job> stills` (or `motion`) writes the same calls as a package, and nothing paid runs until it is signed. See [How to sign off paid work](sign-off-paid-work.md).
 
 The animatic gate is passed in the copy only, so the rehearsal can reach the moving shots. The real run still makes no video until you accept the animatic (see [How to watch a rough cut](watch-a-rough-cut.md)).
 

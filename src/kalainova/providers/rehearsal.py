@@ -24,6 +24,7 @@ from typing import Any
 
 from .. import media
 from ..blobstore import sha256_file
+from . import payloads
 from .contract import (
     ImageRequest,
     LipsyncRequest,
@@ -62,6 +63,7 @@ class Rehearsal:
         *,
         key: str = "",
         model: str | None = None,
+        routed: str = "",
     ) -> None:
         with _guard:
             self._asked[attempt] = request
@@ -70,6 +72,7 @@ class Rehearsal:
                 "capability": request.capability,
                 "provider": provider,
                 "model": model,
+                "routed": routed or model or "",  # the model it is sent to, as a package binds it
                 "note": note,
                 "estimate": round(float(estimate or 0.0), 6),
                 "key": key,
@@ -100,7 +103,12 @@ class Rehearsal:
     ) -> str:
         """Write down what the adapter would send, with what the vendor's schema says of it, under
         the router's call for this attempt; answer with the address its file would come back at."""
-        entry: dict[str, Any] = {"model": model, "payload": payload}
+        entry: dict[str, Any] = {
+            "model": model,
+            "payload": payload,
+            "sealed": payloads.sealed(payload),  # each uploaded file named by its bytes
+            "digest": payloads.digest(model, payload),  # what a package signs (ADR 0022)
+        }
         if problems is not None:
             entry["schema"] = problems or "ok"
         with _guard:

@@ -98,6 +98,7 @@ class Context:
     model: str | None = None  # the pinned model for this provider, else the adapter's default
     deadline_sec: float | None = None  # for an adapter that keeps its own deadline
     receipt: Receipt = field(default_factory=Receipt)
+    signed: tuple[str, ...] | None = None  # the payload digests a person signed; None: unbound
 
 
 @dataclass(frozen=True)

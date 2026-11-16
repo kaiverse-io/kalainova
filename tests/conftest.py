@@ -22,6 +22,8 @@ import pytest  # noqa: E402 - after the lab's settings are cleared, on purpose
 from fakes import studio  # noqa: E402 - after the lab's settings are cleared, on purpose
 from kit_fixtures import root  # noqa: E402 - after the lab's settings are cleared, on purpose
 
+from kalainova import gates  # noqa: E402 - after the lab's settings are cleared, on purpose
+
 __all__ = ["root", "studio"]
 
 PROVIDER_KEYS = (
@@ -62,3 +64,12 @@ def _no_lab_and_output_in_a_temp_folder(
     for name in LAB_SETTINGS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path_factory.mktemp("out")))
+
+
+@pytest.fixture(autouse=True)
+def _signed_off(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test's paid calls are signed off, so it tests what it names. A test of the sign-off itself
+    is marked `gated` and meets the real gate (gates.admit)."""
+    if request.node.get_closest_marker("gated"):
+        return
+    monkeypatch.setattr(gates, "admit", lambda call, reserve: (None, reserve()))

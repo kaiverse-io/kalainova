@@ -119,6 +119,9 @@ addopts = [
     # Keep in sync with [tool.coverage.report] fail_under (same Copier answer).
     "--cov-fail-under=80",
 ]
+markers = [
+    "gated: meets the real sign-off gate (ADR 0022) instead of the one every other test passes",
+]
 
 [tool.coverage.run]
 source = ["kalainova"]
