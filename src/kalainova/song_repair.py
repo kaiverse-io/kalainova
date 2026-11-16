@@ -3,14 +3,38 @@
 from __future__ import annotations
 
 import hashlib
-import shutil
 from typing import Any
 
-from . import takes
+from . import config, media, takes
+from .bar import song as musicbar
 from .jobfs import ContractError, Job
-from .providers import router
+from .providers import base, router
 
 SHOT = "song"
+
+
+def _repainter(job: Job) -> str:
+    """The first ready song provider that can repaint a span. Refused before any work if none can.
+
+    A repair never falls back to copying the take: a copy would be recorded as a repaired take
+    that changed nothing.
+    """
+    tried = []
+    for name in config.preference("song", job.job):
+        try:
+            p = base.get(name)
+        except KeyError:
+            continue
+        if "song" not in p.capabilities or not p.available("song"):
+            continue
+        if getattr(p, "supports_song_repaint", lambda: False)():
+            return name
+        tried.append(name)
+    raise ContractError(
+        f"{job.id}: no ready song provider can repaint a section "
+        f"(ready: {', '.join(tried) or 'none'}). The local ACE-Step route can: "
+        "set models.mac.song to ace-step and put mac in the song preference."
+    )
 
 
 def _repair_span(
@@ -71,47 +95,44 @@ def repair_take(
     original = job.work / target["file"]
     if not original.is_file():
         raise ContractError(f"{job.id}: missing audio for song take {target['n']}: {original}")
+    painter = _repainter(job)
     new_n = max(t["n"] for t in existing) + 1
     dst = takes.take_path(job, SHOT, new_n, "-repaired.wav")
     style = prompt or style_text(song)
-    generated: tuple[Any, Any] | None = None
-    provider_runner = router.first_usable(job, "song")
-    can_repaint = bool(
-        provider_runner and getattr(provider_runner, "supports_song_repaint", lambda: False)()
+    seconds = media.duration(original)
+    provider, result = router.generate(
+        job,
+        "song",
+        "song",
+        lyrics_text(song),
+        dst,
+        style=style,
+        duration=seconds,
+        seed=takes.seed_for(prompt or style, new_n),
+        task_type="repaint",
+        src_audio_path=original,
+        repainting_start=start,
+        repainting_end=end,
+        est={"duration": seconds},
+        only=[painter],
+        note="song repair",
     )
-    if can_repaint:
-        generated = router.generate(
-            job,
-            "song",
-            "song",
-            lyrics_text(song),
-            dst,
-            style=style,
-            duration=float(song.get("duration_sec") or end),
-            seed=takes.seed_for(prompt or style, new_n),
-            task_type="repaint",
-            src_audio_path=original,
-            repainting_start=start,
-            repainting_end=end,
-            est={"duration": float(song.get("duration_sec") or end)},
-            note="song repair",
-        )
-    if generated:
-        provider, result = generated
-        seed = int((result.meta or {}).get("seed", 0))
-        extra = {"provider": provider.name, "model": result.model}
-    else:
-        shutil.copy2(original, dst)
-        seed = int(target.get("seed", 0))
-        extra = {"provider": "copy", "model": "copy"}
+    # measured like any take, so the person compares two takes on the same readings
+    report = musicbar.measure(dst, song, None)
+    misses = [r["id"] for r in report["readings"] if not r["ok"]]
     new_take: dict[str, Any] = {
         "n": new_n,
-        "seed": seed,
+        "seed": int((result.meta or {}).get("seed", 0)),
         "file": str(dst.relative_to(job.work)),
         "sha256": hashlib.sha256(dst.read_bytes()).hexdigest(),
-        "ok": True,
-        "readings": {},
-        **extra,
+        "ok": not misses,
+        "readings": {
+            "score": musicbar.score(report),
+            "misses": misses,
+            "readings": report["readings"],
+        },
+        "provider": provider.name,
+        "model": result.model,
         "prompt": prompt,
         "repaired_from": target["n"],
         "repair_section": section,

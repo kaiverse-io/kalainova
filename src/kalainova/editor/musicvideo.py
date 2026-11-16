@@ -64,28 +64,51 @@ def _visual(song: dict[str, Any], span: mc.Span) -> str:
     return str(song["style"])
 
 
+BROLL = "b-roll:"
+
+
+def read_shots(path: Path) -> list[str]:
+    """A shot list: one shot per line, in order, repeated when the cut has more shots than lines.
+    A line that starts with "B-roll:" is a shot with no character in it. # starts a comment."""
+    lines = [ln.strip() for ln in path.read_text().splitlines()]
+    found = [ln for ln in lines if ln and not ln.startswith("#")]
+    if not found:
+        raise ContractError(f"{path}: the shot list has no shots")
+    return found
+
+
+def _listed(line: str, cast: list[str] | None) -> tuple[str, list[str] | None]:
+    if line.lower().startswith(BROLL):
+        return line[len(BROLL) :].strip(), []
+    return line, cast
+
+
 def beats_for(
     song: dict[str, Any],
     spans: list[mc.Span],
     kinds: list[str],
     cast: list[str] | None = None,
     silent: bool = False,
+    shot_list: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     out = []
     for n, span in enumerate(spans):
         text = "" if (silent or song.get("instrumental")) else (span["text"] or song["title"])
+        cue, people = _visual(song, span), cast
+        if shot_list:  # the operator's own shots, which name their framing
+            cue, people = _listed(shot_list[n % len(shot_list)], cast)
         beat: dict[str, Any] = {
             "id": f"s{n:02d}",
             "role": "hook" if n == 0 else ("payoff" if n == len(spans) - 1 else "body"),
             "text": text,
-            "visual_cue": _visual(song, span),
+            "visual_cue": cue,
             "visual_kind": kinds[n],
             "duration_sec": round(span["end"] - span["start"], 3),
         }
-        if cast:
-            beat["cast"] = list(cast)
+        if people is not None and (people or cast):
+            beat["cast"] = list(people)
         shot: dict[str, str] = {}
-        if span.get("angle"):
+        if span.get("angle") and not shot_list:
             shot["size"] = span["angle"]
         if span.get("strong"):
             shot["camera"] = "a short push in as the energy lifts"
@@ -114,29 +137,47 @@ def estimate(
     cap: float | None = None,
     only: list[str] | None = None,
     model: str | None = None,
+    takes_each: int | None = None,
+    refs: list[bool] | None = None,
+    image_only: list[str] | None = None,
 ) -> float:
     """Shots, seconds, and the price of the moving ones, said before any call. Refuses past the cap.
-    Each clip is priced at its generated length: the slot plus a beat to trim from."""
-    moving = [s for s, k in zip(spans, kinds, strict=True) if k == "video"]
+    Each clip is priced at its generated length: the slot plus a beat to trim from, times the takes
+    every moving shot is planned to get (a paid model makes exactly those)."""
+    each = takes_each if takes_each is not None else takes.counts({})[0]
+    held = refs if refs is not None else [True] * len(spans)  # a character in frame, by default
+    moving = [(s, r) for s, k, r in zip(spans, kinds, held, strict=True) if k == "video"]
     seconds = sum(s["end"] - s["start"] for s in spans)
-    total, unpriced = 0.0, False
-    for span in moving:
-        quote = router.quote(
+    total, unpriced, needs = 0.0, False, set()
+    for span, with_refs in moving:  # B-roll goes to the plain model, at its own price
+        quote = router.price(
             job,
             "video",
             duration=span["end"] - span["start"] + pad,
             image=True,
-            references=True,
+            references=with_refs,
             only=only,
-            model=model,
+            model=model if with_refs else None,
         )
         if quote is None or quote[1] is None:
             unpriced = True
         else:
-            total += quote[1]
+            total += quote[1] * each
+            needs |= {f"{quote[0]} needs {key}" for key in quote[2]}
+    stills = 0.0
+    for _ in spans if image_only else []:  # every shot starts from a rented still
+        still = router.price(job, "image", only=image_only)
+        if still is None or still[1] is None:
+            unpriced = True
+        else:
+            stills += still[1]
+    total += stills
     say(
-        f"{len(spans)} shots, {seconds:.1f}s, {len(moving)} moving: about ${total:.2f}"
-        + (" (some shots have no ready, priced provider)" if unpriced else "")
+        f"{len(spans)} shots, {seconds:.1f}s, {len(moving)} moving, {each} take(s) each: "
+        f"about ${total:.2f}"
+        + (f", ${stills:.2f} of it for a still a shot" if stills else "")
+        + (" (some shots have no priced provider, so the total is low)" if unpriced else "")
+        + (f"; before the paid run, {', '.join(sorted(needs))}" if needs else "")
     )
     limit = cap if cap is not None else job.job.get("cost_cap")
     if limit is not None and total > float(limit):
@@ -203,6 +244,7 @@ def build(
     phrase_bars: int | None = None,
     stream: str | None = None,
     cast: list[str] | None = None,
+    shot_list: list[str] | None = None,
     say: Say = print,
 ) -> Path:
     stream_data, chosen, kit_lock, stream_providers, stream_video_model = (
@@ -230,8 +272,7 @@ def build(
     ceiling = (
         shots.character_ceiling({"profile": profile, "brief": brief_in}) if stream_id else None
     )
-    if by_music:
-        spans = mc.split_for_ceiling(spans, found, ceiling)
+    spans = mc.split_for_ceiling(spans, found, ceiling)  # lyric lines too: a face drifts either way
     notes = list(found["notes"])
     a, b = 0.0, length
     if excerpt:
@@ -247,6 +288,10 @@ def build(
         )
     kinds = _kinds(spans, still_only, moving)
     pad = (60 / found["bpm"]) if found["bpm"] else 0.5
+    cast_in = [
+        bool(_listed(shot_list[n % len(shot_list)], chosen)[1] if shot_list else chosen)
+        for n in range(len(spans))
+    ]
     cost = estimate(
         job,
         spans,
@@ -256,6 +301,8 @@ def build(
         cap=stream_data.get("cost_cap_per_job") if stream_data else None,
         only=stream_providers.get("video") if stream_providers else None,
         model=stream_video_model,
+        refs=cast_in,
+        image_only=stream_providers.get("image") if stream_providers else None,
     )
     for note in notes:
         say(f"note: {note}")
@@ -334,6 +381,7 @@ def build(
                 kinds,
                 cast=chosen,
                 silent=bool(stream_data and stream_data.get("silent")),
+                shot_list=shot_list,
             ),
             **hooks_data,
             **({"publish": song["publish"]} if song.get("publish") else {}),

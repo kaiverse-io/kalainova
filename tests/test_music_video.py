@@ -228,7 +228,7 @@ def test_qa_warns_when_the_cuts_of_a_track_video_are_off_the_grid(tmp_path, monk
 
 def test_the_estimate_is_said_before_any_call_and_a_costly_plan_is_refused(tmp_path, monkeypatch):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
-    monkeypatch.setattr(router, "quote", lambda *a, **k: ("fake", 1.0))
+    monkeypatch.setattr(router, "price", lambda *a, **k: ("fake", 1.0, []))
     track = _track(tmp_path / "t.wav")
     said: list[str] = []
     job = _parent(tmp_path, cost_cap=2.0)
@@ -412,14 +412,14 @@ def test_song_video_stream_pinned_model_passed_to_estimate(tmp_path, monkeypatch
     _track(song_job.work / "final.wav", seconds=12.0)
 
     quoted_models = []
-    real_quote = router.quote
+    real_quote = router.price
 
     def spy_quote(job, cap, *args, **kwargs):
         if cap == "video":
             quoted_models.append(kwargs.get("model"))
         return real_quote(job, cap, *args, **kwargs)
 
-    with patch("kalainova.providers.router.quote", side_effect=spy_quote):
+    with patch("kalainova.providers.router.price", side_effect=spy_quote):
         songs.video_job(song_job, "s6-video", stream="chan-pin")
 
     assert "vid-pinned" in quoted_models
@@ -441,3 +441,37 @@ def test_song_video_stream_preserves_licensed_rights(tmp_path, monkeypatch):
     child_folder = songs.video_job(song_job, "s7-video", stream="owned-stream")
     child = Job(child_folder)
     assert child.job.get("rights") == "licensed"
+
+
+def test_a_lyric_led_cut_keeps_a_character_under_the_ceiling(tmp_path, monkeypatch):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    cues = [{"start_sec": 0.5, "end_sec": 11.0, "text": "one long line"},
+            {"start_sec": 11.0, "end_sec": 22.0, "text": "another long line"}]  # fmt: skip
+    child = musicvideo.build(
+        _locked_parent(tmp_path), "p1-video", song=_song(), cues=cues, words=[],
+        final=_track(tmp_path / "t.wav"), manifest={"assets": [{}]}, profile="short-9x16",
+        still_only=False, say=lambda _: None,
+    )  # fmt: skip
+    beats = Job(child).read("script_packet")["beats"]
+    assert max(b["duration_sec"] for b in beats) <= 3.2 + 1e-6
+
+
+def test_a_shot_list_names_each_shot_and_b_roll_has_no_character(tmp_path):
+    listed = tmp_path / "shots.txt"
+    listed.write_text(
+        "# the operator's shots\nover the shoulder at the decks\n\nB-roll: hands on the faders\n"
+    )
+    spans = [{"start": float(i), "end": i + 1.0, "text": "", "angle": "wide"} for i in range(3)]
+    beats = musicvideo.beats_for(
+        _song(), spans, ["video"] * 3, cast=["lead"], shot_list=musicvideo.read_shots(listed)
+    )
+    assert [b["visual_cue"] for b in beats] == [
+        "over the shoulder at the decks",
+        "hands on the faders",
+        "over the shoulder at the decks",
+    ]
+    assert [b["cast"] for b in beats] == [["lead"], [], ["lead"]]
+    assert not any("shot" in b for b in beats), "a listed shot names its own framing"
+    (tmp_path / "empty.txt").write_text("# nothing\n")
+    with pytest.raises(ContractError, match="no shots"):
+        musicvideo.read_shots(tmp_path / "empty.txt")

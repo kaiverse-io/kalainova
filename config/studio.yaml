@@ -95,8 +95,11 @@ models:
 openai_compat: {}
 
 prices:
-  anthropic:
-    llm: {input_per_mtok: 15.0, output_per_mtok: 75.0}
+  anthropic:                       # a model's own row wins over the capability's; a call settles at the model it ran on
+    llm: {input_per_mtok: 4.0, output_per_mtok: 20.0}       # the planner, claude-opus-5-5
+    judge: {input_per_mtok: 1.0, output_per_mtok: 5.0}      # the model check, claude-haiku-4-5. Without a row a capped job refuses it
+    claude-opus-5-5: {input_per_mtok: 4.0, output_per_mtok: 20.0}
+    claude-haiku-4-5: {input_per_mtok: 1.0, output_per_mtok: 5.0}
   elevenlabs:
     voice: {per_kchar: 0.04}       # v4 Turbo $40 / 1M chars
     music: {per_min: 0.80}
@@ -107,17 +110,21 @@ prices:
     video: {per_sec: 0.28}         # Wan 3.0 Prime at 1080p
     image_to_video: {per_sec: 0.28}
     reference_to_video: {per_sec: 0.28}
+    # A model's own row wins over its capability's. Without one, a cheaper model is estimated and
+    # recorded at the capability's rate. Audio off; fal's pages, read 2026-11-16.
+    fal-ai/kling-video/o3/pro/reference-to-video: {per_sec: 0.112}
+    fal-ai/kling-video/v3/pro/image-to-video: {per_sec: 0.112}
     music: {per_track: 0.04}
     song: {per_track: 0.15}        # ESTIMATE
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007}    # ESTIMATE: per second of the mix. VERIFY on fal's page before a paid run
     lipsync: {per_min: 3.00}       # ESTIMATE
     motion: {cost_usd: 0.02}
+    transcribe: {per_min: 0.01}
   mac:
     motion: {free: true}
   local:
     motion: {free: true}
-    transcribe: {per_min: 0.01}
   exa:
     search: {per_call: 0.01}       # ESTIMATE
 
@@ -208,15 +215,20 @@ reference_models:
         images_param: image_urls
         max_images: 9
         tag: "@Image{n}"
+        takes_seed: false                 # its schema lists no seed, so none is sent
         durations: "4,5,6,8,10,12,15"
         extra: {generate_audio: false}
       fal-ai/kling-video/o3/pro/reference-to-video:
         elements: true
-        max_images: 7
+        max_images: 4                     # fal: "Maximum 4 total (elements + reference images)"
+        start_image_param: start_image_url  # the first frame, apart from the references
+        end_image_param: end_image_url
+        takes_seed: false                 # its schema lists no seed, so none is sent
         durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
 
 # How each plain video model takes its inputs, from the vendor's published schema. aspect_param names
-# the field for the aspect ratio; null sends none. scripts/check_fal_schemas.py compares every name here.
+# the field for the aspect ratio; null sends none. takes_seed: false marks a model with no seed field.
+# scripts/check_fal_schemas.py compares every name here.
 video_models:
   fal:
     alibaba/wan-3.0-prime/image-to-video:
@@ -233,17 +245,34 @@ video_models:
       image_param: start_image_url
       end_image_param: end_image_url
       aspect_param: null               # its schema lists no aspect_ratio; the frame sets the shape
+      takes_seed: false                # nor a seed, so none is sent
       durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
       extra: {generate_audio: false}
     bytedance/seedance-2.5/image-to-video:
       image_param: image_url
       end_image_param: end_image_url
+      takes_seed: false
       durations: "4,5,6,8,10,12,15"
       extra: {generate_audio: false}
 
+# Whether a picture or a video shows a kit's character: every face in it, compared with the kit's
+# faces (bar/identity.py). The engine ships no face model. face_command takes `--out FILE` and
+# image paths after it, and writes {path: [{box, score, embedding}]}. providers/runners/face_run.py
+# does this with OpenCV's YuNet, embedding with SFace, or with ArcFace given --arcface FILE:
+#   face_command: [~/models/.venv/bin/python, src/kalainova/providers/runners/face_run.py, --models, ~/models/face]
+# With none set, identity is not measured, and the check says so; it never passes by default.
+# The limits belong to the recognizer, so set them with the command. Measured on one character's
+# generated stills and clips (docs/how-to/run-models-on-a-mac.md): ArcFace separated her (0.62)
+# from look-alikes of the same image model (0.42-0.52), with same_face_min 0.57, clip_median_min
+# 0.50 and lost_below 0.45; SFace did not separate them. Every reading warns and none blocks.
+identity:
+  face_command: []
+  same_face_min: 0.363     # a face in a picture is the character at or above this (SFace's published limit)
+  clip_median_min: 0.363   # a video holds the character when its sampled frames' median closest face reaches this
+  lost_below: 0.25         # a sampled frame whose closest face is below this has lost the character
+
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:
-  face_distance_max: 0.40
   stutter_max: 0.08
   cuts_per_min_max: 40
   banding_max: 0.03
@@ -256,7 +285,7 @@ bar:
   hard_cuts_per_min_max: 6
   digital_silence_sec_max: 0.2
   ending_drop_db_max: -12
-  audio_groove_steadiness_min: 0.70
+  audio_groove_steadiness_min: 0.50    # pulse clarity: steady grooves read near 1, 30 ms of jitter about 0.4, random onsets under 0.1. Warns; not calibrated on verdicts
   audio_pitch_snapping_max: 0.85
   audio_crest_factor_min: 6.0
   audio_stereo_width_min: 0.05
@@ -278,18 +307,21 @@ bar:
   song_range_lu_min: 2.0           # less than this has no shape between sections
   song_length_tolerance: 0.25
 
+# character_source_min_px: the smallest a model may make a shot with a character in it, on its short
+#   side. Upscaling adds no detail a model did not make, so a take under it does not pass and goes to
+#   a person, who can still choose it. 720p models make drafts and shots without people.
 # character_shot_max_sec: the longest a shot with a character in it should run before a face tends
 #   to drift. ESTIMATE until a live check shows where drift starts. Warns only; a brief overrides it.
 # safe_zone: where the interface overlays of a short vertical player leave room, as fractions of the
 #   frame. Burned text sits in caption_y, never below caption_floor, clear of the right margin; a face
 #   centre sits in face_y. ESTIMATE. Warns only.
 profiles:
-  short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2, safe_zone: {caption_y: [0.55, 0.72], caption_floor: 0.75, right_margin: 0.15, face_y: [0.15, 0.75]}}
-  square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
-  landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
+  short-9x16: {aspect: "9:16", width: 1080, height: 1920, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2, safe_zone: {caption_y: [0.55, 0.72], caption_floor: 0.75, right_margin: 0.15, face_y: [0.15, 0.75]}}
+  square: {aspect: "1:1", width: 1080, height: 1080, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
+  landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
   song: {aspect: "audio-only", target_lufs: -14, true_peak_dbtp_max: -1}
-  story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
+  story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
-  film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
-  film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
+  film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
+  film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}

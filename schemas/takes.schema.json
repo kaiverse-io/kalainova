@@ -98,6 +98,10 @@
                   "type": "boolean",
                   "description": "A camera test: made to compare models, and never chosen over a real take."
                 },
+                "conditioning": {
+                  "type": "string",
+                  "description": "What a bench take's model was given (start frame, references), so takes given different inputs are not compared as equals."
+                },
                 "meta": {
                   "type": "object"
                 },

@@ -53,6 +53,22 @@ uv run kalainova make <new id> --from assets
 
 This opens a job with a shot for each lyric line, starting on the beat, the track unchanged, and the lyrics as captions. Add `--stills` for stills instead of generated clips.
 
-A track with few or no lyric lines is cut to its music instead. Bars are four beats. A phrase is 8 bars, or 4 where the energy is high (`--phrase-bars N` fixes it), a section that names its `bars` in `song.json` starts a shot, and the biggest rise in energy gets a cut where the drop lands. A shot with a character in it is split into whole bars from another angle (wide, close, medium) so it never runs past `character_shot_max_sec`. If the detector finds no steady pulse, the command says so and stops; it never cuts on a guess. With no clear energy peak it still cuts on phrases and says there is no drop.
+A track with few or no lyric lines is cut to its music instead. Bars are four beats. A phrase is 8 bars, or 4 where the energy is high (`--phrase-bars N` fixes it), a section that names its `bars` in `song.json` starts a shot, and the biggest rise in energy gets a cut where the drop lands. If the detector finds no steady pulse, the command says so and stops; it never cuts on a guess. With no clear energy peak it still cuts on phrases and says there is no drop.
 
-For a short, `--excerpt SECONDS` takes the strongest stretch of that length, or `--start SECONDS` takes it from the nearest bar line. The stretch starts and ends on bar lines, is cut from the mastered file with a short fade at each end, and is levelled again for the profile. Shots, seconds and the estimated price are printed first; the command refuses if the estimate passes `cost_cap`. A track longer than 90 seconds defaults to stills with camera moves and a few moving shots, so the price stays inside a cap. Generated motion does not follow a tempo and is not promised to: the edit supplies the feel, and QA's `edit.cuts_on_beat` warns when cuts drift off the beat grid. `work/music_cuts.json` records each cut's distance from the nearest beat.
+Whether the cut follows the lyrics or the music, a shot with a character in it is split into whole bars from another angle (wide, close, medium), so it never runs past `character_shot_max_sec`.
+
+Without a shot list, each shot's picture comes from the `visual` of its section in `song.json`, or else from the song's style. That describes the music, not a shot. To direct the shots, write a shot list and pass it with `--shots <file>`:
+
+- one shot per line, in order, repeated when the cut has more shots than lines;
+- `#` starts a comment;
+- a line that starts with `B-roll:` is a shot with no character in it, so it is made from its still alone, with no face references.
+
+```text
+over the shoulder: her hands on the mixer, the crowd lit behind her
+B-roll: close on the faders and the jog wheel, lights pulsing
+front, waist up: she lifts one hand as the drop lands
+```
+
+A listed shot names its own framing, so the split adds no angle to it.
+
+For a short, `--excerpt SECONDS` takes the strongest stretch of that length, or `--start SECONDS` takes it from the nearest bar line. The stretch starts and ends on bar lines, is cut from the mastered file with a short fade at each end, and is levelled again for the profile. Shots, seconds and the estimated price are printed first, with any key the paid run still needs; the command refuses if the estimate passes `cost_cap`. `kalainova rehearse <new id>` then shows every request and its price before anything is spent ([How to rehearse a paid run](rehearse-and-review-takes.md)). A track longer than 90 seconds defaults to stills with camera moves and a few moving shots, so the price stays inside a cap. Generated motion does not follow a tempo and is not promised to: the edit supplies the feel, and QA's `edit.cuts_on_beat` warns when cuts drift off the beat grid. `work/music_cuts.json` records each cut's distance from the nearest beat.

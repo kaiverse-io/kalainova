@@ -56,10 +56,13 @@ def shot_kw(
     pin = (lock.get("generators") or {}).get(capability)
     if not resolved or not pin:
         return {}
-    capacity = base.get(pin["provider"]).reference_support(capability, pin["model"])["max_images"]
+    support = base.get(pin["provider"]).reference_support(capability, pin["model"])
     if not beat.get("cast") and capability == "video":
         return {}
-    refs = consistency.shot_refs(resolved, beat, capacity, start=start)
+    # A model that takes the first frame on its own gets the still there, so every reference slot
+    # goes to the kit; otherwise the still rides along as the first reference.
+    first = None if support.get("start_image_param") else start
+    refs = consistency.shot_refs(resolved, beat, support["max_images"], start=first)
     return {"references": refs, "model": pin["model"]} if refs else {}
 
 
@@ -99,7 +102,7 @@ def graphics_shot(job: Job, beat: Fields, span: float, add: Add, gen: Gen, data:
 
 def end_frame_used(job: Job, beat: Fields, clip_kw: Fields) -> bool:
     """Whether this shot has a last frame and the model that will run it can be given one."""
-    if not (beat.get("shot") or {}).get("last_frame") or clip_kw.get("references"):
+    if not (beat.get("shot") or {}).get("last_frame"):
         return False
     first = router.first_usable(job, "video")
     return bool(first and first.takes_end_image("video", clip_kw.get("model")))
@@ -159,6 +162,8 @@ def take_clip(
     )
     if note:
         prompt = f"{prompt} {note}"
+    floor = int(prof.get("character_source_min_px") or 0)
+    assess = takes.held_to(floor) if floor and beat.get("cast") else takes.assess_clip
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
         return gen(
@@ -172,7 +177,12 @@ def take_clip(
             seed=seed,
             audio=wants_sound,
             **({"end_image": end} if end else {}),
-            est={"duration": span, "image": True, "references": bool(clip_kw)},
+            est={
+                "duration": span,
+                "image": True,
+                "references": bool(clip_kw),
+                **({"model": clip_kw["model"]} if clip_kw.get("model") else {}),
+            },
             **clip_kw,
         )
 
@@ -184,7 +194,7 @@ def take_clip(
             n,
             suffix=".mp4",
             make=make,
-            assess=takes.assess_clip,
+            assess=assess,
             prompt=prompt,
             note=note,
             extra={"retake": True},
@@ -196,7 +206,7 @@ def take_clip(
             brief,
             suffix=".mp4",
             make=make,
-            assess=takes.assess_clip,
+            assess=assess,
             prompt=prompt,
         )
     taken = takes.place(job, beat["id"], clip)
@@ -308,18 +318,28 @@ def retake(job: Job, bid: str, note: str = "") -> Fields:
 
 
 MOTION_REASON = "no take moved enough"
+SOURCE_REASON = "no take was made at the profile's source size"
 
 
 def motion_break(job: Job, bid: str, take: Fields, allow_stills: bool) -> Fields | None:
     """A shot whose chosen take did not pass the motion reading broke its promise, unless a person
-    accepted stills or chose that take. The failing clip stays on disk for a person to look at."""
-    if take.get("ok") or allow_stills:
+    accepted stills or chose that take. The failing clip stays on disk for a person to look at.
+    A character take made under the profile's source size breaks it too, stills allowed or not."""
+    readings = take.get("readings") or {}
+    small = readings.get("below_source_floor")
+    if take.get("ok") or (allow_stills and not small):
         return None
     entry = takes.load(job)["shots"].get(bid) or {}
     if entry.get("chosen_by") == "human":
         return None
-    reading = (take.get("readings") or {}).get("shot_motion")
-    return {"beat_id": bid, "reason": f"{MOTION_REASON} (take {take['n']} read {reading})"}
+    if small:
+        why = f"take {take['n']} is {small}; look at it, and choose it only if it holds up"
+        return {"beat_id": bid, "reason": f"{SOURCE_REASON} ({why})"}
+    if readings.get("unmeasurable"):
+        why = f"take {take['n']} could not be measured: {readings['unmeasurable']}; look at it"
+    else:
+        why = f"take {take['n']} read {readings.get('shot_motion')}"
+    return {"beat_id": bid, "reason": f"{MOTION_REASON} ({why})"}
 
 
 def apply_chosen(job: Job, bid: str) -> Fields:
@@ -331,7 +351,7 @@ def apply_chosen(job: Job, bid: str) -> Fields:
     breaks = [
         b
         for b in manifest.get("promise_breaks") or []
-        if not (b["beat_id"] == bid and str(b["reason"]).startswith(MOTION_REASON))
+        if not (b["beat_id"] == bid and str(b["reason"]).startswith((MOTION_REASON, SOURCE_REASON)))
     ]
     broken = motion_break(job, bid, take, allowed)
     breaks += [broken] if broken else []

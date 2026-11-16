@@ -111,6 +111,8 @@ def test_a_moving_shot_that_never_says_what_moves_is_flagged():
     assert "plan.motion_stated" in _found(_packet(still))
     moving = _beat(visual_kind="video", visual_cue="Waves rolling against a rock")
     assert "plan.motion_stated" not in _found(_packet(moving))
+    body = _beat(visual_kind="video", visual_cue="She lifts one arm as the light flares")
+    assert "plan.motion_stated" not in _found(_packet(body)), "a body's and a light's motion count"
 
 
 def test_a_moving_shot_asking_for_a_still_is_flagged():

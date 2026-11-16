@@ -13,11 +13,14 @@
 | Look sheet for a kit's candidate references | `kalainova look` | `lookdev.py`, `studio_cli.py` | `tests/test_preproduction.py` |
 | Plan review before spending | `kalainova shotplan` | `shots.py` | `tests/test_shots.py` |
 | Takes and retakes | `kalainova takes`, `take`, `retake` | `takes.py`, `shotmake.py` | `tests/test_takes.py` |
+| See every paid request and its price before spending | `kalainova rehearse`, `scripts/check_fal_schemas.py --rehearsal` | `rehearse.py`, `providers/rehearsal.py`, `providers/router.py`, `providers/fal.py` | `tests/test_rehearsal.py` |
+| Judge every take by eye on one page | `kalainova review` | `reviewpage.py` | `tests/test_review_page.py` |
+| Character shots at the profile's source size | `kalainova make`, `retake` | `takes.py` (`held_to`), `shotmake.py`, `config/studio.yaml` (`character_source_min_px`) | `tests/test_take_honesty.py` |
 | Compare models on one shot | `kalainova bench`, `verdict --take` | `bench.py`, `takes.py`, `timeline.py`, `verdicts.py` | `tests/test_bench.py` |
 | Every shot moves by default | `kalainova make`, `shotplan` | `shots.py`, `plan.py`, `assets.py` | `tests/test_moving_by_default.py` |
 | The motion promise | `kalainova make` | `assets.py`, `shotmake.py`, `qachecks.py` | `tests/test_takes.py`, `tests/test_vendor_payloads.py` |
 | Songs | `kalainova song`, `song-video` | `songs.py`, `bar/song.py` | `tests/test_songs.py` |
-| Video cut to a track: bars, phrases, excerpt, character cutaways, estimate | `kalainova song-video [--excerpt]` | `editor/musiccuts.py`, `editor/musicvideo.py`, `editor/beats.py` (seam: `adapters.beats`), `editor/beat_this.py`, `jobfs.py` (`open_child`), `qachecks.py` (`edit.cuts_on_beat`) | `tests/test_music_video.py`, `tests/test_beat_adapters.py` |
+| Video cut to a track: bars, phrases, excerpt, character cutaways, shot list, estimate | `kalainova song-video [--excerpt] [--shots]` | `editor/musiccuts.py`, `editor/musicvideo.py`, `editor/beats.py` (seam: `adapters.beats`), `editor/beat_this.py`, `jobfs.py` (`open_child`), `qachecks.py` (`edit.cuts_on_beat`) | `tests/test_music_video.py`, `tests/test_beat_adapters.py` |
 | Song release files, stems, length check | `kalainova song` | `render/release.py`, `providers/fal.py` (`separate`), `providers/router.py` (`refuse_too_long`) | `tests/test_song_release.py`, `tests/test_fal_stems.py` |
 | Scripts from a brief | `kalainova song`, `comic`, `story` | `writers.py` | `tests/test_songs.py` |
 | Research with checked quotes | `kalainova research` | `research.py`, `providers/search.py` | `tests/test_research.py` |

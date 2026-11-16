@@ -28,10 +28,11 @@ downloads the `beat_this` checkpoint into the torch cache.
 
 ## Select them
 
-Use a private copy of the config; do not edit a shared one in place.
+Use a private config; do not edit a shared one in place. The engine lays it over the repo's
+`config/studio.yaml`, so it holds only what you change.
 
 ```yaml
-# $KALAINOVA_CONFIG, a copy of config/studio.yaml with these changed
+# $KALAINOVA_CONFIG: only these lines; everything else comes from config/studio.yaml
 adapters:
   beats: {use: beat_this, command: /Users/you/tools/beat_this-env/bin/beat_this}
 preference:

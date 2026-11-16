@@ -159,24 +159,69 @@ def test_character_consistency_passes_without_a_character_kit_or_panels(tmp_path
     assert check["detail"] == "no character kit attached"
 
 
-@pytest.mark.parametrize(("distance", "status"), [(0.45, "pass"), (0.46, "warn")])
-def test_character_consistency_compares_panels_with_kit_references(
-    tmp_path, monkeypatch, distance, status
-):
+def _panels_and_reference(job, names):
+    for name in names:
+        panel = job.work / "panels" / f"{name}.png"
+        panel.parent.mkdir(exist_ok=True)
+        panel.write_bytes(b"panel")
+    reference = job.folder / "kit" / "face.png"
+    reference.parent.mkdir(exist_ok=True)
+    reference.write_bytes(b"reference")
+    return reference
+
+
+def _faces_by_file(monkeypatch, table):
+    """Stand in for the face command: each file's faces, as unit vectors."""
+
+    def found(paths):
+        return {
+            p: [identity.Face((0, 0, 10, 10), 0.9, tuple(v)) for v in table[p.stem]] for p in paths
+        }
+
+    monkeypatch.setattr(identity, "configured", lambda: True)
+    monkeypatch.setattr(identity, "limit", lambda: 0.5)
+    monkeypatch.setattr(identity, "faces", found)
+
+
+def test_character_consistency_names_a_peopled_panel_with_no_cast_face(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     _write_comic_report(job)
-    panel = job.work / "panels" / "p1.png"
-    panel.parent.mkdir()
-    panel.write_bytes(b"panel")
-    reference = job.folder / "kit" / "face.png"
-    reference.parent.mkdir()
-    reference.write_bytes(b"reference")
-    monkeypatch.setattr(identity, "face_distance", lambda _panel, _reference: distance)
+    _panels_and_reference(job, ["p1", "p2", "p3"])
+    lead, stranger = (1.0, 0.0), (0.0, 1.0)
+    _faces_by_file(monkeypatch, {"p1": [lead], "p2": [], "p3": [stranger], "face": [lead]})
 
     check = next(c for c in comic.checks(job) if c["id"] == "comic.character_consistency")
 
-    assert check["status"] == status
-    assert "distance" in check["detail"]
+    assert check["status"] == "warn"
+    assert "2 panel(s) with faces" in check["detail"]  # p2 shows no one, and says nothing
+    assert "no cast face in p3" in check["detail"]
+
+
+def test_character_consistency_passes_when_every_peopled_panel_shows_the_cast(
+    tmp_path, monkeypatch
+):
+    job = _job(tmp_path, monkeypatch)
+    _write_comic_report(job)
+    _panels_and_reference(job, ["p1", "p2"])
+    lead, extra = (1.0, 0.0), (0.0, 1.0)
+    _faces_by_file(monkeypatch, {"p1": [lead, extra], "p2": [lead], "face": [lead]})
+
+    check = next(c for c in comic.checks(job) if c["id"] == "comic.character_consistency")
+
+    assert check["status"] == "pass"
+    assert "weakest match 1.000" in check["detail"]
+
+
+def test_character_consistency_is_a_gap_not_a_pass_without_a_face_check(tmp_path, monkeypatch):
+    job = _job(tmp_path, monkeypatch)
+    _write_comic_report(job)
+    _panels_and_reference(job, ["p1"])
+    monkeypatch.setattr(identity, "configured", lambda: False)
+
+    check = next(c for c in comic.checks(job) if c["id"] == "comic.character_consistency")
+
+    assert check["status"] == "warn"
+    assert "no face check configured" in check["detail"]
 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")

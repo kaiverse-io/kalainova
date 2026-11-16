@@ -159,27 +159,58 @@ def pitch_snapping(voice: Arr, sr: int) -> float:
     return float(voiced_snapped / total_voiced) if total_voiced > 5 else 0.0
 
 
-def groove_steadiness(x: Arr, sr: int) -> float:
-    """Steadiness of rhythmic onsets across the track (1.0 is metronome steady, <0.7 is erratic)."""
-    hop = max(int(sr * 0.01), 1)
+GROOVE_FRAME_SEC = 0.01
+GROOVE_WINDOW_SEC = 8.0
+GROOVE_PERIOD_SEC = (0.33, 1.0)  # 180 to 60 beats a minute
+
+
+def _onset_flux(x: Arr, sr: int) -> Arr:
+    """Rises in loudness, in 10 ms frames, lightly smoothed so a few ms of timing do not count."""
+    hop = max(int(sr * GROOVE_FRAME_SEC), 1)
     n = x.size // hop
-    if n < 100:
+    rms = np.sqrt((x[: n * hop].reshape(n, hop) ** 2).mean(axis=1))
+    rise = np.maximum(0.0, np.diff(np.log1p(100.0 * rms)))
+    return np.convolve(rise, np.ones(3) / 3, mode="same")
+
+
+def _pulse_at(flux: Arr, lags: range) -> float | None:
+    """How strongly a stretch repeats itself at one of these lags: 1 exactly, 0 not at all."""
+    f = flux - flux.mean()
+    energy = float(f @ f)
+    if energy <= 1e-12:
+        return None
+    return max(float(f[:-lag] @ f[lag:]) / energy * (f.size / (f.size - lag)) for lag in lags)
+
+
+def groove_steadiness(x: Arr, sr: int) -> float:
+    """How strongly the onsets repeat at one beat period, window by window (pulse clarity).
+
+    The track's beat period is found once; each 8 s window is then asked how strongly its onsets
+    repeat at that period. Busy patterns (eighths, sixteenths, swing, fills) still read high,
+    because only the period is compared, not the gaps between neighbouring onsets. Onsets that
+    drift off the pulse, or share no period at all, read low. The median window is reported, so a
+    breakdown without drums does not decide it, and a track that loses its pulse for half its
+    length does. Too short to judge reads 1.0.
+    """
+    flux = _onset_flux(x, sr)
+    frames = 1.0 / GROOVE_FRAME_SEC
+    window = int(GROOVE_WINDOW_SEC * frames)
+    if flux.size < window // 2:
         return 1.0
-    env = np.sqrt((x[: n * hop].reshape(n, hop) ** 2).mean(axis=1))
-    diff = np.maximum(0, np.diff(env))
-    if diff.max(initial=0.0) <= 1e-6:
+    lo, hi = (int(s * frames) for s in GROOVE_PERIOD_SEC)
+    centred = flux - flux.mean()
+    spectrum = np.fft.rfft(centred, 2 * centred.size)
+    auto = np.fft.irfft(spectrum * np.conj(spectrum))[: centred.size]
+    auto = auto / np.maximum(centred.size - np.arange(centred.size), 1)
+    period = lo + int(np.argmax(auto[lo : hi + 1]))
+    lags = range(max(period - 2, 1), period + 3)
+    step = max(window // 2, 1)
+    starts = range(0, max(flux.size - window, 0) + 1, step)
+    found = [_pulse_at(flux[s : s + window], lags) for s in starts]
+    values = [v for v in found if v is not None]
+    if not values:
         return 1.0
-    threshold = 0.3 * diff.max()
-    is_peak = (diff[1:-1] > diff[:-2]) & (diff[1:-1] > diff[2:]) & (diff[1:-1] > threshold)
-    peaks = np.flatnonzero(is_peak)
-    if peaks.size < 4:
-        return 1.0
-    intervals = np.diff(peaks) * (hop / sr)
-    med = float(np.median(intervals))
-    if med <= 0:
-        return 1.0
-    cv = float(intervals.std() / med)
-    return float(max(0.0, min(1.0, 1.0 - cv * 0.5)))
+    return float(np.clip(np.median(values), 0.0, 1.0))
 
 
 def mix_balance(left: Arr, right: Arr, sr: int) -> dict[str, float]:

@@ -54,6 +54,45 @@ Pin `{"song": ["mac"]}` in the job's `providers`, and set `song: ace-step` under
 - **`kalainova providers` says `mac` is ready for songs whether or not this environment exists.** A missing environment shows up when the job runs.
 - A song with no lyrics must set `"instrumental": true`, and a section's `kind` must be one of the kinds in `schemas/song.schema.json`.
 
+## Faces
+
+The identity check (`bar/identity.py`) finds every face in a picture, or in a video's sampled frames, and compares each with a kit's reference faces. It runs as a command in an environment that has `opencv-python` 4.8 or later; the engine ships no face model.
+
+1. Download `face_detection_yunet_2023mar.onnx` and `face_recognition_sface_2021dec.onnx` from the OpenCV model zoo into one folder outside the repo. For ArcFace, also take `w600k_r50.onnx` from insightface's `buffalo_l` pack.
+2. Set the command and its limits in `config/studio.yaml`. The limits belong to the recognizer:
+
+   ```yaml
+   identity:
+     face_command: [<python with opencv>, <repo>/src/kalainova/providers/runners/face_run.py,
+                    --models, <that folder>, --arcface, <folder>/w600k_r50.onnx]
+     same_face_min: 0.57     # a face in a picture
+     clip_median_min: 0.50   # a video's median closest face
+     lost_below: 0.45        # a sampled frame below this has lost the character
+   ```
+
+3. Measure against a frozen kit with `kalainova bar <picture or video> --kit <kit>`:
+   - a picture: how many faces it holds, and how close the nearest comes to the character;
+   - a video: one frame a second, whether the character holds over the clip, and the stretches where she is lost or no face is seen.
+
+   With a command set, `kalainova animatic` also prints a line for each shot that names a character, before any video is paid for. With no command set, identity is reported as not measured.
+
+It ran in under a second for 25 pictures, at a 0.4 GB peak. A 30-minute video at one frame a second is 1,800 frames, read in batches.
+
+**What it can tell, measured on one character's generated stills and clips:**
+
+| | SFace | ArcFace |
+|---|---|---|
+| The character, two accepted stills | 0.60, 0.73 | 0.62, 0.62 |
+| Look-alikes from the same image model and light | 0.56-0.66 | 0.42-0.52 |
+| Different people in other scenes | 0.05-0.42 | -0.04-0.21 |
+| Her own clips under haze, pulsing light and motion, each frame | | 0.51-0.62 |
+| A clip whose model drifted away from her, after the first frame | | 0.04-0.28 |
+
+- **SFace** does not tell her from a look-alike. ArcFace does.
+- **In video, effects pull single frames of her down to the look-alike level**, so a clip is judged by its median, and a frame counts as lost only well below that.
+- **Every reading warns and none blocks.** The limits come from this one set, and still need checking against a person's verdicts.
+- **Licence:** the `buffalo_l` weights are for non-commercial research.
+
 ## What to expect
 
 | Work | Measured |

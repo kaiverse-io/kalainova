@@ -16,26 +16,19 @@ The system context below is the runtime view.
 
 Who and what the engine touches.
 
-```mermaid
-flowchart LR
-    operator["Operator<br/>brief, review, approve"]
-    agent["Coding agent<br/>builds and runs jobs"]
-    engine["Kalainova engine<br/>job record, gates, render"]
-    models["Rented model providers<br/>image, video, voice, music, LLM"]
-    tools["Outside production tools<br/>planned, run in containers"]
-    platforms["Publishing platforms<br/>official APIs or an aggregator"]
-    stock["Free-license stock sources"]
+```
+ Operator: brief, review, approve ──brief, approval─────────▶ ┌────────────────────┐
+ Operator ◀───────────────────────file, contact sheet──────── │                    │
+ Coding agent: builds and runs jobs ──plans, stages─────────▶ │                    │
+ Free-license stock sources ──licensed footage──────────────▶ │  Kalainova engine  │
+ Rented model providers ◀─────────requests within budget───── │                    │
+   image, video, voice, music, LLM ──files, cost────────────▶ │  job record,       │
+ Outside production tools ◀ ─ ─ ─ ─job bundle─ ─ ─ ─ ─ ─ ─ ─  │  gates, render     │
+   planned, run in containers ─ ─ files, record ─ ─ ─ ─ ─ ─ ▶ │                    │
+ Publishing platforms ◀───────────approved bytes only──────── │                    │
+   official APIs or an aggregator ──48 h metrics────────────▶ └────────────────────┘
 
-    operator -->|"brief, approval"| engine
-    agent -->|"plans, stages"| engine
-    engine -->|"file, contact sheet"| operator
-    engine -->|"requests within budget"| models
-    models -->|"files, cost"| engine
-    engine -.->|"job bundle"| tools
-    tools -.->|"files, record"| engine
-    stock -->|"licensed footage"| engine
-    engine -->|"approved bytes only"| platforms
-    platforms -->|"48 h metrics"| engine
+ ── built    ─ ─ planned
 ```
 
 An agent never writes an approval (ADR 0007). A human approves every piece.
@@ -44,180 +37,103 @@ An agent never writes an approval (ADR 0007). A human approves every piece.
 
 Dependencies point down. A lower layer never imports an upper one, and a producer or model can be replaced without changing the control layer.
 
-```mermaid
-flowchart TB
-    subgraph control["Control layer: owned"]
-        direction LR
-        contract["Job contract<br/>brief, rights, budget"]:::built
-        selector["Producer selection"]:::planned
-        intake["Intake of outside files"]:::built
-        qa["QA"]:::partial
-        gate["Human gate<br/>hash-bound approval"]:::partial
-        publish["Publish"]:::built
-        measure["Acceptance and measure"]:::partial
-        contract --> selector --> intake --> qa --> gate --> publish --> measure
-    end
+```
+ ┌─ Control layer: owned ─────────────────────────────────────────────────────────┐
+ │ Job contract: brief, rights, budget   [built]                                  │
+ │   ▶ Producer selection                [planned]                                │
+ │   ▶ Intake of outside files           [built]                                  │
+ │   ▶ QA                                [partial]                                │
+ │   ▶ Human gate: hash-bound approval   [partial]                                │
+ │   ▶ Publish                           [built]                                  │
+ │   ▶ Acceptance and measure            [partial]                                │
+ └────────────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          ▼
+ ┌─ Producers: swappable ─────────────────────────────────────────────────────────┐
+ │ Generated video [partial] · Footage edit [partial] · Explainers [planned]      │
+ │ Songs [partial] · Comics and books [partial]                                   │
+ └────────────────────────────────────────────────────────────────────────────────┘
+                     │                                         │
+                     ▼                                         ▼
+ ┌─ Shared media tools: owned ──────────┐  ┌─ Model access: rented ───────────────┐
+ │ ffmpeg compile and render    [built] │  │ Router: budget, deadline,            │
+ │ Word timing and captions   [partial] │  │ next listed provider, reuse  [built] │
+ │ Audio mix and loudness       [built] │  │ Provider adapters            [built] │
+ └──────────────────────────────────────┘  └──────────────────────────────────────┘
 
-    subgraph producers["Producers: swappable"]
-        direction LR
-        pgen["Generated video"]:::partial
-        pedit["Footage edit"]:::partial
-        pexplain["Explainers"]:::planned
-        psong["Songs"]:::partial
-        pwrite["Comics and books"]:::partial
-    end
-
-    subgraph shared["Shared media tools: owned"]
-        direction LR
-        compile["ffmpeg compile and render"]:::built
-        timing["Word timing and captions"]:::partial
-        mix["Audio mix and loudness"]:::built
-    end
-
-    subgraph access["Model access: rented"]
-        direction LR
-        router["Router<br/>budget, deadline, failover, reuse"]:::built
-        adapters["Provider adapters"]:::built
-    end
-
-    records[("Job folder<br/>record, ledger, stamps")]:::built
-
-    control --> producers
-    producers --> shared
-    producers --> access
-    control --- records
-    producers --- records
-    access --- records
-
-    classDef built fill:#d3f0d8,stroke:#2e7d32,color:#10321a
-    classDef partial fill:#fdeec8,stroke:#b7791f,color:#3d2a07
-    classDef planned fill:#e8e8e8,stroke:#777777,color:#333333,stroke-dasharray: 4 3
+ The control layer, the producers and model access all read and write the job folder:
+ its record, ledger and stamps [built].
 ```
 
 ## Component view: the engine today
 
 The modules in `src/kalainova/`, and the two paths that make a piece. Every model call goes through `providers/router.py`.
 
-```mermaid
-flowchart TB
-    cli["__main__.py<br/>CLI"]
+```
+ __main__.py, the CLI
+   │
+   ├─▶ Generated path
+   │     plan.py, research.py ─▶ assets.py ─▶ shotmake.py, takes.py, shots.py ─▶ edit.py ───┐
+   ├─▶ Footage path                                                                         │
+   │     stock.py ─▶ editor/analyze.py (shots, scores) ─▶ editor/direct.py (choose, patch) ─┤
+   │     editor/notes.py, beats.py, speech.py, clips.py, auto_editor.py ─▶ editor/direct.py │
+   ├─▶ Songs and documents                                                                  │
+   │     writers.py ─▶ songs.py ────────────────────────────────────────────────────────────┤
+   │     writers.py ─▶ comic.py · writers.py ─▶ story.py, bookpdf.py                        │
+   ├─▶ Before and after a spend                                                             │
+   │     rehearse.py: a dry run of the paid stage · reviewpage.py: every take on one page   │
+   │                                                                                        ▼
+   └─▶ Shared finish
+         render/ (closed op list, step cache) ─▶ captions.py
+         render/ ─▶ qa.py, qachecks.py, kitchecks.py ─▶ publish/ (approve, publish, measure)
+         qa ─▶ timeline.py (shot sheet, cut check) · qa ─▶ provenance.py, verdicts.py
+         After the cut: render/ ─▶ nle.py ─▶ nle_otio.py ─▶ opentools.py · render/ ─▶ dub.py
 
-    subgraph generated["Generated path"]
-        plan["plan.py<br/>and research.py"]
-        assets["assets.py"]
-        shotmake["shotmake.py<br/>takes.py, shots.py"]
-        edit["edit.py"]
-    end
+ Model access
+   plan, assets, shotmake, direct, qa, songs, dub ─▶ providers/router.py ─▶ providers/base.py
+   providers/base.py: the contract and the registry, which every adapter implements:
+     remote.py, fal.py, search.py, spaces.py, compat.py (rented) · mac.py (open models on this
+     machine) · local.py (placeholders) · rehearsal.py (requests written down, none sent)
 
-    subgraph written["Songs and documents"]
-        writers["writers.py"]
-        songs["songs.py"]
-        comic["comic.py"]
-        story["story.py<br/>bookpdf.py"]
-    end
-
-    subgraph footage["Footage path"]
-        stockmod["stock.py"]
-        analyze["editor/analyze.py<br/>shots and scores"]
-        direct["editor/direct.py<br/>choose.py, patch.py"]
-        notes["editor/notes.py"]
-        beats["editor/beats.py"]
-        speech["editor/speech.py<br/>clips.py, auto_editor.py"]
-    end
-
-    subgraph finish["Shared finish"]
-        render["render/<br/>closed op list, step cache"]
-        captions["captions.py"]
-        qa["qa.py<br/>qachecks.py, kitchecks.py"]
-        timeline["timeline.py<br/>shot sheet, cut check"]
-        publish["publish/<br/>approve, publish, measure"]
-    end
-
-    subgraph access["Model access"]
-        router["providers/router.py"]
-        base["providers/base.py<br/>contract and registry"]
-        remote["providers/remote.py<br/>fal.py, search.py, spaces.py, compat.py"]
-        mac["providers/mac.py<br/>open models on this machine"]
-        local["providers/local.py<br/>placeholders"]
-    end
-
-    subgraph after["After the cut"]
-        nle["nle.py<br/>timeline export"]
-        nleotio["nle_otio.py<br/>otioconvert adapter"]
-        opentools["opentools.py<br/>run a tool as a command"]
-        dub["dub.py"]
-        record["provenance.py<br/>verdicts.py"]
-    end
-
-    subgraph foundation["Foundation"]
-        jobfs["jobfs.py<br/>job folder and ledger"]
-        config["config.py<br/>config/studio.yaml"]
-        media["media.py, mediascan.py<br/>ffmpeg and ffprobe"]
-        schemas["schemas/"]
-    end
-
-    cli --> plan --> assets --> shotmake --> edit --> render
-    cli --> stockmod --> analyze --> direct --> render
-    cli --> writers
-    writers --> songs --> render
-    writers --> comic
-    writers --> story
-    notes --> direct
-    beats --> direct
-    speech --> direct
-    render --> captions
-    render --> qa --> publish
-    qa --> timeline
-    render --> nle
-    nle --> nleotio --> opentools
-    render --> dub
-    qa --> record
-
-    plan --> router
-    shotmake --> router
-    assets --> router
-    direct --> router
-    qa --> router
-    songs --> router
-    dub --> router
-    router --> base
-    remote --> base
-    mac --> base
-    local --> base
-
-    router --> jobfs
-    render --> jobfs
-    publish --> jobfs
-    jobfs --> schemas
-    router --> config
-    render --> media
-    render --> bar
+ Foundation
+   router, render, publish ─▶ jobfs.py (job folder and ledger) ─▶ schemas/
+   router ─▶ config.py (config/studio.yaml) · render ─▶ media.py, mediascan.py (ffmpeg,
+   ffprobe) · render ─▶ bar/
 ```
 
 ## Component view: model access
 
 What happens on one model call. The engine depends on the contract, never on a vendor.
 
-```mermaid
-flowchart LR
-    caller["Engine stage"] --> list["Listed providers<br/>job list, else studio list"]
-    list --> saved{"Same paid file<br/>already saved?"}
-    saved -->|"yes"| reuse["Reuse with no charge"]
-    saved -->|"no"| priced{"Priced, or job<br/>has no cap?"}
-    priced -->|"no"| next["Next listed provider"]
-    priced -->|"yes"| reserve["Reserve the estimate<br/>on the ledger"]
-    reserve -->|"over cap"| stop["Stop the job"]
-    reserve -->|"within cap"| invoke["Call with a deadline<br/>to a temporary path"]
-    invoke -->|"failed, nothing billed"| release["Release the reservation"]
-    release --> next
-    invoke -->|"timed out, or billed<br/>then failed"| charged["Settle at the estimate<br/>or the billed amount"]
-    charged --> next
-    invoke -->|"file returned"| check{"File matches<br/>the request?"}
-    check -->|"no"| rejected["Settle, discard"]
-    rejected --> next
-    check -->|"yes"| move["Move to destination<br/>record, settle at the real cost"]
-    next -->|"none left"| fail["Job fails and<br/>names each reason"]
-    next -->|"another"| priced
+```
+ Engine stage
+   ▼
+ Listed providers: the job's list, else the studio's
+   ▼
+ Same paid file already saved? ──yes──▶ reuse it with no charge
+   │ no
+   ▼
+ Priced, or the job has no cap? ──no──▶ next listed provider
+   │ yes
+   ▼
+ Rehearsal open, and the provider costs money and cannot rehearse? ──yes──▶ stop before calling it
+   │ no
+   ▼
+ Reserve the estimate on the ledger ──over the cap──▶ stop the job
+   │ within the cap
+   ▼
+ Call with a deadline, to a temporary path
+   │   (in a rehearsal the adapter writes the request down and returns a stand-in file)
+   ├── failed, nothing billed ────────────▶ release the reservation ─────────────▶ next listed provider
+   ├── timed out, or billed then failed ──▶ settle at the estimate or the billed amount ─▶ next listed
+   └── file returned
+         ▼
+       File matches the request? ──no──▶ settle, discard ──▶ next listed provider
+         │ yes
+         ▼
+       Move to the destination, record it, settle at the real cost
+
+ next listed provider: another one ──▶ back to "Priced?" · none left ──▶ the job fails, naming each reason
 ```
 
 A bug in an adapter is raised and does not count as a provider failure. Only listed providers are tried. `local` is listed in `config/studio.yaml`, so a run with no keys still works, and `approve` refuses what it makes.
@@ -226,59 +142,31 @@ A bug in an adapter is raised and does not count as a provider failure. Only lis
 
 ## Sequence: one piece
 
-```mermaid
-sequenceDiagram
-    actor Operator
-    participant Engine
-    participant Router
-    participant Provider
-    participant Record as Job folder
-    participant QA
-    participant Platform
-
-    Operator->>Engine: Brief, rights, budget
-    Engine->>Record: job.json, script_packet.json
-    loop Each asset
-        Engine->>Router: Request
-        Router->>Record: Check the cap and saved files
-        Router->>Provider: Call with a deadline
-        Provider-->>Router: File and cost
-        Router->>Record: Record the file, charge the ledger
-        Router-->>Engine: Checked file
-    end
-    Engine->>Engine: Edit, compile, render final.mp4
-    Engine->>Record: render_stamp.json
-    Engine->>QA: Run the checks
-    QA->>Record: qa.json with the file hash
-    Engine-->>Operator: File and contact sheet
-    alt Accepted
-        Operator->>Engine: approve
-        Engine->>Record: Check QA, placeholders, and stamp
-        Engine->>Record: approval.json
-        Engine->>Platform: Approved bytes, AI label on
-        Platform-->>Engine: 48 h metrics
-        Engine->>Record: measure.json
-    else Sent back
-        Operator->>Engine: Reason
-        Engine->>Router: Regenerate what was named
-    end
+```
+ Operator ──brief, rights, budget──▶ Engine ──▶ job folder: job.json, script_packet.json
+ for each asset:
+   Engine ──request──▶ Router ──check the cap and the saved files──▶ job folder
+                       Router ──call with a deadline──▶ Provider ──file and cost──▶ Router
+                       Router ──record the file, charge the ledger──▶ job folder
+                       Router ──checked file──▶ Engine
+ Engine: edit, compile, render final.mp4 ──▶ job folder: render_stamp.json
+ Engine ──run the checks──▶ QA ──▶ job folder: qa.json with the file hash
+ Engine ──file and contact sheet──▶ Operator
+ accepted:
+   Operator ──approve──▶ Engine ──check QA, placeholders and stamp──▶ job folder: approval.json
+   Engine ──approved bytes, AI label on──▶ Platform ──48 h metrics──▶ Engine ──▶ measure.json
+ sent back:
+   Operator ──reason──▶ Engine ──regenerate what was named──▶ Router
 ```
 
 ## Job states
 
-```mermaid
-stateDiagram-v2
-    [*] --> draft
-    draft --> rendered: make or edit
-    rendered --> rendered: re-render
-    rendered --> approved: human approve
-    approved --> published: publish
-    published --> measured: 48 h metrics
-    draft --> killed
-    rendered --> killed
-    approved --> killed
-    measured --> [*]
-    killed --> [*]
+```
+ draft ──make or edit──▶ rendered ──human approve──▶ approved ──publish──▶ published
+   │                      │    ▲                       │                     │
+   │                      └────┘ re-render             │                48 h metrics
+   │                      │                            │                     ▼
+   └──────────────────────┴───────▶ killed ◀───────────┘                 measured
 ```
 
 `scripts/check.py` also allows `rented` and `accepted`, for work finished in a rented tool.
@@ -287,53 +175,28 @@ stateDiagram-v2
 
 The engine runs on one machine. Anything from a third party runs in a container that sees only the folders mounted into it.
 
-```mermaid
-flowchart TB
-    subgraph host["Operator machine"]
-        repo["Repo and job folders"]
-        media_out["Media output<br/>outside git"]
-        subgraph docker["Container runtime"]
-            engine["Engine container"]
-            third["Third-party producer<br/>one container each"]:::planned
-        end
-    end
-
-    subgraph ci["GitHub Actions"]
-        checks["check, eval, lint, test"]
-    end
-
-    subgraph rented["Rented over HTTPS"]
-        api["Hosted model APIs"]
-        gpu["Rented GPU endpoint"]:::planned
-        gpuproducer["Rented GPU running<br/>a whole producer"]:::planned
-    end
-
-    repo -->|"mounted"| engine
-    engine --> media_out
-    media_out -.->|"mounted read-only"| third
-    engine --> api
-    engine -.-> gpu
-    engine -.->|"job bundle"| gpuproducer
-    repo -->|"push"| checks
-
-    classDef planned fill:#e8e8e8,stroke:#777777,color:#333333,stroke-dasharray: 4 3
+```
+ ┌─ Operator machine ───────────────────────────────────────────────────────────────┐
+ │ Repo and job folders ──mounted──▶ Engine container      (container runtime)      │
+ │ Engine container ──▶ media output, outside git                                   │
+ │ Media output ─ ─mounted read-only─ ─▶ third-party producer, one container        │
+ │                                       each, in the runtime   [planned]           │
+ └──────────────────────────────────────────────────────────────────────────────────┘
+ Repo ──push──▶ GitHub Actions: check, eval, lint, test
+ Engine container ──HTTPS──▶ hosted model APIs
+ Engine container ─ ─▶ a rented GPU endpoint                         [planned]
+ Engine container ─ ─job bundle─ ─▶ a rented GPU running a whole producer [planned]
 ```
 
 ## Adding a rented GPU
 
 Three different shapes, with different costs. None of them changes a stage of the engine.
 
-```mermaid
-flowchart LR
-    need["Rented GPU"] --> endpoint["Serves one model<br/>over HTTP"]
-    need --> whole["Runs a whole<br/>production tool"]
-    need --> hourly["Billed by the hour"]
-    endpoint --> adapter["Add a provider adapter<br/>and a config entry"]:::built
-    whole --> runner["Container runner<br/>and file transfer"]:::planned
-    hourly --> ledger["Measured cost per job<br/>and an infrastructure entry"]:::planned
-
-    classDef built fill:#d3f0d8,stroke:#2e7d32,color:#10321a
-    classDef planned fill:#e8e8e8,stroke:#777777,color:#333333,stroke-dasharray: 4 3
+```
+ Rented GPU
+   ├─▶ serves one model over HTTP ──▶ a provider adapter and a config entry        [built]
+   ├─▶ runs a whole production tool ──▶ a container runner and file transfer        [planned]
+   └─▶ billed by the hour ──▶ measured cost per job and an infrastructure entry     [planned]
 ```
 
 ## The stable interfaces
@@ -380,49 +243,39 @@ These change only with a version bump. A new interface waits for a second real u
 
 Three objects carry continuity. The kit says what is fixed, and the stream says where it goes. The job locks exact versions, so a later kit change never moves a piece already made.
 
-```mermaid
-flowchart LR
-    operator["Operator"] -->|"stream + brief"| request["request"]
-    kit["Kit, frozen version<br/>face, voice, persona, style"]:::built --> stream
-    stream["Stream<br/>identity, generators, limits"]:::built --> request
-    canon["Canon, append-only"]:::built --> stream
-    request --> preflight{"Can the pinned tools<br/>hold the kits?"}
-    preflight -->|"no"| stop["Stop before spending"]
-    preflight -->|"yes"| lock["Job + kit.lock.json"]:::built
-    lock --> plan["plan: persona and canon"]
-    lock --> assets["assets: references, voice, music"]
-    assets --> qa["QA: the record, then the frames"]
-    plan --> assets
-    qa --> gate["Human gate"]
-    store[("Blob store<br/>content-addressed")]:::built --> assets
-
-    classDef built fill:#d3f0d8,stroke:#2e7d32,color:#10321a
+```
+ Kit, frozen version: face, voice, persona, style [built] ──▶ Stream: identity, generators, limits [built]
+ Canon, append-only [built] ─────────────────────────────────▶ Stream
+ Operator ──stream + brief──▶ request ◀── Stream
+ request ──▶ Can the pinned tools hold the kits? ──no──▶ stop before spending
+               │ yes
+               ▼
+             Job + kit.lock.json [built]
+               ├─▶ plan: persona and canon ──▶ assets
+               └─▶ assets: references, voice, music ◀── blob store, content-addressed [built]
+                     ▼
+                   QA: the record, then the frames ──▶ human gate
 ```
 
 ## Cloud path
 
 Today one machine runs the engine, with kit files optionally in private object storage. Phases 2 and 3 are proposed in ADR 0010, and none of it is built.
 
-```mermaid
-flowchart TB
-    subgraph data["Private data plane"]
-        pg[("Postgres<br/>queue, ledger, index")]:::planned
-        s3[("Object storage, SSE-KMS<br/>kit files, renders")]:::partial
-        secrets["Secret manager"]:::planned
-    end
-    subgraph compute["Stateless compute"]
-        api["Review API<br/>authenticated"]:::planned
-        worker["Worker: one job, one container<br/>ffmpeg, CPU only"]:::planned
-    end
-    models["Rented models over HTTPS"]
-    api --> pg
-    worker -->|"claim with SKIP LOCKED"| pg
-    worker <-->|"bundles, bytes"| s3
-    worker --> secrets
-    worker --> models
-
-    classDef partial fill:#fdeec8,stroke:#b7791f,color:#3d2a07
-    classDef planned fill:#e8e8e8,stroke:#777777,color:#333333,stroke-dasharray: 4 3
+```
+ ┌─ Private data plane ───────────────────────────────────────────┐
+ │ Postgres: queue, ledger, index                 [planned]       │
+ │ Object storage, SSE-KMS: kit files, renders    [partial]       │
+ │ Secret manager                                 [planned]       │
+ └────────────────────────────────────────────────────────────────┘
+ ┌─ Stateless compute ────────────────────────────────────────────┐
+ │ Review API, authenticated                      [planned]       │
+ │ Worker: one job, one container, ffmpeg, CPU    [planned]       │
+ └────────────────────────────────────────────────────────────────┘
+ Review API ──▶ Postgres
+ Worker ──claim with SKIP LOCKED──▶ Postgres
+ Worker ◀──bundles, bytes──▶ object storage
+ Worker ──▶ secret manager
+ Worker ──▶ rented models over HTTPS
 ```
 
 ## Component Diagram
@@ -449,6 +302,8 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, config, providers
     ├─▶ takes ─────▶ bar, blobstore, media, config
     ├─▶ bench ─────▶ consistency, shotmake, shots, takes, timeline, config, providers
+    ├─▶ rehearse ──▶ assets, preproduction, takes, providers
+    ├─▶ reviewpage ▶ consistency, kits, takes
     ├─▶ shots ─────▶ config
     ├─▶ edit ──────▶ config
     ├─▶ render ────▶ bar, captions, look, motion, media, mediascan
@@ -471,7 +326,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ verdicts ──▶ bar, media, jobfs
     ├─▶ publish ───▶ blobstore, consistency, preproduction, streams, stock
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
-    ├─▶ song_repair ─▶ jobfs, takes, providers, songs
+    ├─▶ song_repair ─▶ config, media, jobfs, takes, bar, providers, songs
     ├─▶ intake ────▶ media, render
     ├─▶ variants ──▶ jobfs
     ├─▶ templates ─▶ jobfs
@@ -543,7 +398,7 @@ A brief to the script a song, a comic, or a book is made from, each held to its 
 What a shot says, kept apart: the still prompt, the motion prompt, continuity shared across shots, and a review of the plan before any money is spent.
 
 ### takes
-Attempts at one shot, each with its own seed and readings. A reading picks among them, and a person's choice stands (ADR 0013).
+Attempts at one shot, each with its own seed and readings. Passing is a floor, not a ranking: among takes that pass, the first is kept; a clip that cannot be read is unmeasurable, never a pass; each reading records the size the model made. `held_to` adds a profile's `character_source_min_px`, so a character shot made smaller does not pass. A person's choice stands (ADR 0013).
 
 ### bench
 A camera test: one shot made on several models from the same start frame, prompt, and seeds. It prints each model's estimate, refuses before any call when the total passes the job's cap, and makes takes marked `bench` through the router and the take store, so each carries its model, seed, and cost. It writes one sheet with a row per take. Depends on `consistency`, `shotmake`, `shots`, `takes`, `timeline`, `config`, and `providers`.
@@ -555,11 +410,27 @@ A camera test: one shot made on several models from the same start frame, prompt
         router --> takes.attempt (bench) --> takes.json --> timeline.bench_sheet
 ```
 
+### rehearse
+A dry run of a job's paid stage. The job is copied to a throwaway folder that sees the same kits and streams through links, and its stills and moving shots run there with a rehearsal open (`providers/rehearsal.py`). Each request a rented model would be sent is written down with its fields, the files it would upload named by hash, the router's estimate and the adapter's price; stand-in files of the asked-for shape let the line go on. A paid provider that cannot rehearse stops it. The animatic gate is passed in the copy only, and the report says the real run still waits there. Nothing is sent, nothing is spent, and no key is needed; the real job gets only `rehearsal.json` in its work folder, which `scripts/check_fal_schemas.py --rehearsal` checks against each model's live schema. Depends on `assets`, `preproduction`, `takes`, and `providers`.
+
+```
+ job ──copy──▶ throwaway job (kits, streams linked read only)
+                   │  rehearsal open: fal writes requests down, paid others refuse
+                   ▼
+   assets (animatic stills) ──▶ assets (moving shots) ──▶ stand-in files
+                   │
+                   ▼
+   rehearsal.json in the real job's work: requests, fields, estimates, gate, where it stopped
+```
+
+### reviewpage
+One local page to judge a piece's takes by eye: the kit's faces, each moving shot's start frame, and every take side by side with its model, seed, cost, size and what its readings flag (unread, under the source size, missed motion, no start frame). Under each shot it lists the faults only a person can see (hands, melting objects, morphing, warped text, face drift) and the `verdict` and `take` commands to record a decision. It writes `review.html` next to the takes and changes nothing else. Depends on `consistency`, `kits`, and `takes`.
+
 ### shotmake
 One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A first run and a retake share this code, so they keep the same promise and the same record. A retake is refused past the take limits (`takes.check_retake`), and with no note it reads that shot's finding from `findings.json`.
 
 ### preproduction
-The rough cut before the money, and the gate on it. The assets stage, run with `animatic`, makes the voice and one still per shot and asks for no video. This module prices each moving shot (`moving_quotes`, per shot, at the length asked for), draws the stills under a camera move with the words and the voice into `animatic.mp4` stamped ANIMATIC, and writes `animatic.json`. `require_review` is the gate: with `brief.animatic_gate` set, the assets stage refuses before any spend unless the job's `animatic_reviewed` is an `accept` for the cut that exists now. `publish` refuses an animatic by name and by hash. Depends on `media`, `motion`, `shotmake`, `takes`, `timeline`, and `providers`.
+The rough cut before the money, and the gate on it. The assets stage, run with `animatic`, makes the voice and one still per shot and asks for no video. This module prices each moving shot (`moving_quotes`, per shot, at the length asked for), draws the stills under a camera move with the words and the voice into `animatic.mp4` stamped ANIMATIC, and writes `animatic.json`. `require_review` is the gate: with `brief.animatic_gate` set, or by default for a capped job whose video is paid for, the assets stage refuses before any spend unless the job's `animatic_reviewed` is an `accept` for the cut that exists now. Accepting records each still's hash, and a shot whose still changed after that refuses. The model check (`still_judge_refusal`, `prompts/qa_still.md`, the `judge` model) looks at each moving shot's still while the animatic is made and advises the person through `findings.json` and the animatic's printout (`judge_lines`); it blocks nothing there. In the paid run a still the person accepted is not judged again (`still_was_accepted`); with no accepted animatic, a still the check flags is not sent for motion. `publish` refuses an animatic by name and by hash. Depends on `config`, `media`, `motion`, `prompts`, `shotmake`, `takes`, `timeline`, and `providers`.
 
 ```
  assets(animatic) ─▶ voice + stills ─▶ made{timeline, shots, quotes}
@@ -606,7 +477,7 @@ edit_manifest ─▶ compile_plan ─▶ render_plan.json ─▶ execute
 Lyrics to takes of a song, readings that pick among them, a master, lyric files, release files for a distributor (`render/release.py`: WAV, FLAC and MP3 with tags, cover and lyrics), optional stems through a `separate` provider, a refusal before spending when a song asks for more than the model states it can make (`router.refuse_too_long`), and a job that cuts a video to the finished track (ADR 0014).
 
 ### song_repair
-Repaints a single section of a chosen song take into a new take beside it, without re-rolling the whole track. Depends on `jobfs`, `takes`, `providers.router`, and `songs`.
+Repaints a single section of a chosen song take into a new take beside it, without re-rolling the whole track. The first ready song provider that can repaint does it (on the Mac, ACE-Step's `repaint` task); when none can, the repair is refused before any work, and nothing is copied or recorded. The new take is measured with the same readings as any take. Depends on `config`, `media`, `jobfs`, `takes`, `bar.song`, `providers`, and `songs`.
 
 ### dub
 A piece in another language as a job of its own: its music and effects stem under new voices, and captions in the new language, with its own human gate.
@@ -663,7 +534,7 @@ A story to a typeset book and a real EPUB with live text. Pages are laid out onc
 A book's pages as a PDF with live text in embedded fonts, at the same places as its page images. The same input gives the same bytes, because approval binds to them.
 
 ### bar
-The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks.
+The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks. `identity` reads whether a picture or a video shows a kit's character: a configured command (`identity.face_command`; `providers/runners/face_run.py` runs OpenCV's YuNet, embedding with SFace or ArcFace) describes every face as an embedding, and each face is compared with the kit's reference faces, so a crowd is read face by face. A video is read from one sampled frame a second, by its median closest face and the stretches where the character is lost (`clip_report`). The animatic checks each still against the characters its shot names (`check_cast`, printed by `kalainova animatic`). With no command set, identity is reported as not measured, never as a pass; it warns and does not block.
 
 ### qa
 Runs the automated checks before the human gate, for a rendered piece, a document, a song, or a file from an outside tool.
@@ -684,7 +555,7 @@ How a piece was made, for whoever answers for it: each asset's model, weights, s
 Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account. `labels` sets each platform's AI-content label from the assets' synthetic flag, using the fields the aggregator documents, and refuses a platform with none; it also holds a publish time only where the platform's own API takes one. `aggregator` is the one-upload route to several platforms.
 
 ### providers
-The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
+The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. While a rehearsal is open (`rehearsal.py`), an adapter that can rehearse (`fal`) writes its requests down instead of sending them, and the router refuses any other provider that costs money. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
 
 ### editor
 The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording (starting on a sentence start, with opening fillers dropped, and optionally opening and closing on a drawn title card from the graphics provider), chooses the crop through one seam with two adapters (the in-house motion centre, and a face detector the operator names as a command in `config/studio.yaml`), refusing a job whose `brief.source` does not say where the file came from and which file in the job folder covers its use. `patch` updates one cut in an existing `edit_manifest` (source, in point, title), voids any approval, and records the change in `direction.json` when that file is present. `musiccuts` turns a beat grid into bars, phrases, sections and the biggest rise in energy, and says so when there is no steady pulse; `musicvideo` builds the job that cuts a video to a track, with an excerpt, character cutaways under the shot ceiling, and the cost said first. `beats` is a seam: `adapters.beats` in `config/studio.yaml` picks its own onset-and-comb grid (default) or `beat_this`, which `beat_this.py` runs as a command and which adds downbeats. `speech_cuts` is a second seam: `speech.keep_spans` (called by `direct` for each take with sound) follows `adapters.speech_cuts`, which picks the in-house cuts at gaps between words (a silence detector when there is no transcript, the default) or `auto_editor`, which runs the `auto-editor` command, keeps the loud spans it reports, and lays any words over them. `auto_editor.py` follows the adapter contract in `opentools`, and keeps its result by the file's bytes and options. A seam is built only with its second adapter, and a missing command stops the step with its name.

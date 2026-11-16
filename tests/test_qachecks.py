@@ -474,3 +474,17 @@ def test_the_judge_uses_the_judge_model_when_configured(tmp_path, studio, monkey
     judge_calls = [c for c in studio.calls if c["capability"] in ("judge", "llm")]
     assert len(judge_calls) == 1
     assert judge_calls[0].get("model") == "custom-judge-haiku"
+
+
+@pytest.mark.parametrize(
+    ("check", "expected"),
+    [
+        ({"id": "b1.black_frames", "status": "fail", "detail": "black span"}, {"b1"}),
+        ({"id": "edit.cuts", "status": "fail", "detail": "b10: a cut inside a word"}, {"b10"}),
+        ({"id": "shot.motion", "status": "fail", "detail": "b2 and b10 froze"}, {"b2", "b10"}),
+        ({"id": "b1.black_frames", "status": "warn", "detail": "black span"}, set()),
+    ],
+)
+def test_a_failed_reading_excludes_only_the_beats_it_names_by_whole_id(check, expected):
+    packet = {"beats": [{"id": f"b{i}"} for i in (1, 2, 10)]}
+    assert qachecks.failed_beats(packet, [check]) == expected

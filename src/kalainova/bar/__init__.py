@@ -84,8 +84,8 @@ MAX_SHOTS_READ = 24
 
 
 def identity_readings(path: Path, references: list[Path]) -> list[Reading]:
-    """Measure the closest reference image against the configured identity limit."""
-    reading = face_reading(path, references, float(limits()["face_distance_max"]))
+    """How close the nearest face in a picture comes to the references. Empty: not measured."""
+    reading = face_reading(path, references)
     return [] if reading is None else [reading]
 
 

@@ -52,6 +52,7 @@ from . import (
     timeline,
     verdicts,
 )
+from .bar import identity
 from .jobfs import ContractError, Job, home, open_job
 from .render import drawn
 
@@ -137,6 +138,7 @@ def _make_parsers(sub: Any) -> None:
     video.add_argument("--excerpt", type=float)
     video.add_argument("--start", type=float)
     video.add_argument("--phrase-bars", type=int)
+    video.add_argument("--shots", type=Path, help="a shot list, one per line; B-roll: no character")
     found = sub.add_parser("research")
     found.add_argument("job")
     found.add_argument("question", nargs="?", default="")
@@ -342,6 +344,7 @@ def _song_video(a: argparse.Namespace) -> int:
         phrase_bars=a.phrase_bars,
         stream=getattr(a, "stream", None),
         cast=cast,
+        shots=getattr(a, "shots", None),
     )
     print(f"{folder}\nMake it with: kalainova make {a.new_id} --from assets")
     return 0
@@ -423,7 +426,8 @@ def _animatic(a: argparse.Namespace) -> int:
     made = assets.run(job, animatic=True)
     record = preproduction.write_record(job, made, preproduction.render(job, made))
     print(job.work / record["file"])
-    for line in preproduction.cost_lines(record, job.job.get("cost_cap"), job.committed()):
+    cost = preproduction.cost_lines(record, job.job.get("cost_cap"), job.committed())
+    for line in [*cost, *preproduction.judge_lines(job), *identity.cast_lines(job.work)]:
         print(line)
     print(
         f"watch it, then: kalainova verdict {job.id} accept|fix|reject --animatic --reviewer NAME"

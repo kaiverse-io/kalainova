@@ -23,3 +23,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0017](0017-autonomy-level-per-review-gate.md) | An autonomy level per review gate |
 | [0018](0018-stream-alternate-provider-and-model.md) | A stream may name one alternate provider and model |
 | [0019](0019-self-hosted-models-workflow-runtime.md) | Self-hosted models through one workflow runtime |
+| [0020](0020-a-short-animatic-is-cut-from-its-rented-stills.md) | A short's animatic is cut from its rented stills |

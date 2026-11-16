@@ -8,6 +8,8 @@
   uv run kalainova measure <job>
   uv run kalainova status <job>
   uv run kalainova clean <job> [--dry-run]   delete what make can rebuild; the final and assets stay
+  uv run kalainova rehearse <job>      every paid request and its price, with nothing sent
+  uv run kalainova review <job>        a page of every take side by side, to judge by eye
   uv run kalainova bar <job or file>   hold it to the studio bar
   uv run kalainova comic <job>         lay out and letter a comic from comic_script.json
   uv run kalainova story <job>         typeset a book and an EPUB from story.json
@@ -42,6 +44,7 @@ import json
 import shutil
 import sys
 import time
+from pathlib import Path
 
 from . import assets, edit, plan, production_cli, qa, qachecks, render, studio_cli
 from .jobfs import REPO, ContractError, home, open_job
@@ -129,6 +132,17 @@ def _clean(a) -> int:
     return 0
 
 
+def _rehearse(a) -> int:
+    from . import rehearse
+
+    job = open_job(a.job)
+    report = rehearse.run(job)
+    for line in rehearse.lines(report):
+        print(line)
+    print(job.work / rehearse.REPORT)
+    return 1 if report["stopped"] else 0
+
+
 def _render_edit(job) -> int:
     from .editor import direct
 
@@ -201,7 +215,23 @@ def _bar(a) -> int:
         mark = "ok  " if r["ok"] else "MISS"
         print(f"{mark} {r['id']:<30} {str(r['value'])[:26]:<28} {r['limit']}")
     print(f"studio bar: {bar.summary_line(report)}")
+    kit = getattr(a, "kit", None)  # callers that predate --kit pass no such field
+    if kit:
+        print(_identity_line(target, kit))
     return 0 if report["passed"] else 2
+
+
+def _identity_line(picture: Path, kit: str) -> str:
+    """A picture face by face, or a video frame by frame, against a frozen kit's faces."""
+    from . import kits
+    from .bar import identity
+
+    kit_id, _, ver = kit.partition("@")
+    version = int(ver) if ver else max(kits.versions(home(), kit_id), default=0)
+    refs = [
+        kits.blob_path(home(), e) for e in kits.load(home(), kit_id, version)["identity"]["refs"]
+    ]
+    return identity.kit_line(picture, refs, f"{kit_id}@{version}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -246,11 +276,16 @@ def main(argv: list[str] | None = None) -> int:
     cl = sub.add_parser("clean", help="delete rebuildable render intermediates")
     cl.add_argument("job")
     cl.add_argument("--dry-run", action="store_true")
+    rh = sub.add_parser("rehearse", help="what a job's paid stage would send and cost, unsent")
+    rh.add_argument("job")
+    sub.add_parser("review", help="a page of every take side by side").add_argument("job")
     sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
         "job"
     )
     sub.add_parser("story", help="typeset a book and an EPUB from story.json").add_argument("job")
-    sub.add_parser("bar", help="hold a job or any file to the studio bar").add_argument("target")
+    bar_cmd = sub.add_parser("bar", help="hold a job or any file to the studio bar")
+    bar_cmd.add_argument("target")
+    bar_cmd.add_argument("--kit", help="KIT or KIT@VERSION: compare the faces in a picture with it")
     sub.add_parser("host", help="check host system support and prerequisite capabilities")
     pv = sub.add_parser("providers", help="what is ready; --check makes one real, paid call each")
     pv.add_argument("--check", metavar="PROVIDER", help="prove an adapter against the live service")
@@ -299,6 +334,13 @@ def main(argv: list[str] | None = None) -> int:
             return _bar(a)
         if a.cmd == "clean":
             return _clean(a)
+        if a.cmd == "rehearse":
+            return _rehearse(a)
+        if a.cmd == "review":
+            from . import reviewpage
+
+            print(reviewpage.write(open_job(a.job)))
+            return 0
         if a.cmd in ("comic", "story"):
             return _document(a)
         if a.cmd == "stage":

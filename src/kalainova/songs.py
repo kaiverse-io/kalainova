@@ -456,6 +456,7 @@ def video_job(
     phrase_bars: int | None = None,
     stream: str | None = None,
     cast: list[str] | None = None,
+    shots: Path | None = None,
 ) -> Path:
     """Open a job that cuts a video to this song: every shot on a beat, the lyrics as captions.
 
@@ -486,4 +487,5 @@ def video_job(
         phrase_bars=phrase_bars,
         stream=stream,
         cast=cast,
+        shot_list=musicvideo.read_shots(shots) if shots else None,
     )
