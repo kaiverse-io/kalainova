@@ -114,9 +114,12 @@ def estimate(
     cap: float | None = None,
     only: list[str] | None = None,
     model: str | None = None,
+    takes_each: int | None = None,
 ) -> float:
     """Shots, seconds, and the price of the moving ones, said before any call. Refuses past the cap.
-    Each clip is priced at its generated length: the slot plus a beat to trim from."""
+    Each clip is priced at its generated length: the slot plus a beat to trim from, times the takes
+    every moving shot is planned to get (a paid model makes exactly those)."""
+    each = takes_each if takes_each is not None else takes.counts({})[0]
     moving = [s for s, k in zip(spans, kinds, strict=True) if k == "video"]
     seconds = sum(s["end"] - s["start"] for s in spans)
     total, unpriced = 0.0, False
@@ -133,10 +136,10 @@ def estimate(
         if quote is None or quote[1] is None:
             unpriced = True
         else:
-            total += quote[1]
+            total += quote[1] * each
     say(
-        f"{len(spans)} shots, {seconds:.1f}s, {len(moving)} moving: about ${total:.2f}"
-        + (" (some shots have no ready, priced provider)" if unpriced else "")
+        f"{len(spans)} shots, {seconds:.1f}s, {len(moving)} moving, {each} take(s) each: "
+        f"about ${total:.2f}" + (" (some shots have no ready, priced provider)" if unpriced else "")
     )
     limit = cap if cap is not None else job.job.get("cost_cap")
     if limit is not None and total > float(limit):

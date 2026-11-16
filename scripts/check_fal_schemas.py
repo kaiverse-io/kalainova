@@ -47,6 +47,7 @@ def _reference_names(cap: str, spec: dict) -> set[str]:
         names.add(spec["images_param"])
     if spec.get("elements"):
         names |= {"elements", "image_urls"}
+    names |= {spec[k] for k in ("start_image_param", "end_image_param") if spec.get(k)}
     if cap == "video":
         names |= {"duration", "aspect_ratio"}
     return names
@@ -69,9 +70,14 @@ def expected(cfg: dict) -> dict[str, set[str]]:
 
 
 def main() -> int:
-    path = Path(os.environ.get("KALAINOVA_CONFIG", REPO / "config" / "studio.yaml"))
-    print(f"config: {path}")
-    cfg = yaml.safe_load(path.read_text())
+    base = REPO / "config" / "studio.yaml"
+    cfg = yaml.safe_load(base.read_text())
+    private = os.environ.get("KALAINOVA_CONFIG")
+    if private and Path(private).exists():
+        from kalainova.config import overlay  # the engine's own rule, so this checks what runs
+
+        cfg = overlay(cfg, yaml.safe_load(Path(private).read_text()) or {})
+    print(f"config: {base}" + (f", with {private} laid over it" if private else ""))
     bad = 0
     for model, names in sorted(expected(cfg).items()):
         try:

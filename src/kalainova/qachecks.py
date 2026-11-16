@@ -199,6 +199,19 @@ def shot_problems(shot: Fields) -> list[str]:
     return found
 
 
+def _where(shot: Fields) -> Fields:
+    """Where the judge saw a fault. A problem is only kept when it was located (shot_problems), so
+    the place is kept too: a person can go straight to it, and a repair can aim at it."""
+    time = next((shot[k] for k in ("time", "timestamp", "at_sec") if shot.get(k) is not None), None)
+    where: Fields = {}
+    if time is not None:
+        is_number = isinstance(time, int | float) and not isinstance(time, bool)
+        where["time"] = time if is_number else str(time)
+    if shot.get("region"):
+        where["region"] = str(shot["region"])
+    return where
+
+
 def findings_from_judge(job_id: str, judge: Fields) -> Fields | None:
     """The judge's per-shot faults as a file a retake can read, or None when it found none."""
     shots_found = [
@@ -211,6 +224,7 @@ def findings_from_judge(job_id: str, judge: Fields) -> Fields | None:
                 if s.get("retake_prompt")
                 else {}
             ),
+            **_where(s),
         }
         for s in judge.get("shots") or []
         if (problems := shot_problems(s))

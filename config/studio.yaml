@@ -110,6 +110,10 @@ prices:
     video: {per_sec: 0.28}         # Wan 3.0 Prime at 1080p
     image_to_video: {per_sec: 0.28}
     reference_to_video: {per_sec: 0.28}
+    # A model's own row wins over its capability's. Without one, a cheaper model is estimated and
+    # recorded at the capability's rate. Audio off; fal's pages, read 2026-11-16.
+    fal-ai/kling-video/o3/pro/reference-to-video: {per_sec: 0.112}
+    fal-ai/kling-video/v3/pro/image-to-video: {per_sec: 0.112}
     music: {per_track: 0.04}
     song: {per_track: 0.15}        # ESTIMATE
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
@@ -215,7 +219,9 @@ reference_models:
         extra: {generate_audio: false}
       fal-ai/kling-video/o3/pro/reference-to-video:
         elements: true
-        max_images: 7
+        max_images: 4                     # fal: "Maximum 4 total (elements + reference images)"
+        start_image_param: start_image_url  # the first frame, apart from the references
+        end_image_param: end_image_url
         durations: "3,4,5,6,7,8,9,10,11,12,13,14,15"
 
 # How each plain video model takes its inputs, from the vendor's published schema. aspect_param names

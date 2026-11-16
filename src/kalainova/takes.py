@@ -90,13 +90,17 @@ def _score(take: Take) -> float:
 
 
 def _best(takes: list[Take]) -> int:
-    """The take that reads best among those that pass; otherwise the one closest to passing.
+    """The first take that passes; when none passes, the one closest to passing.
 
-    A bench take is a camera test, so it only stands for the shot when nothing else was made.
+    Passing is a floor, not a ranking: more motion is not a better shot, so the readings never
+    pick between takes that both pass. A person does that. A bench take is a camera test, so it
+    only stands for the shot when nothing else was made.
     """
     takes = [t for t in takes if not t.get("bench")] or takes
     passing = [t for t in takes if t["ok"]]
-    return int(max(passing or takes, key=_score)["n"])
+    if passing:
+        return int(min(passing, key=lambda t: t["n"])["n"])
+    return int(max(takes, key=_score)["n"])
 
 
 def record(job: Job, shot: str, take: Take) -> dict[str, Any]:
@@ -159,14 +163,13 @@ def assess_clip(path: Path) -> tuple[dict[str, Any], bool]:
         frames = media.decode_gray(path, width=READ_WIDTH)
         moved = bar.shot_motion(frames, fps)
     except (media.MediaError, ValueError, KeyError):
-        return {
-            "score": 0.0,
-            "unread": True,
-        }, True  # no reason to pay again for what cannot be read
+        # Not a pass: what cannot be read goes to a person. A paid model still makes only its
+        # planned takes (make_until_good), so this never buys another attempt by itself.
+        return {"score": 0.0, "unmeasurable": "the clip could not be decoded"}, False
     limit = float(bar.limits()["shot_motion_min"])
     readings: dict[str, Any] = {"score": round(moved or 0.0, 4)}
     if moved is None:
-        return readings, True  # too short to read, and no reason to pay for another
+        return {**readings, "unmeasurable": "too short to read its motion"}, False
     readings["shot_motion"] = round(moved, 4)
     return readings, moved >= limit
 

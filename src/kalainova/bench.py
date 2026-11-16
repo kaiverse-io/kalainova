@@ -57,6 +57,8 @@ class _Setup:
     prompt: str
     aspect: str
     kw: dict[str, Any]
+    resolved: Any = None
+    lock: dict[str, Any] | None = None
 
 
 def _setup(job: Job, shot: str) -> _Setup:
@@ -86,16 +88,40 @@ def _setup(job: Job, shot: str) -> _Setup:
         limit=shots.word_limit(config.preference("video", data)),
     )
     prof = config.profile(data.get("profile") or "short-9x16")
-    return _Setup(beat, float(span), still, prompt, str(prof.get("aspect", "9:16")), kw)
+    aspect = str(prof.get("aspect", "9:16"))
+    return _Setup(beat, float(span), still, prompt, aspect, kw, resolved, lock)
 
 
 def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> dict[str, Any]:
-    """The reference images go only to a model that takes them, so no model is refused for them."""
-    kw = {k: v for k, v in setup.kw.items() if k != "model"}
-    if kw.get("references") and not base.get(provider).reference_support("video", model):
+    """What one model is given, worked out for that model rather than the stream's pinned one.
+
+    A model that takes references gets the kit's, with the still as its first frame or its first
+    reference by what it accepts; a model that takes none starts from the frame alone, said aloud.
+    """
+    if not setup.kw.get("references"):
+        return {"model": model}
+    if not base.get(provider).reference_support("video", model):
         say(f"{model} cannot take this shot's references, so it starts from the frame alone")
-        kw = {}
+        return {"model": model}
+    lock = dict(setup.lock or {})
+    lock["generators"] = {
+        **(lock.get("generators") or {}),
+        "video": {"provider": provider, "model": model},
+    }
+    kw = shotmake.shot_kw(setup.resolved, lock, "video", setup.beat, start=setup.still)
     return {**kw, "model": model}
+
+
+def conditioning(provider: str, model: str, request: dict[str, Any]) -> str:
+    """What a bench take was given, in words, so takes with different inputs are not read alike."""
+    refs = request.get("references") or []
+    if not refs:
+        return "the start frame only"
+    spec = base.get(provider).reference_support("video", model)
+    kit = len(refs)
+    if spec.get("start_image_param"):
+        return f"the start frame and {kit} kit reference(s)"
+    return f"{kit} reference(s), the still among them; no start frame"
 
 
 def estimate(job: Job, shot: str, models: list[str], count: int, say: Say = print) -> list[Row]:
@@ -185,14 +211,17 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                     assess=takes.assess_clip,
                     prompt=setup.prompt,
                     seed=takes.seed_for(setup.prompt, i),
-                    extra={"bench": True},
+                    extra={
+                        "bench": True,
+                        "conditioning": conditioning(row.provider, row.model, request),
+                    },
                 )
             except RuntimeError as exc:
                 failed[row.model] = str(exc)[:300]
                 say(f"{row.model}: no take: {exc}")
                 break
             made.append(take)
-            say(f"{row.model} take {take['n']}: {_reading(take)}")
+            say(f"{row.model} take {take['n']}, given {take['conditioning']}: {_reading(take)}")
     sheet = _sheet(job, shot, made)
     return {"takes": made, "failed": failed, "sheet": sheet}
 
@@ -207,7 +236,13 @@ def _reading(take: dict[str, Any]) -> str:
 def _sheet(job: Job, shot: str, made: list[dict[str, Any]]) -> Path | None:
     if not made:
         return None
-    rows = [(f"{t['model']}  take {t['n']}  {_reading(t)}", job.work / t["file"]) for t in made]
+    rows = [
+        (
+            f"{t['model']}  take {t['n']}  given {t.get('conditioning', '?')}  {_reading(t)}",
+            job.work / t["file"],
+        )
+        for t in made
+    ]
     folder = job.work / "bench"
     folder.mkdir(exist_ok=True)
     return timeline.bench_sheet(rows, folder / f"{shot}.jpg")

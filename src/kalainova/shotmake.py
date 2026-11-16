@@ -56,10 +56,13 @@ def shot_kw(
     pin = (lock.get("generators") or {}).get(capability)
     if not resolved or not pin:
         return {}
-    capacity = base.get(pin["provider"]).reference_support(capability, pin["model"])["max_images"]
+    support = base.get(pin["provider"]).reference_support(capability, pin["model"])
     if not beat.get("cast") and capability == "video":
         return {}
-    refs = consistency.shot_refs(resolved, beat, capacity, start=start)
+    # A model that takes the first frame on its own gets the still there, so every reference slot
+    # goes to the kit; otherwise the still rides along as the first reference.
+    first = None if support.get("start_image_param") else start
+    refs = consistency.shot_refs(resolved, beat, support["max_images"], start=first)
     return {"references": refs, "model": pin["model"]} if refs else {}
 
 
@@ -99,7 +102,7 @@ def graphics_shot(job: Job, beat: Fields, span: float, add: Add, gen: Gen, data:
 
 def end_frame_used(job: Job, beat: Fields, clip_kw: Fields) -> bool:
     """Whether this shot has a last frame and the model that will run it can be given one."""
-    if not (beat.get("shot") or {}).get("last_frame") or clip_kw.get("references"):
+    if not (beat.get("shot") or {}).get("last_frame"):
         return False
     first = router.first_usable(job, "video")
     return bool(first and first.takes_end_image("video", clip_kw.get("model")))
@@ -318,8 +321,12 @@ def motion_break(job: Job, bid: str, take: Fields, allow_stills: bool) -> Fields
     entry = takes.load(job)["shots"].get(bid) or {}
     if entry.get("chosen_by") == "human":
         return None
-    reading = (take.get("readings") or {}).get("shot_motion")
-    return {"beat_id": bid, "reason": f"{MOTION_REASON} (take {take['n']} read {reading})"}
+    readings = take.get("readings") or {}
+    if readings.get("unmeasurable"):
+        why = f"take {take['n']} could not be measured: {readings['unmeasurable']}; look at it"
+    else:
+        why = f"take {take['n']} read {readings.get('shot_motion')}"
+    return {"beat_id": bid, "reason": f"{MOTION_REASON} ({why})"}
 
 
 def apply_chosen(job: Job, bid: str) -> Fields:

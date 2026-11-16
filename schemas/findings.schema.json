@@ -67,6 +67,14 @@
           "suggested_prompt_change": {
             "type": "string",
             "description": "What to say to the model on the retake."
+          },
+          "time": {
+            "type": ["number", "string"],
+            "description": "When in the shot the fault shows: seconds, or a span such as \"2.4-3.8\"."
+          },
+          "region": {
+            "type": "string",
+            "description": "Where in the frame the fault shows, as the reviewer named it."
           }
         }
       }

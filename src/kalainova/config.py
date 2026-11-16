@@ -1,6 +1,7 @@
 """Studio config: provider preference per capability, model ids, unit prices.
 
-Lookup order: $KALAINOVA_CONFIG, then config/studio.yaml in the repo.
+config/studio.yaml in the repo is the base. A private file named by $KALAINOVA_CONFIG is laid over
+it, key by key, so it holds only what it changes and never hides a section the repo adds later.
 A job may override with a "providers" object in job.json.
 """
 
@@ -15,16 +16,39 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 
 
+def overlay(base: dict, over: dict) -> dict:
+    """`over` laid on `base`: tables merge key by key; any other value, a list included, replaces."""
+    out = dict(base)
+    for key, value in over.items():
+        below = out.get(key)
+        out[key] = (
+            overlay(below, value) if isinstance(value, dict) and isinstance(below, dict) else value
+        )
+    return out
+
+
+def _read(path: Path) -> dict:
+    return (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
+
+
+@lru_cache(maxsize=1)
+def _repo() -> dict:
+    return _read(REPO / "config" / "studio.yaml")
+
+
 @lru_cache(maxsize=1)
 def studio() -> dict:
-    path = Path(os.environ.get("KALAINOVA_CONFIG", REPO / "config" / "studio.yaml"))
-    return yaml.safe_load(path.read_text()) if path.exists() else {}
+    """The repo's config with the private one laid over it.
+
+    A private file used to replace the repo's whole: one copied before a section existed lost that
+    section, and its stale prices under-reserved spend against the cap.
+    """
+    private = os.environ.get("KALAINOVA_CONFIG")
+    return overlay(_repo(), _read(Path(private))) if private else _repo()
 
 
-@lru_cache(maxsize=1)
 def _repo_bar() -> dict:
-    path = REPO / "config" / "studio.yaml"
-    return yaml.safe_load(path.read_text()).get("bar", {}) if path.exists() else {}
+    return dict(_repo().get("bar") or {})
 
 
 def bar_limits() -> dict:

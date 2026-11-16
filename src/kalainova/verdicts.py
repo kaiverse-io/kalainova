@@ -86,6 +86,9 @@ def record(
     A verdict on the animatic is on the rough cut as it stands; the job records which cut it was.
     """
     _check_record_args(job, verdict, reviewer, shot, take, preferred, over, animatic)
+    # The bytes judged, not only their take number: `assets --force` starts the numbering again,
+    # and a number alone would hand an old verdict to a new clip.
+    judged = _take_sha(job.folder, shot, take) if shot and preferred is None else ""
     entry = {
         "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "verdict": verdict,
@@ -93,7 +96,16 @@ def record(
         **({"stage": "animatic"} if animatic else {}),
         **({"shot": shot} if shot else {}),
         **({"take": take} if take is not None else {}),
+        **({"take_sha256": judged} if judged else {}),
         **({"preferred": preferred, "over": over} if preferred is not None else {}),
+        **(
+            {
+                "preferred_sha256": _take_sha(job.folder, shot, preferred),
+                "over_sha256": _take_sha(job.folder, shot, over),
+            }
+            if shot and preferred is not None and over is not None
+            else {}
+        ),
         **({"note": note} if note else {}),
     }
     with open(job.folder / VERDICTS_FILE, "a") as fh:
@@ -152,16 +164,33 @@ def _piece_points(folder: Path, verdict: str) -> dict[str, tuple[float, str]]:
     return points
 
 
-def _shot_points(
-    folder: Path, shot: str, verdict: str, take: int | None = None
-) -> dict[str, tuple[float, str]]:
-    entry = (_json(folder / "takes.json").get("shots") or {}).get(shot)
+def _judged_take(folder: Path, shot: str | None, take: int | None) -> dict[str, Any]:
+    """The take a verdict names, or the shot's chosen take when it names none."""
+    entry = (_json(folder / "takes.json").get("shots") or {}).get(shot or "")
     if not entry:
         return {}
     wanted = take if take is not None else entry.get("chosen")
-    if wanted is None:
+    return next((t for t in entry["takes"] if t["n"] == wanted), {}) if wanted is not None else {}
+
+
+def _take_sha(folder: Path, shot: str | None, take: int | None) -> str:
+    return str(_judged_take(folder, shot, take).get("sha256") or "")
+
+
+def _shot_points(
+    folder: Path, shot: str, verdict: str, take: int | None = None, sha: str = ""
+) -> dict[str, tuple[float, str]]:
+    if sha:
+        # The verdict was on these bytes. If no take has them now, it judged a clip that was
+        # replaced, and pairing it with whatever holds that number would be a false sample.
+        entry = (_json(folder / "takes.json").get("shots") or {}).get(shot) or {}
+        chosen: dict[str, Any] = next(
+            (t for t in entry.get("takes", []) if t.get("sha256") == sha), {}
+        )
+    else:  # a verdict written before verdicts named their bytes
+        chosen = _judged_take(folder, shot, take)
+    if not chosen:
         return {}
-    chosen: dict[str, Any] = next((t for t in entry["takes"] if t["n"] == wanted), {})
     points = {}
     for name, value in (chosen.get("readings") or {}).items():
         number = _number(value)
@@ -203,7 +232,9 @@ def samples(jobs_root: Path) -> list[dict[str, Any]]:
                 continue
             shot = entry.get("shot")
             if shot:
-                found = _shot_points(folder, shot, entry["verdict"], entry.get("take"))
+                found = _shot_points(
+                    folder, shot, entry["verdict"], entry.get("take"), entry.get("take_sha256", "")
+                )
                 found.update(_source_points(folder, shot, entry["verdict"]))
             else:
                 found = _piece_points(folder, entry["verdict"])

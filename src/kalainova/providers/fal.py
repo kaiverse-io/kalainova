@@ -98,8 +98,9 @@ class Fal(Provider):
     def takes_end_image(self, capability: str, model: str | None = None) -> bool:
         if capability != "video":
             return False
-        spec = video_spec("fal", model or model_for("fal", "image_to_video"))
-        return bool(spec.get("end_image_param"))
+        name = model or model_for("fal", "image_to_video")
+        plain, with_refs = video_spec("fal", name), reference_spec("fal", "video", name)
+        return bool(plain.get("end_image_param") or with_refs.get("end_image_param"))
 
     def reference_support(self, capability: str, model: str) -> Fields:
         return reference_spec("fal", capability, model)
@@ -245,10 +246,17 @@ class Fal(Provider):
         if aspect_field:  # a model whose schema lists none is sent none
             payload[aspect_field] = aspect
         payload.update(spec.get("extra", {}))
-        if image and not refs:
-            payload[spec.get("image_param", "image_url")] = self._upload(image)
+        # The locked still is the first frame wherever the model has a field for one: every plain
+        # clip, and a reference clip whose model takes the first frame apart from its references.
+        start_field = (
+            spec.get("start_image_param") if refs else spec.get("image_param", "image_url")
+        )
+        start_sent = False
+        if image and start_field:
+            payload[start_field] = self._upload(image)
+            start_sent = True
         end = kw.get("end_image")
-        end_used = bool(end and not refs and spec.get("end_image_param"))
+        end_used = bool(end and spec.get("end_image_param"))
         if end is not None and end_used:
             payload[spec["end_image_param"]] = self._upload(end)
         if seed is not None:
@@ -256,7 +264,12 @@ class Fal(Provider):
         data = self._run(model, payload, timeout=1800)
         cost = billed * price_for("fal", key, model).get("per_sec", 0)
         self._fetch(data["video"]["url"], dst, cost)
-        meta = {"billed_sec": billed, "end_frame_sent": end_used, **_seed_of(data, seed)}
+        meta = {
+            "billed_sec": billed,
+            "start_frame_sent": start_sent,
+            "end_frame_sent": end_used,
+            **_seed_of(data, seed),
+        }
         return Result(path=dst, cost=cost, model=model, meta=meta)
 
     def lipsync(self, video: Path, audio: Path, dst: Path, **kw: Any) -> Result:

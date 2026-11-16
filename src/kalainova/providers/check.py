@@ -249,12 +249,18 @@ def run(job: Job, name: str, calls: list[Call], *, spend: bool) -> list[Outcome]
 
 
 def verify_marks(model: str) -> list[str]:
-    """Lines in the studio config marked VERIFY for this model, for the person to clear."""
-    path = Path(os.environ.get("KALAINOVA_CONFIG", config.REPO / "config" / "studio.yaml"))
-    if not model or not path.exists():
+    """Lines marked VERIFY for this model, in the repo's config and any private one laid over it."""
+    paths = [config.REPO / "config" / "studio.yaml"]
+    if private := os.environ.get("KALAINOVA_CONFIG"):
+        paths.append(Path(private))
+    if not model:
         return []
     return [
-        line.strip() for line in path.read_text().splitlines() if "VERIFY" in line and model in line
+        line.strip()
+        for path in paths
+        if path.exists()
+        for line in path.read_text().splitlines()
+        if "VERIFY" in line and model in line
     ]
 
 
