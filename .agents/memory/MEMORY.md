@@ -15,3 +15,4 @@
 - [Drive a command before calling it done](drive-a-command-before-calling-it-done.md) — running the commands in order found a retake that went unused
 - [A drawn shot is not letterboxed](a-drawn-shot-is-not-letterboxed.md) — picture_box cropped a dark-edged graphics shot 1.19x and QA passed it; compare a source frame with the final
 - [Grain must reach the shadows](grain-must-reach-the-shadows.md) — overlay grain leaves near-black gradients to band; a plain low-alpha pass took banding 0.049 to 0.001
+- [One working tree, one writer](one-working-tree-one-writer.md) — a delegated agent's notes were swept into an unrelated commit and pushed; give it its own folder or worktree, stage named paths
