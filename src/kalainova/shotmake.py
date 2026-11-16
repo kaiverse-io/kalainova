@@ -10,6 +10,7 @@ import json
 import shutil
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +18,36 @@ from . import config, consistency, media, shots, takes, trace
 from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 from .providers import base, router
+from .providers.contract import (
+    Card,
+    GraphicsRequest,
+    ImageRequest,
+    LipsyncRequest,
+    Pin,
+    Reference,
+    Request,
+    Result,
+    SfxRequest,
+    VideoRequest,
+)
 
 Fields = dict[str, Any]
-Gen = Callable[..., tuple[Any, Any]]
+Gen = Callable[..., tuple[base.Provider, Result]]  # (request, **router options)
 Add = Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class Held:
+    """What holds a shot to its kits: the references, and the model pinned to take them."""
+
+    references: tuple[Reference, ...] = ()
+    pin: Pin | None = None
+
+    def __bool__(self) -> bool:
+        return bool(self.references)
+
+    def model_at(self, provider: str) -> str | None:
+        return self.pin.model if self.pin and self.pin.provider == provider else None
 
 
 def rights(job: Fields) -> str:
@@ -51,28 +78,34 @@ def picture_prompt(resolved: Any, packet: Fields, beat: Fields, data: Fields) ->
 
 def shot_kw(
     resolved: Any, lock: Fields, capability: str, beat: Fields, start: Path | None = None
-) -> Fields:
+) -> Held:
     """The references and pinned model for one shot of a stream job. A beat with no references uses
     the studio's plain model, because a reference endpoint will not run without them."""
     pin = (lock.get("generators") or {}).get(capability)
     if not resolved or not pin:
-        return {}
-    support = base.get(pin["provider"]).reference_support(capability, pin["model"])
+        return Held()
+    support = base.get(pin["provider"]).inputs(capability, pin["model"])
     if not beat.get("cast") and capability == "video":
-        return {}
+        return Held()
     # A model that takes the first frame on its own gets the still there, so every reference slot
     # goes to the kit; otherwise the still rides along as the first reference.
-    first = None if support.get("start_image_param") else start
-    refs = consistency.shot_refs(resolved, beat, support["max_images"], start=first)
-    return {"references": refs, "model": pin["model"]} if refs else {}
+    first = None if support.start_with_references else start
+    refs = consistency.shot_refs(resolved, beat, support.references, start=first)
+    if not refs:
+        return Held()
+    held = tuple(
+        Reference(path=r["path"], label=r["label"], group=r["group"], sha256=r["sha256"])
+        for r in refs
+    )
+    return Held(held, Pin(provider=pin["provider"], model=pin["model"]))
 
 
-def kit_refs(shot: Fields) -> Fields | None:
-    shas = [r["sha256"] for r in shot.get("references", []) if r["sha256"]]
+def kit_refs(shot: Held) -> Fields | None:
+    shas = [r.sha256 for r in shot.references if r.sha256]
     return {"kit_refs": shas} if shas else None
 
 
-def reused_origin(job: Job, path: Path, shot: Fields) -> Fields:
+def reused_origin(job: Job, path: Path, shot: Held) -> Fields:
     """Who made a file this job made earlier and now reuses, from the router's record of the same
     bytes, so the reuse keeps its model and its kit references. The references count only when
     the shot's pinned model is the one that made it."""
@@ -83,7 +116,7 @@ def reused_origin(job: Job, path: Path, shot: Fields) -> Fields:
     entry = next((e for e in reversed(entries) if e.get("sha256") == sha), None)
     if entry is None:
         return {"provider": "animatic", "model": "accepted animatic still"}
-    refs = kit_refs(shot) if shot.get("model") == entry["model"] else None
+    refs = kit_refs(shot) if shot.pin and shot.pin.model == entry["model"] else None
     return {
         "provider": entry["provider"],
         "model": entry["model"],
@@ -103,7 +136,7 @@ def graphics_shot(job: Job, beat: Fields, span: float, add: Add, gen: Gen, data:
     if job.folder.resolve() not in folder.parents or not folder.is_dir():
         raise ContractError(f"{job.id}: {beat['id']}: no composition folder at {beat['graphics']}")
     clip = job.work / "beats" / f"{beat['id']}.video.mp4"
-    p, res = gen("graphics", "graphics", folder, clip)
+    p, res = gen(GraphicsRequest(folder=folder, dst=clip))
     add(
         id=f"{beat['id']}.video",
         kind="video",
@@ -120,12 +153,12 @@ def graphics_shot(job: Job, beat: Fields, span: float, add: Add, gen: Gen, data:
     return clip
 
 
-def end_frame_used(job: Job, beat: Fields, clip_kw: Fields) -> bool:
+def end_frame_used(job: Job, beat: Fields, held: Held) -> bool:
     """Whether this shot has a last frame and the model that will run it can be given one."""
     if not (beat.get("shot") or {}).get("last_frame"):
         return False
     first = router.first_usable(job, "video")
-    return bool(first and first.takes_end_image("video", clip_kw.get("model")))
+    return bool(first and first.inputs("video", held.model_at(first.name)).end_frame)
 
 
 def _end_still(job: Job, beat: Fields, prof: Fields, data: Fields, gen: Gen) -> Path:
@@ -134,16 +167,15 @@ def _end_still(job: Job, beat: Fields, prof: Fields, data: Fields, gen: Gen) -> 
     if dst.exists():
         return dst
     text = str(beat["shot"]["last_frame"]).rstrip(".")
+    theme = (data.get("edit") or {}).get("theme", "studio")
     gen(
-        "image",
-        "image",
-        f"{text}. {style(data)}",
-        dst,
-        width=int(prof.get("width", 1080)),
-        height=int(prof.get("height", 1920)),
-        title=text,
-        palette=0,
-        style=(data.get("edit") or {}).get("theme", "studio"),
+        ImageRequest(
+            prompt=f"{text}. {style(data)}",
+            dst=dst,
+            width=int(prof.get("width", 1080)),
+            height=int(prof.get("height", 1920)),
+            card=Card(title=text, palette=0, theme=theme),
+        )
     )
     return dst
 
@@ -155,7 +187,7 @@ def take_clip(
     still: Path,
     span: float,
     prof: Fields,
-    clip_kw: Fields,
+    clip_kw: Held,
     gen: Gen,
     data: Fields,
     fallback_prompt: str,
@@ -186,25 +218,19 @@ def take_clip(
     assess = takes.held_to(floor) if floor and beat.get("cast") else takes.assess_clip
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
-        return gen(
-            "video",
-            "video",
-            prompt,
-            dst,
+        request: Request = VideoRequest(
+            prompt=prompt,
+            dst=dst,
             duration=span,
             aspect=prof.get("aspect", "9:16"),
-            image=still,
+            start=still,
+            end=end,
+            references=clip_kw.references,
             seed=seed,
-            audio=wants_sound,
-            **({"end_image": end} if end else {}),
-            est={
-                "duration": span,
-                "image": True,
-                "references": bool(clip_kw),
-                **({"model": clip_kw["model"]} if clip_kw.get("model") else {}),
-            },
-            **clip_kw,
+            sound=wants_sound,
+            pin=clip_kw.pin,
         )
+        return gen(request)
 
     if note:
         n = takes.next_take_number(job, beat["id"])
@@ -247,7 +273,7 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
     media.run(["-i", str(line), "-af", "apad", "-t", f"{length:.3f}", str(padded)])
     synced = clip.with_suffix(".synced.mp4")
     before = clip.with_name(f"{beat['id']}.video.presync.mp4")
-    _, res = gen("lipsync", "lipsync", clip, padded, synced, est={"duration": length})
+    _, res = gen(LipsyncRequest(video=clip, audio=padded, dst=synced))
     shutil.copyfile(clip, before)
     synced.replace(clip)
     return {"lipsync_model": res.model, "presync_path": f"beats/{before.name}"}
@@ -281,7 +307,7 @@ def generated_ambience(
     """The sound of a place. Worth having, and no reason to stop a piece if nothing can make it."""
     dst = job.work / "beats" / f"{bid}.ambience.wav"
     try:
-        p, res = gen("sfx", "sfx", cue, dst, duration=span, est={"duration": span})
+        p, res = gen(SfxRequest(prompt=cue, dst=dst, duration=span))
     except RuntimeError as exc:
         print(f"{job.id}: {bid}: no ambience: {exc}", file=sys.stderr)
         return
@@ -326,8 +352,8 @@ def retake(job: Job, bid: str, note: str = "") -> Fields:
     clip_kw = shot_kw(resolved, lock, "video", beat, start=still)
     prof = config.profile(data.get("profile") or "short-9x16")
 
-    def gen(capability: str, fn_name: str, *args: Any, **kw: Any) -> tuple[Any, Any]:
-        return router.generate(job, capability, fn_name, *args, **kw)
+    def gen(request: Request, **kw: Any) -> tuple[base.Provider, Result]:
+        return router.generate(job, request, **kw)
 
     prompt = picture_prompt(resolved, packet, beat, data)
     extra = note or f"Another attempt, take {takes.next_take_number(job, bid)}."

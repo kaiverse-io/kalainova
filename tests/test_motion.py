@@ -6,10 +6,12 @@ import json
 from pathlib import Path
 
 import pytest
+from fakes import Wire, context
 
 from kalainova import config, media, trace
 from kalainova.jobfs import Job
 from kalainova.providers import base, fal, local, mac, router
+from kalainova.providers.contract import Billable, MotionRequest
 
 
 class MotionProvider(base.Provider):
@@ -18,10 +20,10 @@ class MotionProvider(base.Provider):
     free = True
     seen: tuple[Path, Path] | None = None
 
-    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw):
-        type(self).seen = (character_image, driving_video)
-        media.run(["-f", "lavfi", "-i", "testsrc2=s=64x64:d=1:r=8", str(dst)])
-        return base.Result(path=dst, model="motion-test")
+    def motion(self, req, ctx):
+        type(self).seen = (req.character, req.driving)
+        media.run(["-f", "lavfi", "-i", "testsrc2=s=64x64:d=1:r=8", str(req.dst)])
+        return base.Result(path=req.dst, model="motion-test")
 
 
 def _job(tmp_path: Path, provider: str) -> Job:
@@ -72,35 +74,34 @@ def test_motion_is_a_declared_provider_capability():
 def test_fal_motion_estimate_uses_the_fixed_price():
     assert config.price_for("fal", "motion")["cost_usd"] == pytest.approx(0.02)
     assert config.estimate("fal", "motion") == pytest.approx(0.02)
-    assert fal.Fal().estimate("motion") == pytest.approx(0.02)
+    assert fal.Fal().estimate(Billable(capability="motion")) == pytest.approx(0.02)
 
 
 def test_fal_motion_sends_both_inputs_and_fetches_the_video(monkeypatch, tmp_path):
-    sent = {}
     fetched = []
 
-    def run(self, model, payload, timeout=900):
-        sent.update(model=model, payload=payload, timeout=timeout)
-        return {"video": {"url": "https://example.test/result.mp4"}}
+    class Clips(Wire):
+        def _upload(self, path):
+            return f"https://example.test/{path.name}"
 
-    monkeypatch.setattr(fal.Fal, "_run", run)
-    monkeypatch.setattr(fal.Fal, "_upload", lambda self, path: f"https://example.test/{path.name}")
-    monkeypatch.setattr(
-        fal.Fal,
-        "_fetch",
-        lambda self, url, dst, billed: fetched.append((url, dst, billed)) or Path(dst).touch(),
-    )
+        def _download(self, url, dst):
+            fetched.append((url, dst))
+            Path(dst).write_bytes(b"clip")
+
+    wire = Clips(default={"video": {"url": "https://example.test/result.mp4"}})
+    monkeypatch.setattr(fal.Fal, "transport", wire)
     character = tmp_path / "character.png"
     driving = tmp_path / "driving.mp4"
     dst = tmp_path / "result.mp4"
 
-    result = fal.Fal().motion(character, driving, dst)
+    asked = MotionRequest(character=character, driving=driving, dst=dst)
+    result = fal.Fal().motion(asked, context())
 
-    assert sent["model"] == "fal-ai/live-portrait"
-    assert sent["payload"] == {
+    assert wire.sent[-1]["endpoint"] == "fal-ai/live-portrait"
+    assert wire.payloads[-1] == {
         "image_url": "https://example.test/character.png",
         "video_url": "https://example.test/driving.mp4",
     }
-    assert fetched == [("https://example.test/result.mp4", dst, pytest.approx(0.02))]
+    assert fetched == [("https://example.test/result.mp4", dst)]
     assert result.path == dst
     assert result.cost == pytest.approx(0.02)

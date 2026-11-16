@@ -21,6 +21,7 @@ from . import bookpdf, captions, comic, render
 from .bookpdf import Placed
 from .jobfs import ContractError, Job
 from .providers import router
+from .providers.contract import ImageRequest
 
 PAGE_W, PAGE_H = 1650, 2550  # 5.5 x 8.5 inches at 300 dpi
 MARGIN_X, MARGIN_TOP, MARGIN_FOOT = 215, 240, 270
@@ -255,7 +256,8 @@ def _cover(job: Job, script: dict[str, Any]) -> tuple[Image.Image, dict[str, Any
     if script.get("cover_art"):
         dst = job.work / "cover.art.png"
         prompt = f"{script['cover_art']}. {comic.NO_LETTERING}"
-        provider, res = router.generate(job, "image", "image", prompt, dst, width=1024, height=1536)
+        cover = ImageRequest(prompt=prompt, dst=dst, width=1024, height=1536)
+        provider, res = router.generate(job, cover)
         page = comic._cover(dst, PAGE_W, PAGE_H)
         record = {
             "id": "cover",

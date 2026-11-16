@@ -22,6 +22,7 @@ from .bar import song as musicbar
 from .bar.readings import summarise
 from .jobfs import ContractError, Job
 from .providers import router
+from .providers.contract import SeparateRequest, SongRequest, TranscribeRequest
 from .render import release
 from .song_repair import repair_take as repair_take
 
@@ -80,19 +81,12 @@ def _heard(job: Job, path: Path) -> list[dict[str, Any]] | None:
     if not router.available(job, "transcribe"):
         return None
     try:
-        _, res = router.generate(
-            job,
-            "transcribe",
-            "transcribe",
-            path,
-            est={"duration": media.duration(path)},
-            note="lyrics",
-        )
+        _, res = router.generate(job, TranscribeRequest(src=path), note="lyrics")
     except (router.ProviderError, OSError) as exc:
         print(f"{job.id}: could not hear the lyrics: {exc}")
         return None
     saved.write_text(json.dumps(res.words))
-    return list(res.words)
+    return [dict(w) for w in res.words]
 
 
 def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
@@ -101,24 +95,20 @@ def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
     seconds = float(song.get("duration_sec") or brief.get("duration_sec") or 120)
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
-        return router.generate(
-            job,
-            "song",
-            "song",
-            lyrics,
-            dst,
+        take = SongRequest(
+            lyrics=lyrics,
+            dst=dst,
             style=style,
             duration=seconds,
             seed=seed,
             sections=song["sections"],
             avoid=song.get("avoid") or "",
             bpm=song.get("bpm"),
-            key=song.get("key"),
+            musical_key=song.get("key"),
             language=song.get("language"),
             instrumental=bool(song.get("instrumental")),
-            est={"duration": seconds},
-            note="song",
         )
+        return router.generate(job, take, note="song")
 
     def assess(path: Path) -> tuple[dict[str, Any], bool]:
         report = musicbar.measure(path, song, _heard(job, path))
@@ -308,16 +298,7 @@ def _stems(job: Job, final: Path) -> dict[str, str]:
         return {}
     vocals, rest = job.work / "vocals.wav", job.work / "instrumental.wav"
     try:
-        router.generate(
-            job,
-            "separate",
-            "separate",
-            final,
-            vocals,
-            rest,
-            est={"duration": media.duration(final)},
-            note="stems",
-        )
+        router.generate(job, SeparateRequest(src=final, vocals=vocals, rest=rest), note="stems")
     except (router.ProviderError, OSError) as exc:
         print(f"{job.id}: no stems: {exc}")
         return {}

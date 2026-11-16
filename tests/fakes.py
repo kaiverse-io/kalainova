@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -12,6 +14,9 @@ from PIL import Image
 from kalainova import media
 from kalainova.jobfs import Job
 from kalainova.providers import base
+from kalainova.providers.contract import Context, Result
+from kalainova.providers.transport import Reply as TransportReply
+from kalainova.providers.transport import Transport
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 needs_ffmpeg = pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
@@ -56,11 +61,15 @@ class Studio(base.Provider):
     end_image = False  # a model that takes the last frame as a picture
     can_repaint = True  # a song model that remakes one span of a take and keeps the rest
 
-    def supports_song_repaint(self) -> bool:
-        return self.can_repaint
+    references = 0  # takes no reference pictures, unless a test says it does
 
-    def takes_end_image(self, capability, model=None):
-        return Studio.end_image and capability == "video"
+    def inputs(self, capability, model=None):
+        return replace(
+            super().inputs(capability, model),
+            references=Studio.references,
+            end_frame=Studio.end_image and capability == "video",
+            repaint=self.can_repaint and capability == "song",
+        )
 
     @classmethod
     def reset(cls) -> None:
@@ -72,33 +81,40 @@ class Studio(base.Provider):
         cls.hits = []
         cls.silent_song = False
         cls.end_image = False
+        cls.references = 0
 
     def _log(self, capability: str, **kw) -> None:
         Studio.calls.append({"capability": capability, **kw})
 
-    def voice(self, text, dst, *, voice=None, **kw):
-        self._log("voice", text=text)
-        media.run(["-f", "lavfi", "-i", "sine=f=220:d=1.2:r=48000", "-ac", "1", str(dst)])
+    def voice(self, req, ctx):
+        self._log("voice", text=req.text, voice=req.voice, model=ctx.model)
+        media.run(["-f", "lavfi", "-i", "sine=f=220:d=1.2:r=48000", "-ac", "1", str(req.dst)])
         words = [
             {"start_sec": i * 0.2, "end_sec": (i + 1) * 0.2, "text": w, "confidence": 0.9}
-            for i, w in enumerate(text.split())
+            for i, w in enumerate(req.text.split())
         ]
-        return base.Result(path=dst, model="fake-voice", words=words)
+        return Result(path=req.dst, model="fake-voice", words=words)
 
-    def image(self, prompt, dst, *, width, height, **kw):
-        self._log("image", prompt=prompt, **{k: v for k, v in kw.items() if k == "seed"})
-        Image.linear_gradient("L").resize((width, height)).convert("RGB").save(dst, format="PNG")
-        return base.Result(path=dst, model="fake-image")
+    def image(self, req, ctx):
+        self._log(
+            "image", prompt=req.prompt, **({"seed": req.seed} if req.seed is not None else {})
+        )
+        Image.linear_gradient("L").resize((req.width, req.height)).convert("RGB").save(
+            req.dst, format="PNG"
+        )
+        return Result(path=req.dst, model="fake-image")
 
-    def video(self, prompt, dst, *, duration, aspect, image=None, **kw):
+    def video(self, req, ctx):
         n = sum(1 for c in Studio.calls if c["capability"] == "video")
         self._log(
             "video",
-            prompt=prompt,
-            image=image,
-            seed=kw.get("seed"),
-            duration=duration,
-            end_image=kw.get("end_image"),
+            prompt=req.prompt,
+            image=req.start,
+            seed=req.seed,
+            duration=req.duration,
+            end_image=req.end,
+            references=req.references,
+            model=ctx.model,
         )
         if Studio.fail_video:
             raise RuntimeError("the model is down")
@@ -109,86 +125,155 @@ class Studio(base.Provider):
                 "-f",
                 "lavfi",
                 "-i",
-                f"{source}:d={duration + 0.5:.2f}:r=24",
+                f"{source}:d={req.duration + 0.5:.2f}:r=24",
                 "-pix_fmt",
                 "yuv420p",
-                str(dst),
+                str(req.dst),
             ]
         )
-        return base.Result(path=dst, model="fake-video", meta={"seed": kw.get("seed")})
+        return Result(path=req.dst, model="fake-video", seed=req.seed)
 
-    def music(self, prompt, dst, *, duration, **kw):
-        self._log("music", prompt=prompt)
-        media.run(["-f", "lavfi", "-i", f"sine=f=330:d={duration}:r=48000", "-ac", "2", str(dst)])
-        return base.Result(path=dst, model="fake-music")
+    def music(self, req, ctx):
+        self._log("music", prompt=req.prompt)
+        media.run(
+            ["-f", "lavfi", "-i", f"sine=f=330:d={req.duration}:r=48000", "-ac", "2", str(req.dst)]
+        )
+        return Result(path=req.dst, model="fake-music")
 
-    def song(self, lyrics, dst, *, style="", duration=None, **kw):
-        self._log("song", lyrics=lyrics, style=style, seed=kw.get("seed"), kw=kw)
-        seconds = float(duration or 20)
+    def song(self, req, ctx):
+        kw = req._shape()[1]
+        self._log("song", lyrics=req.lyrics, style=req.style, seed=req.seed, kw=kw)
+        seconds = float(req.duration or 20)
         source = (
             f"anullsrc=r=48000:cl=stereo:d={seconds}"
             if Studio.silent_song
             else _PULSED.format(seconds=seconds)
         )
-        media.run(["-f", "lavfi", "-i", source, "-ac", "2", str(dst)])
-        return base.Result(path=dst, model="fake-song", meta={"seed": kw.get("seed")})
+        media.run(["-f", "lavfi", "-i", source, "-ac", "2", str(req.dst)])
+        return Result(path=req.dst, model="fake-song", seed=req.seed)
 
-    def sfx(self, prompt, dst, *, duration=1.0, **kw):
-        self._log("sfx", prompt=prompt)
+    def sfx(self, req, ctx):
+        self._log("sfx", prompt=req.prompt)
         media.run(
             [
                 "-f",
                 "lavfi",
                 "-i",
-                f"anoisesrc=d={duration}:c=pink:r=48000:a=0.2",
+                f"anoisesrc=d={req.duration}:c=pink:r=48000:a=0.2",
                 "-ac",
                 "2",
-                str(dst),
+                str(req.dst),
             ]
         )
-        return base.Result(path=dst, model="fake-sfx")
+        return Result(path=req.dst, model="fake-sfx")
 
-    def transcribe(self, src, **kw):
+    def transcribe(self, req, ctx):
         self._log("transcribe")
-        return base.Result(model="fake-whisper", words=list(Studio.heard))
+        return Result(model="fake-whisper", words=list(Studio.heard))
 
-    def lipsync(self, video, audio, dst, **kw):
-        self._log("lipsync", video=video, audio=audio)
+    def lipsync(self, req, ctx):
+        self._log("lipsync", video=req.video, audio=req.audio)
         # like the vendor's cut_off: the shorter input sets the length
-        shortest = min(media.duration(video), media.duration(audio))
-        media.run(["-i", str(video), "-t", f"{shortest:.3f}", "-c", "copy", str(dst)])
-        return base.Result(path=dst, model="fake-lipsync")
+        shortest = min(media.duration(req.video), media.duration(req.audio))
+        media.run(["-i", str(req.video), "-t", f"{shortest:.3f}", "-c", "copy", str(req.dst)])
+        return Result(path=req.dst, model="fake-lipsync")
 
-    def separate(self, src, vocals, rest, **kw):
+    def separate(self, req, ctx):
         self._log("separate")
-        shutil.copyfile(src, vocals)
-        shutil.copyfile(src, rest)
-        return base.Result(path=vocals, model="fake-split")
+        shutil.copyfile(req.src, req.vocals)
+        shutil.copyfile(req.src, req.rest)
+        return Result(path=req.vocals, model="fake-split")
 
-    def graphics(self, folder, dst, **kw):
-        self._log("graphics", folder=folder)
+    def graphics(self, req, ctx):
+        self._log("graphics", folder=req.folder, fps=req.fps)
         media.run(
-            ["-f", "lavfi", "-i", "testsrc2=s=320x180:d=2:r=24", "-pix_fmt", "yuv420p", str(dst)]
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=320x180:d=2:r=24",
+                "-pix_fmt",
+                "yuv420p",
+                str(req.dst),
+            ]
         )
-        return base.Result(path=dst, model="fake-graphics")
+        return Result(path=req.dst, model="fake-graphics")
 
-    def llm(self, prompt, **kw):
-        self._log("llm", prompt=prompt, **kw)
-        return base.Result(
+    def _text(self, capability, req, ctx, default):
+        self._log(
+            capability,
+            prompt=req.prompt,
+            system=req.system,
+            images=list(req.images),
+            max_tokens=req.max_tokens,
+            model=ctx.model,
+            judging=req.judging,
+        )
+        return Result(
             text=Studio.replies.pop(0) if Studio.replies else "{}",
-            model=kw.get("model") or "fake-llm",
+            model=ctx.model or default,
         )
 
-    def judge(self, prompt, **kw):
-        self._log("judge", prompt=prompt, **kw)
-        return base.Result(
-            text=Studio.replies.pop(0) if Studio.replies else "{}",
-            model=kw.get("model") or "fake-judge",
-        )
+    def llm(self, req, ctx):
+        return self._text("llm", req, ctx, "fake-llm")
 
-    def search(self, query, *, limit=5, **kw):
-        self._log("search", query=query)
-        return base.Result(model="fake-search", meta={"hits": list(Studio.hits)})
+    def judge(self, req, ctx):
+        return self._text("judge", req, ctx, "fake-judge")
+
+    def search(self, req, ctx):
+        self._log("search", query=req.query)
+        return Result(model="fake-search", hits=list(Studio.hits))
+
+
+class Wire(Transport):
+    """A vendor's transport with no network: each send is kept, and answered from `replies`.
+
+    `files` maps a reply address to the bytes a fetch writes there; any other address gets a short
+    tone or a frame, made by ffmpeg, of the destination's kind."""
+
+    platform = "wire"
+
+    def __init__(
+        self, *replies: Any, files: dict[str, bytes] | None = None, default: Any = None
+    ) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.replies = list(replies)
+        self.default = default if default is not None else {}
+        self.files = dict(files or {})
+        self.uploaded: list[Path] = []
+
+    def _send(self, endpoint, payload, ctx, *, wait, params):
+        self.sent.append({"endpoint": endpoint, "payload": payload, "params": params, "ctx": ctx})
+        reply = self.replies.pop(0) if self.replies else self.default
+        if isinstance(reply, Exception):
+            raise reply
+        return reply if isinstance(reply, TransportReply) else TransportReply(data=reply)
+
+    def _upload(self, path):
+        self.uploaded.append(Path(path))
+        return f"up:{Path(path).name}"
+
+    def _download(self, url, dst):
+        if url in self.files:
+            Path(dst).write_bytes(self.files[url])
+            return
+        suffix = Path(dst).suffix.lower()
+        if suffix in (".png", ".jpg"):
+            Image.new("RGB", (64, 64), (128, 128, 128)).save(dst, format="PNG")
+        elif suffix in (".mp4", ".mov"):
+            media.run(["-f", "lavfi", "-i", "testsrc2=s=64x64:d=1:r=24", "-pix_fmt", "yuv420p",
+                       "-f", "mp4", str(dst)])  # fmt: skip
+        else:
+            media.run(["-f", "lavfi", "-i", "sine=f=220:d=1:r=48000", "-f", "wav", str(dst)])
+
+    @property
+    def payloads(self) -> list[dict[str, Any]]:
+        return [s["payload"] for s in self.sent]
+
+
+def context(**kw: Any) -> Context:
+    """The router's per-call context, for a test that calls an adapter directly."""
+    return Context(job=kw.pop("job", "t"), attempt=kw.pop("attempt", "a1"), **kw)
 
 
 @pytest.fixture

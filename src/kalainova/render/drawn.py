@@ -21,6 +21,7 @@ from .. import captions as ass
 from .. import media
 from ..jobfs import ContractError
 from ..providers import base
+from ..providers.contract import Context, GraphicsRequest
 
 ACCENT, WHITE = "#ffd24a", "#ffffff"
 FACE = "InterDisplay-SemiBold.ttf"
@@ -207,7 +208,7 @@ def render_layer(folder: Path, dst: Path, fps: float) -> None:
         raise ContractError(
             f"kinetic captions need {', '.join(provider.missing_env())} on this machine"
         )
-    provider.graphics(folder, dst, fps=fps)
+    provider.graphics(GraphicsRequest(folder=folder, dst=dst, fps=fps), Context())
     if not dst.exists():
         raise ContractError(f"the graphics provider wrote no file at {dst.name}")
 

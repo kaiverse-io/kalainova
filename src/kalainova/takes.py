@@ -210,7 +210,7 @@ def attempt(
     readings, ok = assess(dst)
     take: Take = {
         "n": n,
-        "seed": int((res.meta or {}).get("seed", seed)),
+        "seed": int(res.seed if res.seed is not None else seed),
         "file": str(dst.relative_to(job.work)),
         "sha256": sha256_file(dst),
         "provider": provider.name,

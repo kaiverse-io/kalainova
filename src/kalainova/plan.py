@@ -14,6 +14,7 @@ import re
 from . import consistency, prompts, shots
 from .jobfs import ContractError, Job
 from .providers import router
+from .providers.contract import TextRequest
 
 
 def _prompt(job: dict) -> str:
@@ -142,15 +143,8 @@ def run(job: Job, *, force: bool = False) -> dict:
                 else ""
             )
         )
-        _, res = router.generate(
-            job,
-            "llm",
-            "llm",
-            prompt,
-            system=prompts.load("plan_system"),
-            max_tokens=4000,
-            note="plan",
-        )
+        ask = TextRequest(prompt=prompt, system=prompts.load("plan_system"), max_tokens=4000)
+        _, res = router.generate(job, ask, note="plan")
         try:
             packet = extract_json(res.text)
             packet["schema_version"] = "0.1"

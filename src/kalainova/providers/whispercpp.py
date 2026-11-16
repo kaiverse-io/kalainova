@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import media
-from .base import Provider, Result, register
+from .base import Provider, register
+from .contract import Context, Result, TranscribeRequest, Word
 
 COMMAND = "whisper-cli"
 MODEL_ENV = "KALAINOVA_WHISPER_CPP_MODEL"
@@ -29,9 +30,9 @@ def _is_marker(text: str) -> bool:
     return len(text) > 1 and pairs.get(text[0]) == text[-1]
 
 
-def parse_words(doc: dict[str, Any]) -> list[dict[str, Any]]:
+def parse_words(doc: dict[str, Any]) -> list[Word]:
     """Words from whisper.cpp's JSON: each entry of `transcription` carries offsets in ms."""
-    words: list[dict[str, Any]] = []
+    words: list[Word] = []
     for seg in doc.get("transcription") or []:
         text = str(seg.get("text", "")).strip()
         if not text or _is_marker(text):
@@ -64,7 +65,8 @@ class WhisperCpp(Provider):
             missing.append(f"{MODEL_ENV} names no file")
         return missing
 
-    def transcribe(self, src: Path, **kw: Any) -> Result:
+    def transcribe(self, req: TranscribeRequest, ctx: Context) -> Result:
+        src = req.src
         exe = shutil.which(COMMAND) or COMMAND
         model = os.environ[MODEL_ENV]
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,7 +77,7 @@ class WhisperCpp(Provider):
                 [exe, "-m", model, "-f", str(wav), "-ml", "1", "-sow", "-oj", "-of", str(stem)],
                 capture_output=True,
                 text=True,
-                timeout=kw.get("deadline_sec"),
+                timeout=ctx.deadline_sec,
                 check=False,
             )
             out = stem.with_suffix(".json")

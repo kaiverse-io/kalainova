@@ -13,10 +13,22 @@ import random
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from .. import media
-from .base import Provider, Result, register
+from .base import Provider, register
+from .contract import (
+    Card,
+    Context,
+    ImageRequest,
+    Inputs,
+    MotionRequest,
+    MusicRequest,
+    Result,
+    SfxRequest,
+    SongRequest,
+    VoiceRequest,
+    Word,
+)
 
 FONT_DIRS = [Path(__file__).resolve().parents[3] / "fonts"]
 
@@ -30,7 +42,7 @@ def find_font(*names: str) -> str | None:
     return None
 
 
-def estimate_words(text: str, total: float, offset: float = 0.0) -> list[dict]:
+def estimate_words(text: str, total: float, offset: float = 0.0) -> list[Word]:
     """Spread words over a clip by character weight. Marked low confidence."""
     words = re.findall(r"\S+", text)
     if not words or total <= 0:
@@ -66,23 +78,24 @@ class LocalProvider(Provider):
     free = True
     placeholder = True
 
-    def reference_support(self, capability: str, model: str) -> dict:
+    def inputs(self, capability: str, model: str | None = None) -> Inputs:
         """Takes and ignores references, so the line can be tested. approve refuses its output."""
-        return {"max_images": 99, "max_characters": 99} if capability == "image" else {}
+        return Inputs(references=99, characters=99) if capability == "image" else Inputs()
 
-    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+    def motion(self, req: MotionRequest, ctx: Context) -> Result:
         """Copy the driving clip as a placeholder; this provider has no motion model."""
-        media.run(["-i", str(driving_video), "-map", "0", "-c", "copy", str(dst)])
+        media.run(["-i", str(req.driving), "-map", "0", "-c", "copy", str(req.dst)])
         return Result(
-            path=dst,
+            path=req.dst,
             model="liveportrait-placeholder",
-            meta={"placeholder": True, "character_image": character_image.name},
+            meta={"placeholder": True, "character_image": req.character.name},
         )
 
     # flite voices bundled with ffmpeg's libflite
     VOICES = ("slt", "awb", "rms", "kal16", "kal")
 
-    def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw) -> Result:
+    def voice(self, req: VoiceRequest, ctx: Context) -> Result:
+        text, dst, voice = req.text, req.dst, req.voice
         if not media.has_filter("flite"):  # many ffmpeg builds ship without it
             return self._murmur(text, dst)
         v = voice if voice in self.VOICES else "slt"
@@ -133,20 +146,14 @@ class LocalProvider(Provider):
             meta={"duration_sec": dur},
         )
 
-    def image(
-        self,
-        prompt: str,
-        dst: Path,
-        *,
-        width: int,
-        height: int,
-        title: str = "",
-        palette: int | None = None,
-        **kw,
-    ) -> Result:
-        if kw.get("style", "studio") == "studio":
-            return self._studio_field(prompt, dst, width=width, height=height, palette=palette)
-        return self._typecard(prompt, dst, width=width, height=height, title=title, palette=palette)
+    def image(self, req: ImageRequest, ctx: Context) -> Result:
+        card = req.card or Card(title="", palette=None)
+        prompt, dst, width, height = req.prompt, req.dst, req.width, req.height
+        if card.theme == "studio":
+            return self._studio_field(prompt, dst, width=width, height=height, palette=card.palette)
+        return self._typecard(
+            prompt, dst, width=width, height=height, title=card.title, palette=card.palette
+        )
 
     # Studio palettes: (base, light A, light B). Deep near-black base, two luminous fields.
     STUDIO = {
@@ -309,10 +316,13 @@ class LocalProvider(Provider):
             img, Image.new("RGB", (width, height), (0, 0, 0)), noise.point(lambda v: 255 - v // 10)
         )
         img.save(dst, quality=92)
-        return Result(path=dst, model="local-typecard", meta={"seed": seed})
+        return Result(path=dst, model="local-typecard", seed=seed)
 
-    def music(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
+    def music(self, req: MusicRequest, ctx: Context) -> Result:
         """Ambient pad: a slow chord progression with tremolo and a soft pulse."""
+        return self._pad(req.dst, req.duration)
+
+    def _pad(self, dst: Path, duration: float) -> Result:
         prog = [
             (220.0, 261.63, 329.63),
             (196.0, 246.94, 293.66),
@@ -341,14 +351,13 @@ class LocalProvider(Provider):
         )
         return Result(path=dst, model="local-pad", meta={"duration_sec": duration})
 
-    def song(
-        self, lyrics: str, dst: Path, *, style: str = "", duration: float | None = None, **kw
-    ) -> Result:
+    def song(self, req: SongRequest, ctx: Context) -> Result:
         """A placeholder with no voice in it, so the line can run with no model. approve refuses it."""
-        return self.music(style or lyrics, dst, duration=float(duration or 20))
+        return self._pad(req.dst, float(req.duration or 20))
 
-    def sfx(self, prompt: str, dst: Path, *, duration: float = 0.6, **kw) -> Result:
+    def sfx(self, req: SfxRequest, ctx: Context) -> Result:
         """A whoosh: filtered noise with a fast swell."""
+        dst, duration = req.dst, req.duration
         media.run(
             [
                 "-f",

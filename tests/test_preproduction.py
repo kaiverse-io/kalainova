@@ -13,6 +13,7 @@ from kalainova import assets, kits, lookdev, preproduction, publish, shotmake, v
 from kalainova.blobstore import sha256_file
 from kalainova.jobfs import ContractError
 from kalainova.providers import base
+from kalainova.providers.contract import Pin, Reference
 
 
 def _beat(i, **extra):
@@ -30,7 +31,7 @@ class Priced(base.Provider):
     name = "priced-video"
     capabilities = ("video",)
 
-    def estimate(self, capability, **request):
+    def estimate(self, billable, model=None):
         return 4.0
 
 
@@ -201,12 +202,6 @@ def test_a_look_sheet_reads_a_draft_and_leaves_it_alone(root):
 
 
 def test_test_stills_are_one_per_look_under_a_cap(root, monkeypatch):
-    def picture(self, prompt, dst, *, width, height, **kw):
-        Stub.calls.append({"capability": "image", "prompt": prompt, **kw})
-        Image.linear_gradient("L").resize((width, height)).convert("RGB").save(dst, format="PNG")
-        return base.Result(path=dst, model=kw.get("model") or "stub-plain")
-
-    monkeypatch.setattr(Stub, "image", picture)
     make_character(root)
     made = lookdev.make_test_stills(root, "lead", cost_cap=1.0, provider="stub", model="img-ref")
     assert [name for name, _ in made] == ["office"]
@@ -265,7 +260,7 @@ class PaidVideoStudio(Studio):
     capabilities = ("video",)
     free = False
 
-    def estimate(self, capability, **request):
+    def estimate(self, billable, model=None):
         return 2.0
 
 
@@ -480,11 +475,12 @@ def test_kit_references_count_only_for_the_model_that_made_the_file(tmp_path):
     entry = {"key": "k", "provider": "p", "model": "m1", "file": "s.png",
              "sha256": sha256_file(made), "cost": 0.1, "words": [], "meta": {}}  # fmt: skip
     (job.folder / "generations.jsonl").write_text(json.dumps(entry) + "\n")
-    shot = {"model": "m1", "references": [{"sha256": "face"}]}
+    face = Reference(path=made, label="face", sha256="face")
+    shot = shotmake.Held((face,), Pin(provider="p", model="m1"))
     found = shotmake.reused_origin(job, made, shot)
     assert (found["provider"], found["model"]) == ("p", "m1")
     assert found["provenance"]["kit_refs"] == ["face"]
-    other = shotmake.reused_origin(job, made, {**shot, "model": "m2"})
+    other = shotmake.reused_origin(job, made, shotmake.Held((face,), Pin(provider="p", model="m2")))
     assert "kit_refs" not in other["provenance"]
     Image.new("RGB", (8, 8), color="blue").save(made)  # bytes the router never made
     assert shotmake.reused_origin(job, made, shot)["model"] == "accepted animatic still"

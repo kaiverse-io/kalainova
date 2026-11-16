@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 
 import pytest
+from fakes import Wire, context
 from kit_fixtures import Stub, make_character, make_stream, packet, picture
 
 from kalainova import assets, consistency, kitchecks, kits, media, streams
 from kalainova import publish as pub
 from kalainova.jobfs import ContractError, Job
-from kalainova.providers import fal, router
+from kalainova.providers import fal
+from kalainova.providers.contract import ImageRequest, Reference, VideoRequest
 
 
 # ------------------------------------------------------------------ script
@@ -145,11 +147,16 @@ def test_a_new_kit_version_does_not_move_a_locked_job(root):
 
 def test_a_changed_reference_forces_a_new_render(root):
     first = picture(root, "a.png", (1, 1, 1))
-    key = {"references": [{"path": first, "label": "x"}]}
-    before = router._request_key("image", "image", ("p", root / "o.png"), key)
+    asked = ImageRequest(
+        prompt="p",
+        dst=root / "o.png",
+        width=1,
+        height=1,
+        references=(Reference(path=first, label="x"),),
+    )
+    before = asked.key()
     picture(root, "a.png", (2, 2, 2))
-    after = router._request_key("image", "image", ("p", root / "o.png"), key)
-    assert before != after
+    assert asked.key() != before
 
 
 def test_judge_failures_block_and_uncertainty_warns():
@@ -164,77 +171,55 @@ def test_judge_failures_block_and_uncertainty_warns():
 
 # ---------------------------------------------------------------- adapters
 def test_fal_sends_references_in_each_model_shape(root, monkeypatch):
-    sent = {}
     provider = fal.Fal()
-    monkeypatch.setattr(
-        provider,
-        "_run",
-        lambda model, payload, timeout=900: (
-            sent.update(payload) or {"video": {"url": "u"}, "images": [{"url": "u"}]}
-        ),
-    )
-    monkeypatch.setattr(fal, "_download", lambda url, dst: dst)
-    face = {"path": picture(root, "f.png"), "label": "lead, the character", "group": "lead"}
-    side = {"path": picture(root, "s.png"), "label": "lead, another angle", "group": "lead"}
-    frame = {"path": picture(root, "k.png"), "label": "the start frame", "group": ""}
+    provider.transport = wire = Wire()
+    face = Reference(path=picture(root, "f.png"), label="lead, the character", group="lead")
+    side = Reference(path=picture(root, "s.png"), label="lead, another angle", group="lead")
+    frame = Reference(path=picture(root, "k.png"), label="the start frame")
 
-    provider.image(
-        "shot",
-        root / "o.png",
-        width=9,
-        height=16,
-        model="google/nano-banana-2.1/edit",
-        references=[face],
-    )
-    assert len(sent["image_urls"]) == 1
-    assert "image 1 is lead, the character" in sent["prompt"]
+    def sent(request, model):
+        wire.replies.append({"video": {"url": "u"}, "images": [{"url": "u"}]})
+        getattr(provider, request.capability)(request, context(model=model))
+        return wire.payloads[-1]
 
-    sent.clear()
-    provider.video(
-        "shot",
-        root / "o.mp4",
-        duration=4,
-        aspect="9:16",
-        model="alibaba/wan-3.0-prime/reference-to-video",
-        references=[frame, face],
-    )
-    assert len(sent["reference_image_urls"]) == 2
-    assert sent["audio"] is False
-    assert sent["duration"] == 4  # the model takes any whole second, so a shot pays only for itself
+    still = ImageRequest(prompt="shot", dst=root / "o.png", width=9, height=16, references=(face,))
+    payload = sent(still, "google/nano-banana-2.1/edit")
+    assert len(payload["image_urls"]) == 1
+    assert "image 1 is lead, the character" in payload["prompt"]
 
-    sent.clear()
-    provider.video(
-        "shot",
-        root / "o.mp4",
-        duration=4,
-        aspect="9:16",
-        model="fal-ai/kling-video/o3/pro/reference-to-video",
-        references=[frame, face, side],
+    clip = VideoRequest(
+        prompt="shot", dst=root / "o.mp4", duration=4, aspect="9:16", references=(frame, face)
     )
-    assert len(sent["elements"]) == 1
-    assert len(sent["elements"][0]["reference_image_urls"]) == 1
-    assert "@Element1 is lead" in sent["prompt"]
-    assert "@Image1 is the start frame" in sent["prompt"]
+    payload = sent(clip, "alibaba/wan-3.0-prime/reference-to-video")
+    assert len(payload["reference_image_urls"]) == 2
+    assert payload["audio"] is False
+    assert (
+        payload["duration"] == 4
+    )  # the model takes any whole second, so a shot pays only for itself
+
+    clip = VideoRequest(
+        prompt="shot", dst=root / "o.mp4", duration=4, aspect="9:16", references=(frame, face, side)
+    )
+    payload = sent(clip, "fal-ai/kling-video/o3/pro/reference-to-video")
+    assert len(payload["elements"]) == 1
+    assert len(payload["elements"][0]["reference_image_urls"]) == 1
+    assert "@Element1 is lead" in payload["prompt"]
+    assert "@Image1 is the start frame" in payload["prompt"]
 
     # One picture of a character cannot be an element: fal wants a front and another angle
-    sent.clear()
-    provider.video(
-        "shot",
-        root / "o.mp4",
-        duration=4,
-        aspect="9:16",
-        model="fal-ai/kling-video/o3/pro/reference-to-video",
-        references=[face],
+    clip = VideoRequest(
+        prompt="shot", dst=root / "o.mp4", duration=4, aspect="9:16", references=(face,)
     )
-    assert "elements" not in sent
-    assert len(sent["image_urls"]) == 1
-    assert "@Image1 is lead" in sent["prompt"] and "@Element" not in sent["prompt"]
+    payload = sent(clip, "fal-ai/kling-video/o3/pro/reference-to-video")
+    assert "elements" not in payload
+    assert len(payload["image_urls"]) == 1
+    assert "@Image1 is lead" in payload["prompt"] and "@Element" not in payload["prompt"]
 
 
 def test_fal_refuses_references_for_an_unlisted_model(root):
-    face = {"path": picture(root, "f.png"), "label": "x", "group": ""}
+    face = Reference(path=picture(root, "f.png"), label="x")
     with pytest.raises(ValueError, match="not listed"):
-        fal.Fal()._with_references("image", "unknown/model", "p", [face])
+        fal.Fal()._with_references("image", "unknown/model", "p", (face,))
 
 
 # ------------------------------------------------------------------ gates

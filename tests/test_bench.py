@@ -10,6 +10,7 @@ from fakes import make_job, needs_ffmpeg
 from kalainova import assets, bench, config, media, takes, verdicts
 from kalainova.jobfs import ContractError
 from kalainova.providers import base
+from kalainova.providers.contract import Billable
 
 pytestmark = needs_ffmpeg
 
@@ -21,19 +22,18 @@ class Camera(base.Provider):
     capabilities = ("video",)
     calls: list[dict] = []
 
-    def estimate(self, capability, **request):
-        return PRICES[request.get("model", "cam-a")] * float(request["duration"])
+    def estimate(self, billable, model=None):
+        return PRICES[model or "cam-a"] * float(billable.duration)
 
-    def video(self, prompt, dst, *, duration, aspect, image=None, **kw):
-        Camera.calls.append({"model": kw.get("model"), "seed": kw.get("seed"), "image": image})
+    def video(self, req, ctx):
+        model = ctx.model or "cam-a"
+        Camera.calls.append({"model": ctx.model, "seed": req.seed, "image": req.start})
         media.run(
-            ["-f", "lavfi", "-i", f"testsrc2=s=320x180:d={duration + 0.5:.2f}:r=24",
-             "-pix_fmt", "yuv420p", str(dst)]
+            ["-f", "lavfi", "-i", f"testsrc2=s=320x180:d={req.duration + 0.5:.2f}:r=24",
+             "-pix_fmt", "yuv420p", str(req.dst)]
         )  # fmt: skip
-        cost = PRICES[kw.get("model", "cam-a")] * duration
-        return base.Result(
-            path=dst, cost=cost, model=kw.get("model", "cam-a"), meta={"seed": kw.get("seed")}
-        )
+        cost = PRICES[model] * req.duration
+        return base.Result(path=req.dst, cost=cost, model=model, seed=req.seed)
 
 
 @pytest.fixture
@@ -163,5 +163,6 @@ def test_a_fal_clip_is_estimated_at_the_length_it_is_billed(monkeypatch):
     }
     monkeypatch.setattr(config, "studio", lambda: table)
     fal = base.get("fal")
-    assert fal.estimate("video", duration=3.0, image=True, model="m/x") == 5.0
-    assert fal.estimate("video", duration=6.0, image=True, model="m/x") == 10.0
+    clip = Billable(capability="video", duration=3.0, image=True)
+    assert fal.estimate(clip, "m/x") == 5.0
+    assert fal.estimate(Billable(capability="video", duration=6.0, image=True), "m/x") == 10.0

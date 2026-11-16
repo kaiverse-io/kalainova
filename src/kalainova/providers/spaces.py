@@ -10,11 +10,11 @@ from __future__ import annotations
 import importlib
 import importlib.util
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 from .. import config, media
-from .base import Provider, Result, register
+from .base import Provider, register
+from .contract import Context, Result, SongRequest
 
 
 def _first_path(output: Any) -> str:
@@ -57,15 +57,15 @@ class Spaces(Provider):
             return []
         return ["gradio_client (install the spaces extra)"]
 
-    def song(
-        self, lyrics: str, dst: Path, *, style: str = "", duration: float | None = None, **kw: Any
-    ) -> Result:
+    def song(self, req: SongRequest, ctx: Context) -> Result:
+        if req.repaint is not None:
+            raise ValueError("a hosted app cannot repaint a span of a take")
         spec = config.space_spec("song")
         if not spec.get("space"):
             raise ValueError("models.spaces.song names no app in config/studio.yaml")
-        request = _song_request(spec, lyrics, style, duration, kw.get("seed"))
+        request = _song_request(spec, req.lyrics, req.style, req.duration, req.seed)
+        dst = req.dst
         client = importlib.import_module("gradio_client").Client(spec["space"], verbose=False)
         made = _first_path(client.predict(api_name=spec["api_name"], **request))
         media.run(["-i", made, "-ar", "48000", "-ac", "2", str(dst)])
-        meta = {"seed": kw["seed"]} if kw.get("seed") is not None else {}
-        return Result(path=dst, model=str(spec["space"]), meta=meta)
+        return Result(path=dst, model=str(spec["space"]), seed=req.seed)

@@ -8,6 +8,7 @@ from fakes import make_job
 from kalainova.__main__ import main
 from kalainova.jobfs import ContractError
 from kalainova.providers import base, check
+from kalainova.providers.contract import Inputs
 
 
 class Paid(base.Provider):
@@ -16,20 +17,20 @@ class Paid(base.Provider):
     broken: list[str] = []
     calls: list[str] = []
 
-    def estimate(self, capability, **request):
+    def estimate(self, billable, model=None):
         return 0.01
 
-    def llm(self, prompt, **kw):
+    def llm(self, req, ctx):
         Paid.calls.append("llm")
         return base.Result(text="ok", cost=0.012, model="paid-llm")
 
-    def search(self, query, *, limit=5, **kw):
+    def search(self, req, ctx):
         Paid.calls.append("search")
         if "search" in Paid.broken:
             return {}["hits"]  # the vendor's reply no longer has what the adapter reads
         return base.Result(model="paid-search", cost=0.01)
 
-    def transcribe(self, src, **kw):
+    def transcribe(self, req, ctx):
         Paid.calls.append("transcribe")
         return base.Result(model="paid-whisper", cost=0.01)
 
@@ -109,28 +110,28 @@ class Video(base.Provider):
     name = "video-only"
     capabilities = ("video",)
 
-    def estimate(self, capability, **request):
+    def estimate(self, billable, model=None):
         return 0.5
 
-    def reference_support(self, capability, model):
-        return {"images_param": "x"}
+    def inputs(self, capability, model=None):
+        return Inputs(references=1)
 
 
 def test_the_video_check_also_tries_a_still_and_a_reference(tmp_path, monkeypatch):
     monkeypatch.setitem(base._REGISTRY, "video-only", Video)
     calls, _ = check.plan(_job(tmp_path), "video-only")
     assert [c.label for c in calls] == ["video", "video from a still", "video from a reference"]
-    still = calls[1].kw["image"]
+    still = calls[1].request.start
     assert still.read_bytes().startswith(b"\x89PNG")
-    assert calls[2].kw["references"][0]["label"]
+    assert calls[2].request.references[0].label
 
 
 def test_the_reference_route_is_left_out_for_a_provider_that_cannot_take_one(tmp_path, monkeypatch):
     class Plain(Video):
         name = "plain-video"
 
-        def reference_support(self, capability, model):
-            return {}
+        def inputs(self, capability, model=None):
+            return Inputs()
 
     monkeypatch.setitem(base._REGISTRY, "plain-video", Plain)
     calls, _ = check.plan(_job(tmp_path), "plain-video")

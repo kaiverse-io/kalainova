@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from pathlib import Path
-from typing import Any
 
-from .base import Provider, Result, register
+from .base import Provider, register
+from .contract import Context, GraphicsRequest, Result
 
 FORMATS = {".mp4": "mp4", ".mov": "mov", ".webm": "webm"}
 
@@ -26,10 +25,11 @@ class HyperFrames(Provider):
     def missing_env(self, capability: str = "") -> list[str]:
         return [] if shutil.which("npx") else ["npx (Node 22 or newer)"]
 
-    def graphics(self, folder: Path, dst: Path, **kw: Any) -> Result:
+    def graphics(self, req: GraphicsRequest, ctx: Context) -> Result:
+        folder, dst = req.folder, req.dst
         npx = shutil.which("npx") or "npx"
         render_format = FORMATS.get(dst.suffix.lower(), "mp4")
-        rate = ["--fps", f"{float(kw['fps']):g}"] if kw.get("fps") else []
+        rate = ["--fps", f"{float(req.fps):g}"] if req.fps else []
         # an argument list built here, never a shell string
         proc = subprocess.run(  # noqa: S603
             [

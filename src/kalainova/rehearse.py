@@ -22,10 +22,10 @@ from typing import Any
 
 from . import assets, preproduction, takes
 from .jobfs import ContractError, Job
-from .providers import fal, rehearsal
+from .providers import base, rehearsal
 
 REPORT = "rehearsal.json"
-Check = Callable[[str, dict[str, Any]], list[str]]
+Check = Callable[[str, str, dict[str, Any]], list[str]]  # provider, model, payload
 SKIP = ("jobs", "out")  # the studio's other folders are seen through links, read only
 
 
@@ -70,21 +70,30 @@ def _shots(copy: Job) -> dict[str, Any]:
     return found
 
 
+def published_schema(provider: str, model: str, payload: dict[str, Any]) -> list[str]:
+    """What the vendor's published schema says of a payload, read by the provider's own adapter.
+    Free, and needs no key; a vendor that publishes none has nothing to say."""
+    try:
+        return base.get(provider).problems(model, payload)
+    except KeyError:
+        return []
+
+
 def _checked(calls: list[dict[str, Any]], check: Check | None) -> list[str]:
-    """Each fal request against the model's live schema, so a field fal would refuse stops the
-    rehearsal instead of the paid run. The verdict is kept on the request."""
+    """Each request against its model's published schema, so a field the vendor would refuse stops
+    the rehearsal instead of the paid run. The verdict is kept on the request."""
     found: list[str] = []
     for call in calls:
         for req in call.get("requests", []):
-            if check is None or call.get("provider") != "fal":
+            if check is None or not call.get("provider"):
                 continue
-            said = check(req["model"], req.get("payload") or {})
+            said = check(str(call["provider"]), req["model"], req.get("payload") or {})
             req["schema"] = said or "ok"
-            found += [f"request {call['n']}: {s}" for s in said]
+            found += [f"request {call['n']}: {call['provider']}: {s}" for s in said]
     return found
 
 
-def run(job: Job, check: Check | None = fal.schema_problems) -> dict[str, Any]:
+def run(job: Job, check: Check | None = published_schema) -> dict[str, Any]:
     """Rehearse the job's stills and moving shots; write what would be sent and what it costs.
     `check` reads each model's published schema, which is free and needs no key."""
     stopped = ""
@@ -93,7 +102,9 @@ def run(job: Job, check: Check | None = fal.schema_problems) -> dict[str, Any]:
         try:
             with rehearsal.opened() as dry:
                 try:
+                    dry.phase = "stills"  # what the animatic pays for
                     assets.run(copy, animatic=True)
+                    dry.phase = "motion"  # what the full run pays for once the animatic is accepted
                     assets.run(copy, force=copy.has("asset_manifest"))
                 except ContractError as exc:
                     stopped = str(exc).replace(copy.id, job.id)
@@ -102,7 +113,7 @@ def run(job: Job, check: Check | None = fal.schema_problems) -> dict[str, Any]:
             shutil.rmtree(copy.work, ignore_errors=True)
     refused = _checked(calls, check)
     if refused and not stopped:
-        stopped = "fal would refuse: " + "; ".join(refused)
+        stopped = "the vendor would refuse: " + "; ".join(refused)
     cap = job.job.get("cost_cap")
     total = round(sum(c.get("estimate", 0.0) for c in calls), 6)
     report = {

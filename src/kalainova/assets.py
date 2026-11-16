@@ -16,6 +16,7 @@ from . import config, consistency, media, preproduction, shotmake, shots, soundb
 from .bar import identity
 from .jobfs import ContractError, Job
 from .providers import router
+from .providers.contract import Card, ImageRequest, Pin, Request, VoiceRequest
 
 Fields = dict[str, Any]
 
@@ -54,8 +55,8 @@ class _Piece:
     def has_sound(self) -> bool:
         return bool(self.kinds & {"audio", "video"})
 
-    def gen(self, capability: str, fn_name: str, *args: Any, **kw: Any) -> tuple[Any, Any]:
-        return router.generate(self.job, capability, fn_name, *args, fresh=self.force, **kw)
+    def gen(self, request: Request, **kw: Any) -> tuple[Any, Any]:
+        return router.generate(self.job, request, fresh=self.force, **kw)
 
     def add(self, **fields: Any) -> Fields:
         kept = {k: v for k, v in fields.items() if v not in (None, "", [])}
@@ -116,39 +117,37 @@ class _Narration:
     pauses: list[float] = field(default_factory=list)
 
 
-def _voice_request(piece: _Piece, n: int) -> Fields:
+def _voice_request(piece: _Piece, n: int, dst: Path) -> tuple[VoiceRequest, list[str] | None]:
+    """The line's request, and the one provider it must use when a kit fixes its voice."""
     beats = piece.packet["beats"]
     beat = beats[n]
-    request: Fields = {"voice": piece.brief.get("voice")}
-    if piece.resolved:
-        fixed = consistency.voice_for(piece.resolved, beat, piece.lock.get("cast", []))
-        piece.kit_voices[beat["id"]] = fixed["voice_id"]
-        request = {
-            "voice": fixed["voice_id"],
-            "model": fixed["model"],
-            "only": [fixed["provider"]],
-        }
-        if fixed.get("settings"):
-            request["settings"] = fixed["settings"]
-    return {
-        **request,
+    around = {
         "previous_text": beats[n - 1]["text"] if n else None,
         "next_text": beats[n + 1]["text"] if n + 1 < len(beats) else None,
     }
+    if not piece.resolved:
+        return VoiceRequest(
+            text=beat["text"], dst=dst, voice=piece.brief.get("voice"), **around
+        ), None
+    fixed = consistency.voice_for(piece.resolved, beat, piece.lock.get("cast", []))
+    piece.kit_voices[beat["id"]] = fixed["voice_id"]
+    request = VoiceRequest(
+        text=beat["text"],
+        dst=dst,
+        voice=fixed["voice_id"],
+        settings=fixed.get("settings") or None,
+        pin=Pin(provider=fixed["provider"], model=fixed["model"]),
+        **around,
+    )
+    return request, [fixed["provider"]]
 
 
 def _say_line(piece: _Piece, n: int, at: float, lines: _Narration) -> float:
     """Voice one beat, with its words on the piece's clock. Returns its length, with its pause."""
     beat = piece.packet["beats"][n]
     dst = piece.job.work / "beats" / f"{beat['id']}.voice.wav"
-    made, res = piece.gen(
-        "voice",
-        "voice",
-        beat["text"],
-        dst,
-        est={"chars": len(beat["text"])},
-        **_voice_request(piece, n),
-    )
+    request, only = _voice_request(piece, n, dst)
+    made, res = piece.gen(request, only=only)
     piece.words += [
         {**w, "start_sec": round(w["start_sec"] + at, 3), "end_sec": round(w["end_sec"] + at, 3)}
         for w in res.words
@@ -241,17 +240,17 @@ def _new_still(piece: _Piece, i: int, beat: Fields, prompt: str, still: Path) ->
     kw = shotmake.shot_kw(piece.resolved, piece.lock, "image", beat)
     if preproduction.reuse_accepted_still(piece, beat, still, prompt, kw):
         return
+    theme = (piece.data.get("edit") or {}).get("theme", "studio")
     made, res = piece.gen(
-        "image",
-        "image",
-        prompt,
-        still,
-        width=int(piece.prof.get("width", 1080)),
-        height=int(piece.prof.get("height", 1920)),
-        title=beat.get("on_screen") or beat["text"],
-        palette=i,
-        style=(piece.data.get("edit") or {}).get("theme", "studio"),
-        **kw,
+        ImageRequest(
+            prompt=prompt,
+            dst=still,
+            width=int(piece.prof.get("width", 1080)),
+            height=int(piece.prof.get("height", 1920)),
+            card=Card(title=beat.get("on_screen") or beat["text"], palette=i, theme=theme),
+            references=kw.references,
+            pin=kw.pin,
+        )
     )
     piece.add(
         id=f"{beat['id']}.still",

@@ -16,6 +16,7 @@ from typing import Any
 from . import blobstore, kitrules, kits
 from .jobfs import ContractError, Job
 from .providers import base
+from .providers.contract import Inputs
 
 Kit = dict[str, Any]
 Reference = dict[str, Any]
@@ -120,15 +121,15 @@ def choose_cast(resolved: Resolved, wanted: list[str] | None) -> list[str]:
     return roster
 
 
-def _supported(capability: str, pin: dict[str, Any] | None) -> dict[str, Any]:
+def _supported(capability: str, pin: dict[str, Any] | None) -> Inputs:
     if not pin:
         raise ContractError(f"a stream with a character must pin a {capability} generator")
     try:
         provider = base.get(pin["provider"])
     except KeyError as exc:
         raise ContractError(str(exc)) from exc
-    support = provider.reference_support(capability, pin["model"])
-    if not support:
+    support = provider.inputs(capability, pin["model"])
+    if not support.references:
         raise ContractError(
             f"{pin['provider']}/{pin['model']} takes no reference images for {capability}, so it "
             "cannot hold a face. Pin one listed under reference_models in config/studio.yaml"
@@ -146,9 +147,9 @@ def preflight(resolved: Resolved, stream: dict[str, Any], cast: list[str]) -> No
         wanted = [c for c in ("image", "video") if c == "image" or c in media]
         for capability in wanted:
             support = _supported(capability, pins.get(capability))
-            if len(cast) > support.get("max_characters", 99):
+            if support.characters is not None and len(cast) > support.characters:
                 raise ContractError(
-                    f"{pins[capability]['model']} holds {support['max_characters']} characters "
+                    f"{pins[capability]['model']} holds {support.characters} characters "
                     f"at once; this job asks for {len(cast)}"
                 )
     if (media & {"audio", "video"}) and not stream.get("silent"):

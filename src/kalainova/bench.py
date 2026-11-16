@@ -16,6 +16,7 @@ from typing import Any
 from . import config, consistency, shotmake, shots, takes, timeline
 from .jobfs import ContractError, Job
 from .providers import base, router
+from .providers.contract import Billable, Pin, VideoRequest
 
 Say = Callable[[str], None]
 
@@ -37,15 +38,19 @@ def parse_models(text: str) -> list[str]:
 
 def _provider_of(job: Job, model: str) -> str:
     """The first provider in the job's video list that names this model."""
-    listed = config.studio().get("video_models") or {}
     names = config.preference("video", job.job)
+    known: list[str] = []
     for name in names:
-        if model in (listed.get(name) or {}):
+        try:
+            offered = base.get(name).models("video")
+        except KeyError:
+            continue
+        if model in offered:
             return name
-    known = sorted({m for name in names for m in (listed.get(name) or {})})
+        known += offered
     raise ContractError(
         f"{job.id}: {model} is not under video_models for any provider this job uses; "
-        f"known: {', '.join(known) or 'none'}"
+        f"known: {', '.join(sorted(set(known))) or 'none'}"
     )
 
 
@@ -56,7 +61,7 @@ class _Setup:
     still: Path
     prompt: str
     aspect: str
-    kw: dict[str, Any]
+    kw: shotmake.Held
     resolved: Any = None
     lock: dict[str, Any] | None = None
 
@@ -92,34 +97,33 @@ def _setup(job: Job, shot: str) -> _Setup:
     return _Setup(beat, float(span), still, prompt, aspect, kw, resolved, lock)
 
 
-def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> dict[str, Any]:
+def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> shotmake.Held:
     """What one model is given, worked out for that model rather than the stream's pinned one.
 
     A model that takes references gets the kit's, with the still as its first frame or its first
     reference by what it accepts; a model that takes none starts from the frame alone, said aloud.
     """
-    if not setup.kw.get("references"):
-        return {"model": model}
-    if not base.get(provider).reference_support("video", model):
+    pin = Pin(provider=provider, model=model)
+    if not setup.kw.references:
+        return shotmake.Held(pin=pin)
+    if not base.get(provider).inputs("video", model).references:
         say(f"{model} cannot take this shot's references, so it starts from the frame alone")
-        return {"model": model}
+        return shotmake.Held(pin=pin)
     lock = dict(setup.lock or {})
     lock["generators"] = {
         **(lock.get("generators") or {}),
         "video": {"provider": provider, "model": model},
     }
-    kw = shotmake.shot_kw(setup.resolved, lock, "video", setup.beat, start=setup.still)
-    return {**kw, "model": model}
+    held = shotmake.shot_kw(setup.resolved, lock, "video", setup.beat, start=setup.still)
+    return shotmake.Held(held.references, pin)
 
 
-def conditioning(provider: str, model: str, request: dict[str, Any]) -> str:
+def conditioning(provider: str, model: str, held: shotmake.Held) -> str:
     """What a bench take was given, in words, so takes with different inputs are not read alike."""
-    refs = request.get("references") or []
-    if not refs:
+    if not held.references:
         return "the start frame only"
-    spec = base.get(provider).reference_support("video", model)
-    kit = len(refs)
-    if spec.get("start_image_param"):
+    kit = len(held.references)
+    if base.get(provider).inputs("video", model).start_with_references:
         return f"the start frame and {kit} kit reference(s)"
     return f"{kit} reference(s), the still among them; no start frame"
 
@@ -132,15 +136,13 @@ def estimate(job: Job, shot: str, models: list[str], count: int, say: Say = prin
     for model in models:
         provider = _provider_of(job, model)
         request = _request_for(setup, provider, model, say)
-        quote = router.quote(
-            job,
-            "video",
-            only=[provider],
+        asked = Billable(
+            capability="video",
             duration=setup.span,
             image=True,
-            references=bool(request.get("references")),
-            model=model,
+            references=bool(request.references),
         )
+        quote = router.quote(job, asked, only=[provider], pin=request.pin)
         if quote is None:
             raise ContractError(f"{job.id}: {provider} is not ready, so {model} cannot be tested")
         if quote[1] is None:
@@ -177,29 +179,20 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
             n = takes.next_take_number(job, shot)
 
             def make(
-                seed: int, dst: Path, request: dict[str, Any] = request, row: Row = row
+                seed: int, dst: Path, request: shotmake.Held = request, row: Row = row
             ) -> tuple[Any, Any]:
-                return router.generate(
-                    job,
-                    "video",
-                    "video",
-                    setup.prompt,
-                    dst,
+                clip = VideoRequest(
+                    prompt=setup.prompt,
+                    dst=dst,
                     duration=setup.span,
                     aspect=setup.aspect,
-                    image=setup.still,
+                    start=setup.still,
                     seed=seed,
-                    audio=False,
-                    only=[row.provider],
-                    note=f"bench {row.model}",
-                    est={
-                        "duration": setup.span,
-                        "image": True,
-                        "references": bool(request.get("references")),
-                        "model": row.model,
-                    },
-                    **request,
+                    sound=False,
+                    references=request.references,
+                    pin=request.pin,
                 )
+                return router.generate(job, clip, only=[row.provider], note=f"bench {row.model}")
 
             try:
                 take = takes.attempt(

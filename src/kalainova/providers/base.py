@@ -1,13 +1,16 @@
-"""Provider contract.
+"""Provider contract: the port every vendor adapter implements (ADR 0023).
 
-A provider turns a request for one capability into a local file plus metadata.
-The engine never cares which vendor made the bytes; it records provider, model,
-prompt, cost, and rights on the asset so the job folder stays the source of truth.
+A provider turns one typed request (providers/contract.py) into a local file and a `Result`. The
+engine never sees a vendor's payload or reply: an adapter maps the engine's request to its vendor's
+fields and maps the reply back. What a model can be given is said in the engine's terms
+(`inputs`), and so is what a call costs (`estimate` on a `Billable`).
 
-Capabilities: llm, voice, image, video, motion, music, song, sfx, transcribe.
+Capabilities: llm, judge, voice, image, video, motion, music, song, sfx, transcribe, lipsync,
+separate, graphics, search. Each is a method taking its request and the router's `Context`.
 
 To add a provider, put a module in this package or name one under provider_modules in
 config/studio.yaml. It registers a Provider subclass, and config/studio.yaml lists it and prices it.
+tests/boundary/test_provider_contract.py is the suite every registered adapter must pass.
 """
 
 from __future__ import annotations
@@ -17,14 +20,38 @@ import os
 import pkgutil
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .. import config
+from .contract import (
+    Billable,
+    BilledError,
+    Context,
+    GraphicsRequest,
+    ImageRequest,
+    Inputs,
+    LipsyncRequest,
+    MotionRequest,
+    MusicRequest,
+    RefusalError,
+    Result,
+    SearchRequest,
+    SeparateRequest,
+    SfxRequest,
+    SongRequest,
+    TextRequest,
+    TranscribeRequest,
+    VideoRequest,
+    VoiceRequest,
+)
+from .transport import Transport
+
+__all__ = ["BilledError", "Provider", "RefusalError", "Result", "get", "names", "register"]
 
 CAPABILITIES = (
     "llm",
+    "judge",
     "voice",
     "image",
     "video",
@@ -40,32 +67,6 @@ CAPABILITIES = (
 )
 
 
-class BilledError(RuntimeError):
-    """The vendor charged for this call, and then the file could not be fetched.
-
-    Raised by an adapter so the ledger still records the money.
-    """
-
-    def __init__(self, billed: float, message: str) -> None:
-        super().__init__(message)
-        self.billed = billed
-
-
-class RefusalError(RuntimeError):
-    """The model or provider declined the request under its policy."""
-
-
-@dataclass
-class Result:
-    path: Path | None = None
-    cost: float = 0.0
-    model: str = ""
-    meta: dict[str, Any] = field(default_factory=dict)
-    # word timings, seconds relative to the start of this file
-    words: list[dict] = field(default_factory=list)
-    text: str = ""
-
-
 class Provider:
     name = "base"
     capabilities: tuple[str, ...] = ()
@@ -74,24 +75,14 @@ class Provider:
     synthetic = True  # output is AI-generated and must be declared where platforms ask
     free = False  # calls cost nothing, so no price is needed under a cost cap
     placeholder = False  # output never counts as a real result
-    # Keeps its own deadline, so time queued for a shared GPU does not count against the call, and a
-    # call that runs out can really be stopped. Python cannot kill a worker thread.
+    # Keeps its own deadline (Context.deadline_sec), so time queued for a shared GPU does not count
+    # against the call, and a call that runs out can really be stopped. Python cannot kill a thread.
     self_timed = False
-    # Can write down what it would send instead of sending it (providers/rehearsal.py)
+    # Can write down what it would send instead of sending it (providers/rehearsal.py). Every
+    # adapter that reaches its vendor through a transport can.
     rehearses = False
-    # The vendor's id for the request this instance last sent, as its bill lists it. The router
-    # copies it to the trace row and the ledger entry; an adapter sets it as soon as it has one.
-    request_id: str | None = None
-    # What the vendor said this call cost (its billed units times the account's unit price), when
-    # it says. The router settles the ledger at it instead of the price table's figure.
-    charged: float | None = None
-    billed_units: float | None = None
-    # Labels the router hands each call (job, attempt, run, stage, shot); an adapter that can
-    # attach them to the vendor's request does, so the vendor's own usage reports match ours.
-    tags: dict[str, str] | None = None
-
-    def _unsupported(self, capability: str) -> Result:
-        raise NotImplementedError(f"{self.name} does not implement {capability}")
+    # How it reaches its vendor (providers/transport.py); None for one that runs on this machine.
+    transport: Transport | None = None
 
     def missing_env(self, capability: str = "") -> list[str]:
         from . import rehearsal
@@ -104,100 +95,129 @@ class Provider:
     def available(self, capability: str = "") -> bool:
         try:
             return not self.missing_env(capability)
-        except TypeError:
+        except TypeError:  # a plug-in written before missing_env took the capability
             return not self.missing_env()
 
-    def price_key(self, capability: str, request: dict) -> str:
-        """The row in config/studio.yaml that prices this request."""
-        return capability
+    # ---------------------------------------------------------------- what it costs
+    def price_key(self, billable: Billable) -> str:
+        """The row in config/studio.yaml that prices this call."""
+        return billable.capability
 
-    def estimate(self, capability: str, **request) -> float | None:
-        """Pre-call cost in dollars. None means this provider has no price for the request."""
+    def estimate(self, billable: Billable, model: str | None = None) -> float | None:
+        """Pre-call cost in dollars. None means this provider has no price for the call."""
         if self.free:
             return 0.0
-        key = self.price_key(capability, request)
-        model = request.get("model")
+        key = self.price_key(billable)
         row = config.price_for(self.name, key, model) if model else config.price_for(self.name, key)
         if not row:
             return None
-        return config.estimate(
-            self.name,
-            capability,
-            key=key,
-            chars=request.get("chars", 0),
-            duration=request.get("duration", 0.0),
-            model=model,
+        return float(
+            config.estimate(
+                self.name,
+                billable.capability,
+                key=key,
+                chars=billable.chars,
+                duration=billable.duration,
+                model=model,
+            )
         )
 
-    def reference_support(self, capability: str, model: str) -> dict[str, Any]:
-        """How this provider's model takes reference images. Empty means it cannot hold a face."""
-        return {}
+    def list_price(self, model: str) -> dict[str, Any] | None:
+        """The vendor's own unit price for a model, when it publishes one: unit_price and unit."""
+        return self.transport.list_price(model) if self.transport else None
 
-    def takes_end_image(self, capability: str, model: str | None = None) -> bool:
-        """Whether this provider's model can be given a last frame as an image."""
-        return False
+    # ---------------------------------------------------------------- what it takes
+    def default_model(self, capability: str, *, references: bool = False) -> str:
+        key = capability
+        if capability == "video":
+            key = "reference_to_video" if references else "image_to_video"
+        return config.model_for(self.name, key) or config.model_for(self.name, capability)
 
-    # Each capability is a method. Unimplemented ones raise.
-    def llm(
-        self,
-        prompt: str,
-        *,
-        system: str = "",
-        max_tokens: int = 4000,
-        images: list[Path] | None = None,
-        **kw,
-    ) -> Result:
-        raise NotImplementedError
+    def inputs(self, capability: str, model: str | None = None) -> Inputs:
+        """What a model of this provider can be given, from config/studio.yaml's model tables.
 
-    def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw) -> Result:
-        raise NotImplementedError
+        The tables hold the vendor's field names; only this package reads them. With no model, the
+        provider's default for a plain call is described."""
+        name = model or self.default_model(capability)
+        refs = config.reference_spec(self.name, capability, name)
+        plain = config.video_spec(self.name, name) if capability == "video" else {}
+        sound = config.audio_spec(self.name, name) if capability in ("song", "music") else {}
+        most = sound.get("max_sec")
+        return Inputs(
+            references=int(refs.get("max_images") or 0),
+            characters=int(refs["max_characters"]) if refs.get("max_characters") else None,
+            start_with_references=bool(refs.get("start_image_param")),
+            end_frame=bool(plain.get("end_image_param") or refs.get("end_image_param")),
+            seed=bool(plain.get("takes_seed", refs.get("takes_seed", True))),
+            longest_sec=float(most) if most else None,
+        )
 
-    def image(self, prompt: str, dst: Path, *, width: int, height: int, **kw) -> Result:
-        raise NotImplementedError
+    def models(self, capability: str) -> list[str]:
+        """The models config/studio.yaml describes for this provider and capability."""
+        tables = config.studio()
+        found = (
+            list((tables.get("video_models") or {}).get(self.name) or {})
+            if capability == "video"
+            else []
+        )
+        found += list(
+            ((tables.get("reference_models") or {}).get(self.name) or {}).get(capability) or {}
+        )
+        return list(dict.fromkeys(found))
 
-    def video(
-        self,
-        prompt: str,
-        dst: Path,
-        *,
-        duration: float,
-        aspect: str,
-        image: Path | None = None,
-        **kw,
-    ) -> Result:
-        raise NotImplementedError
+    def problems(self, model: str, payload: dict[str, Any]) -> list[str]:
+        """What the vendor would refuse in a payload before it is sent, from its published schema.
+        Empty when it publishes none."""
+        return self.transport.problems(model, payload) if self.transport else []
 
-    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+    # ---------------------------------------------------------------- capabilities
+    def _unsupported(self, capability: str) -> Result:
+        raise NotImplementedError(f"{self.name} does not implement {capability}")
+
+    def llm(self, req: TextRequest, ctx: Context) -> Result:
+        return self._unsupported("llm")
+
+    def judge(self, req: TextRequest, ctx: Context) -> Result:
+        return self._unsupported("judge")
+
+    def voice(self, req: VoiceRequest, ctx: Context) -> Result:
+        return self._unsupported("voice")
+
+    def image(self, req: ImageRequest, ctx: Context) -> Result:
+        return self._unsupported("image")
+
+    def video(self, req: VideoRequest, ctx: Context) -> Result:
+        return self._unsupported("video")
+
+    def motion(self, req: MotionRequest, ctx: Context) -> Result:
         return self._unsupported("motion")
 
-    def music(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
-        raise NotImplementedError
+    def music(self, req: MusicRequest, ctx: Context) -> Result:
+        return self._unsupported("music")
 
-    def song(
-        self, lyrics: str, dst: Path, *, style: str = "", duration: float | None = None, **kw
-    ) -> Result:
-        raise NotImplementedError
+    def song(self, req: SongRequest, ctx: Context) -> Result:
+        return self._unsupported("song")
 
-    def sfx(self, prompt: str, dst: Path, *, duration: float, **kw) -> Result:
-        raise NotImplementedError
+    def sfx(self, req: SfxRequest, ctx: Context) -> Result:
+        return self._unsupported("sfx")
 
-    def transcribe(self, src: Path, **kw) -> Result:
-        raise NotImplementedError
+    def transcribe(self, req: TranscribeRequest, ctx: Context) -> Result:
+        return self._unsupported("transcribe")
 
-    def lipsync(self, video: Path, audio: Path, dst: Path, **kw) -> Result:
-        raise NotImplementedError
+    def lipsync(self, req: LipsyncRequest, ctx: Context) -> Result:
+        return self._unsupported("lipsync")
 
-    def separate(self, src: Path, vocals: Path, rest: Path, **kw) -> Result:
+    def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Split a mix into its vocals and everything else."""
-        raise NotImplementedError
+        return self._unsupported("separate")
 
-    def graphics(self, folder: Path, dst: Path, **kw) -> Result:
+    def graphics(self, req: GraphicsRequest, ctx: Context) -> Result:
         """Render a composition folder to a file."""
-        raise NotImplementedError
+        return self._unsupported("graphics")
 
-    def search(self, query: str, *, limit: int = 5, **kw) -> Result:
-        """Find sources. meta["hits"] holds url, title, publisher, snippet, and text when known."""
-        raise NotImplementedError
+    def search(self, req: SearchRequest, ctx: Context) -> Result:
+        """Find sources, as `Result.hits`."""
+        return self._unsupported("search")
 
 
 _REGISTRY: dict[str, Callable[[], Provider]] = {}
@@ -222,9 +242,24 @@ def names() -> list[str]:
     return sorted(_REGISTRY)
 
 
+# Modules in this package that are not adapters: the port, the router, and what they share.
+NOT_ADAPTERS = (
+    "base",
+    "router",
+    "contract",
+    "errors",
+    "results",
+    "transport",
+    "records",
+    "prices",
+    "rehearsal",
+    "check",
+)
+
+
 def _load_builtin() -> None:
-    """Import every provider module once. A plug-in registered first must not hide the others, and one
-    module with a missing dependency must not take the rest down."""
+    """Import every provider module once. A plug-in registered first must not hide the others, and
+    one module with a missing dependency must not take the rest down."""
     global _loaded
     if _loaded:
         return
@@ -233,7 +268,7 @@ def _load_builtin() -> None:
     modules = [
         f"{package}.{m.name}"
         for m in pkgutil.iter_modules([str(Path(__file__).parent)])
-        if m.name not in ("base", "router")
+        if m.name not in NOT_ADAPTERS
     ]
     for module in modules + list(config.studio().get("provider_modules") or []):
         try:

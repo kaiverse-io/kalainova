@@ -14,13 +14,12 @@ from __future__ import annotations
 import base64
 import os
 from functools import partial
-from pathlib import Path
 from typing import Any
 
-import requests
-
 from .. import config
-from .base import Provider, Result, register
+from .base import Provider, register
+from .contract import Context, Result, TextRequest
+from .transport import Https, Transport
 
 TIMEOUT = 600
 
@@ -40,11 +39,21 @@ class OpenAICompat(Provider):
 
     capabilities = ("llm",)
     synthetic = False
+    rehearses = True
+    transport: Transport
 
     def __init__(self, name: str, base_url: str, env_key: str) -> None:
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.env_key = env_key
+        self.transport = Https(
+            name,
+            self.base_url,
+            lambda: {
+                "Authorization": f"Bearer {os.environ[env_key]}",
+                "content-type": "application/json",
+            },
+        )
 
     @property
     def free(self) -> bool:  # type: ignore[override]  # reason: the base class keeps a plain flag
@@ -56,47 +65,34 @@ class OpenAICompat(Provider):
             missing.append(f"models.{self.name}.llm in config/studio.yaml")
         return missing
 
-    def llm(
-        self,
-        prompt: str,
-        *,
-        system: str = "",
-        max_tokens: int = 4000,
-        images: list[Path] | None = None,
-        **kw: Any,
-    ) -> Result:
-        model = kw.get("model") or config.model_for(self.name, "llm")
+    def llm(self, req: TextRequest, ctx: Context) -> Result:
+        model = (
+            ctx.model
+            or (config.model_for(self.name, "judge") if req.judging else "")
+            or config.model_for(self.name, "llm")
+        )
         if not model:
             raise ValueError(f"{self.name}: set models.{self.name}.llm in config/studio.yaml")
-        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        for img in images or []:
+        content: list[dict[str, Any]] = [{"type": "text", "text": req.prompt}]
+        for img in req.images:
             mime = "image/jpeg" if img.suffix in (".jpg", ".jpeg") else "image/png"
             blob = base64.b64encode(img.read_bytes()).decode()
             content.append(
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{blob}"}}
             )
-        messages: list[dict[str, Any]] = [{"role": "system", "content": system}] if system else []
-        messages.append({"role": "user", "content": content if images else prompt})
-        r = requests.post(
-            f"{self.base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {os.environ[str(self.env_key)]}",
-                "content-type": "application/json",
-            },
-            json={"model": model, "max_tokens": max_tokens, "messages": messages},
-            timeout=TIMEOUT,
+        messages: list[dict[str, Any]] = (
+            [{"role": "system", "content": req.system}] if req.system else []
         )
-        r.raise_for_status()
-        data = r.json()
-        text = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
-        u = data.get("usage") or {}
+        messages.append({"role": "user", "content": content if req.images else req.prompt})
+        body = {"model": model, "max_tokens": req.max_tokens, "messages": messages}
+        reply = self.transport.send("chat/completions", body, ctx, model=model, wait=TIMEOUT)
+        text = str(reply.get("choices.0.message.content") or "")
+        u = reply.get("usage") or {}
         p = config.price_for(self.name, "llm", model)
         cost = u.get("prompt_tokens", 0) / 1e6 * p.get("input_per_mtok", 0) + u.get(
             "completion_tokens", 0
         ) / 1e6 * p.get("output_per_mtok", 0)
         return Result(text=text, cost=cost, model=str(model), meta={"usage": u})
-
-    judge = llm
 
 
 def _vendors() -> dict[str, dict[str, str]]:

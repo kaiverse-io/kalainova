@@ -12,6 +12,7 @@ from .editor import musiccuts
 from .jobfs import ContractError, CostCapExceeded, Job
 from .providers import base as providers_base
 from .providers import router
+from .providers.contract import TextRequest
 
 Fields = dict[str, Any]
 
@@ -382,9 +383,8 @@ def kit_checks(job: Job, packet: Fields, am: Fields, sheet: str | None) -> list[
     )
     images = [*kitchecks.judge_images(resolved, lock["cast"]), job.work / sheet]
     try:
-        _, res = router.generate(
-            job, "llm", "llm", text, images=images, max_tokens=800, note="qa-consistency"
-        )
+        ask = TextRequest(prompt=text, images=tuple(images), max_tokens=800)
+        _, res = router.generate(job, ask, note="qa-consistency")
         return [*checks, *kitchecks.judge_checks(extract_json(res.text))]
     except CostCapExceeded:
         raise

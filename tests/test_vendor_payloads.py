@@ -2,39 +2,43 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+from fakes import Wire, context
 
 from kalainova import config
 from kalainova.providers import fal as fal_provider
+from kalainova.providers.contract import ImageRequest, MusicRequest, VideoRequest
+
+
+class FalWire(Wire):
+    """fal's own way of sending a small input (inline), with no network for the rest."""
+
+    _upload = fal_provider.FalQueue._upload
+    _key = staticmethod(lambda: "test")
 
 
 @pytest.fixture
 def fal(monkeypatch, tmp_path):
-    sent = {}
-
-    def fake_run(self, model, payload, timeout=900):
-        sent.update(model=model, payload=payload)
-        return {
-            "images": [{"url": "x"}],
-            "video": {"url": "x"},
-            "audio": {"url": "x"},
-        }
-
-    def fake_download(url, dst):
-        Path(dst).write_bytes(b"x")
-        return dst
-
-    monkeypatch.setattr(fal_provider.Fal, "_run", fake_run)
-    monkeypatch.setattr(fal_provider, "_download", fake_download)
+    reply = {"images": [{"url": "x"}], "video": {"url": "x"}, "audio": {"url": "x"}}
+    wire = FalWire(default=reply, files={"x": b"x"})
+    monkeypatch.setattr(fal_provider.Fal, "transport", wire)
     monkeypatch.setenv("FAL_KEY", "test")
-    return fal_provider.Fal(), sent, tmp_path
+
+    class Sent:
+        def __getitem__(self, key):
+            last = wire.sent[-1]
+            return last["endpoint"] if key == "model" else last[key]
+
+    return fal_provider.Fal(), Sent(), tmp_path
+
+
+def ask(provider, request, model=None):
+    return getattr(provider, request.capability)(request, context(model=model))
 
 
 def test_a_still_is_requested_at_more_than_the_default_1k(fal):
     provider, sent, tmp = fal
-    provider.image("a prompt", tmp / "a.png", width=1080, height=1920)
+    ask(provider, ImageRequest(prompt="a prompt", dst=tmp / "a.png", width=1080, height=1920))
     assert sent["payload"]["resolution"] == "2K"
     assert sent["payload"]["aspect_ratio"] == "9:16"
 
@@ -43,7 +47,12 @@ def test_image_to_video_uses_a_live_endpoint_with_an_integer_duration(fal):
     provider, sent, tmp = fal
     still = tmp / "s.png"
     still.write_bytes(b"png")
-    provider.video("a prompt", tmp / "a.mp4", duration=4.2, aspect="9:16", image=still)
+    ask(
+        provider,
+        VideoRequest(
+            prompt="a prompt", dst=tmp / "a.mp4", duration=4.2, aspect="9:16", start=still
+        ),
+    )
     assert sent["model"] == "alibaba/wan-3.0-prime/image-to-video"
     assert sent["payload"]["duration"] == 5
     assert sent["payload"]["start_image_url"].startswith("data:image/png")
@@ -55,7 +64,7 @@ def test_image_to_video_uses_a_live_endpoint_with_an_integer_duration(fal):
 
 def test_a_shot_is_billed_for_the_nearest_length_not_the_next_ten_seconds(fal):
     provider, sent, tmp = fal
-    provider.video("a prompt", tmp / "a.mp4", duration=6.1, aspect="16:9")
+    ask(provider, VideoRequest(prompt="a prompt", dst=tmp / "a.mp4", duration=6.1, aspect="16:9"))
     assert sent["payload"]["duration"] == 7
 
 
@@ -74,7 +83,7 @@ def test_no_deprecated_or_missing_model_is_configured():
 def test_lyria_gets_only_the_fields_it_accepts(fal, monkeypatch):
     provider, sent, tmp = fal
     monkeypatch.setattr("kalainova.media.run", lambda *a, **k: None)
-    provider.music("a bed", tmp / "m.wav", duration=30.0)
+    ask(provider, MusicRequest(prompt="a bed", dst=tmp / "m.wav", duration=30.0))
     assert set(sent["payload"]) == {"prompt"}
 
 
@@ -83,15 +92,18 @@ def test_an_end_frame_goes_in_the_models_own_field(fal):
     still, end = tmp / "s.png", tmp / "e.png"
     still.write_bytes(b"s")
     end.write_bytes(b"e")
-    uploads = []
-    provider._upload = lambda path: uploads.append(path) or f"https://x/{path.name}"
+    provider.transport._upload = lambda path: f"https://x/{path.name}"
     kling = "fal-ai/kling-video/v3/pro/image-to-video"
-    provider.video(
-        "p", tmp / "a.mp4", duration=5, aspect="9:16", image=still, end_image=end, model=kling
+    clip = VideoRequest(
+        prompt="p", dst=tmp / "a.mp4", duration=5, aspect="9:16", start=still, end=end
     )
+    ask(provider, clip, kling)
     assert sent["payload"]["end_image_url"] == "https://x/e.png"
     assert sent["payload"]["start_image_url"] == "https://x/s.png"
-    provider.video("p", tmp / "b.mp4", duration=5, aspect="9:16", image=still, end_image=end)
+    clip = VideoRequest(
+        prompt="p", dst=tmp / "b.mp4", duration=5, aspect="9:16", start=still, end=end
+    )
+    ask(provider, clip)
     assert sent["payload"]["end_image_url"] == "https://x/e.png", "the default model takes one too"
     assert sent["payload"]["start_image_url"] == "https://x/s.png"
 
@@ -101,9 +113,10 @@ def test_a_model_whose_schema_lists_no_aspect_ratio_is_sent_none(fal):
     still = tmp / "s.png"
     still.write_bytes(b"s")
     kling = "fal-ai/kling-video/v3/pro/image-to-video"
-    provider.video("p", tmp / "a.mp4", duration=5, aspect="9:16", image=still, model=kling)
+    clip = VideoRequest(prompt="p", dst=tmp / "a.mp4", duration=5, aspect="9:16", start=still)
+    ask(provider, clip, kling)
     assert "aspect_ratio" not in sent["payload"]
-    provider.video("p", tmp / "b.mp4", duration=5, aspect="9:16")
+    ask(provider, VideoRequest(prompt="p", dst=tmp / "b.mp4", duration=5, aspect="9:16"))
     assert sent["payload"]["aspect_ratio"] == "9:16"
     assert "start_image_url" not in sent["payload"], "text to video takes no first frame"
 

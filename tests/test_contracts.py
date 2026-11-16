@@ -12,6 +12,7 @@ import pytest
 from kalainova import intake, media, publish, qa
 from kalainova.jobfs import ContractError, Job
 from kalainova.providers import base, router
+from kalainova.providers.contract import SongRequest
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 needs_ffmpeg = pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
@@ -122,9 +123,11 @@ def test_a_song_request_runs_through_the_router(tmp_path, monkeypatch):
         capabilities = ("song",)
         free = True
 
-        def song(self, lyrics, dst, *, style="", duration=None, **kw):
-            tone(dst)
-            return base.Result(path=dst, model=f"songs-{style}", meta={"lyrics": lyrics})
+        def song(self, req, ctx):
+            tone(req.dst)
+            return base.Result(
+                path=req.dst, model=f"songs-{req.style}", meta={"lyrics": req.lyrics}
+            )
 
     base.names()
     monkeypatch.setitem(base._REGISTRY, "songs", Songs)
@@ -132,7 +135,8 @@ def test_a_song_request_runs_through_the_router(tmp_path, monkeypatch):
     data = job.job
     data["providers"] = {"song": ["songs"]}
     job.write("job", data)
-    p, res = router.generate(job, "song", "song", "some lyrics", job.work / "song.wav", style="pop")
+    asked = SongRequest(lyrics="some lyrics", dst=job.work / "song.wav", style="pop")
+    p, res = router.generate(job, asked)
     assert p.name == "songs" and res.meta["lyrics"] == "some lyrics" and res.path.exists()
 
 

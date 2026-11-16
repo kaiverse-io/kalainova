@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fakes import Reply
+from fakes import Reply, context
 
 from kalainova import config
-from kalainova.providers import base, compat
+from kalainova.providers import base, compat, transport
+from kalainova.providers.contract import Billable, RateLimitedError, TextRequest
 
 
 def _studio(monkeypatch, **sections):
@@ -22,7 +23,7 @@ def sent(monkeypatch):
         calls.append({"url": url, **kw})
         return replies.pop(0)
 
-    monkeypatch.setattr(compat.requests, "post", post)
+    monkeypatch.setattr(transport.requests, "post", post)
     return calls, replies
 
 
@@ -60,7 +61,8 @@ def test_it_posts_the_chat_shape_to_the_vendor_url_with_a_bearer_key(monkeypatch
     )
     monkeypatch.setenv("GROQ_API_KEY", "secret")
     replies.append(_answer("done"))
-    res = base.get("groq").llm("Say it.", system="Be brief.", max_tokens=50)
+    asked = TextRequest(prompt="Say it.", system="Be brief.", max_tokens=50)
+    res = base.get("groq").llm(asked, context())
     assert calls[0]["url"] == "https://api.groq.com/openai/v1/chat/completions"
     assert calls[0]["headers"]["Authorization"] == "Bearer secret"
     assert calls[0]["json"] == {
@@ -87,8 +89,8 @@ def test_a_free_tier_costs_nothing_and_estimates_zero(monkeypatch, sent):
     replies.append(_answer())
     provider = base.get("gemini")
     assert provider.free
-    assert provider.estimate("llm") == 0.0
-    assert provider.llm("x").cost == 0.0
+    assert provider.estimate(Billable(capability="llm")) == 0.0
+    assert provider.llm(TextRequest(prompt="x"), context()).cost == 0.0
 
 
 def test_images_go_as_data_urls(monkeypatch, sent, tmp_path):
@@ -98,7 +100,7 @@ def test_images_go_as_data_urls(monkeypatch, sent, tmp_path):
     img = tmp_path / "a.png"
     img.write_bytes(b"png")
     replies.append(_answer())
-    base.get("openrouter").llm("Look.", images=[img])
+    base.get("openrouter").llm(TextRequest(prompt="Look.", images=(img,)), context())
     parts = calls[0]["json"]["messages"][0]["content"]
     assert parts[0] == {"type": "text", "text": "Look."}
     assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
@@ -109,8 +111,8 @@ def test_a_vendor_failure_is_raised(monkeypatch, sent):
     _studio(monkeypatch, models={"zai": {"llm": "m"}})
     monkeypatch.setenv("ZAI_API_KEY", "k")
     replies.append(Reply(status=429))
-    with pytest.raises(OSError):
-        base.get("zai").llm("x")
+    with pytest.raises(RateLimitedError):
+        base.get("zai").llm(TextRequest(prompt="x"), context())
 
 
 def test_the_config_can_add_a_vendor_or_move_a_url(monkeypatch):
@@ -126,3 +128,12 @@ def test_the_config_can_add_a_vendor_or_move_a_url(monkeypatch):
     assert vendors["groq"]["env_key"] == "GROQ_API_KEY"
     assert vendors["mine"]["env_key"] == "MINE_KEY"
     assert compat.OpenAICompat("mine", **vendors["mine"]).base_url == "https://mine.example/v1"
+
+
+def test_a_check_runs_on_the_vendors_judge_model_when_it_names_one(monkeypatch, sent):
+    calls, replies = sent
+    _studio(monkeypatch, models={"groq": {"llm": "m-1", "judge": "m-judge"}})
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    replies.append(_answer())
+    base.get("groq").llm(TextRequest(prompt="Is it right?", judging=True), context())
+    assert calls[0]["json"]["model"] == "m-judge"

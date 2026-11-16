@@ -7,6 +7,7 @@ from PIL import Image
 
 from kalainova import kits, media, streams
 from kalainova.providers import base
+from kalainova.providers.contract import Inputs
 
 
 class Stub(base.Provider):
@@ -19,42 +20,56 @@ class Stub(base.Provider):
     calls: list[dict] = []
     support = {"image": {"max_images": 4, "max_characters": 2}, "video": {"max_images": 3}}
 
-    def reference_support(self, capability, model):
-        return self.support.get(capability, {})
+    def inputs(self, capability, model=None):
+        spec = self.support.get(capability, {})
+        return Inputs(
+            references=int(spec.get("max_images") or 0),
+            characters=spec.get("max_characters"),
+            start_with_references=bool(spec.get("start_image_param")),
+        )
 
-    def _note(self, capability, dst, prompt, kw):
+    @staticmethod
+    def _asked(req, ctx):
+        """What the engine asked for, in the keyword form the kit tests read."""
+        kw = req._shape()[1] if req.OUTPUTS else {}
+        return {**kw, **({"model": ctx.model} if ctx.model else {})}
+
+    def _note(self, capability, req, ctx, prompt):
+        kw = self._asked(req, ctx)
         Stub.calls.append({"capability": capability, "prompt": prompt, **kw})
-        dst.write_bytes(b"x")
-        return base.Result(path=dst, model=kw.get("model") or f"stub-{capability}")
+        req.dst.write_bytes(b"x")
+        return base.Result(path=req.dst, model=ctx.model or f"stub-{capability}")
 
-    def voice(self, text, dst, *, voice=None, **kw):
-        return self._note("voice", dst, text, {"voice": voice, **kw})
+    def voice(self, req, ctx):
+        return self._note("voice", req, ctx, req.text)
 
-    def image(self, prompt, dst, *, width, height, **kw):
-        Stub.calls.append({"capability": "image", "prompt": prompt, **kw})
-        Image.linear_gradient("L").resize((width, height)).convert("RGB").save(dst, format="PNG")
-        return base.Result(path=dst, model=kw.get("model") or "stub-plain")
+    def image(self, req, ctx):
+        Stub.calls.append({"capability": "image", "prompt": req.prompt, **self._asked(req, ctx)})
+        Image.linear_gradient("L").resize((req.width, req.height)).convert("RGB").save(
+            req.dst, format="PNG"
+        )
+        return base.Result(path=req.dst, model=ctx.model or "stub-plain")
 
-    def video(self, prompt, dst, *, duration, aspect, image=None, **kw):
-        Stub.calls.append({"capability": "video", "prompt": prompt, "image": image, **kw})
+    def video(self, req, ctx):
+        Stub.calls.append({"capability": "video", "prompt": req.prompt, **self._asked(req, ctx)})
         media.run(
             [
                 "-f",
                 "lavfi",
                 "-i",
-                f"testsrc2=s=320x180:d={duration + 0.5:.2f}:r=24",
+                f"testsrc2=s=320x180:d={req.duration + 0.5:.2f}:r=24",
                 "-pix_fmt",
                 "yuv420p",
-                str(dst),
+                str(req.dst),
             ]
         )
-        return base.Result(path=dst, model=kw.get("model") or "stub-video")
+        return base.Result(path=req.dst, model=ctx.model or "stub-video")
 
-    def music(self, prompt, dst, *, duration, **kw):
-        return self._note("music", dst, prompt, kw)
+    def music(self, req, ctx):
+        return self._note("music", req, ctx, req.prompt)
 
-    def sfx(self, prompt, dst, *, duration=1.0, **kw):
-        return self._note("sfx", dst, prompt, kw)
+    def sfx(self, req, ctx):
+        return self._note("sfx", req, ctx, req.prompt)
 
 
 base.register(Stub)

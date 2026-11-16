@@ -71,10 +71,8 @@ ignore = ["S101"]
 "src/kalainova/jobfs.py" = ["E501", "N818"]
 "src/kalainova/media.py" = ["B905", "S603"]
 "src/kalainova/plan.py" = ["B007", "E501"]
-"src/kalainova/providers/base.py" = ["E501"]
 "src/kalainova/providers/local.py" = ["B905", "C901", "E501", "S311", "S324"]
 "src/kalainova/providers/remote.py" = ["B905", "E501"]
-"src/kalainova/providers/router.py" = ["C901", "E501", "N818"]
 "src/kalainova/publish/__init__.py" = ["C901", "E501"]
 "src/kalainova/qa.py" = ["B905", "C901", "E501"]
 "src/kalainova/stock.py" = ["E501"]
@@ -102,10 +100,8 @@ module = [
     "kalainova.jobfs",
     "kalainova.media",
     "kalainova.plan",
-    "kalainova.providers.base",
     "kalainova.providers.local",
     "kalainova.providers.remote",
-    "kalainova.providers.router",
     "kalainova.publish",
     "kalainova.qa",
     "kalainova.stock",

@@ -70,8 +70,8 @@ def _sheet(job):
 def test_a_vision_model_compares_the_frames_with_the_kit(locked, monkeypatch):
     seen = {}
 
-    def judged(job, capability, fn, text, **kw):
-        seen.update(kw)
+    def judged(job, request, **kw):
+        seen.update(images=request.images)
         reply = {"same_character": False, "style_matches": True, "resembles_real_person": False}
         return None, type("Reply", (), {"text": json.dumps(reply)})
 
@@ -346,8 +346,6 @@ def test_still_judge_keeps_findings_for_each_flagged_still(tmp_path, monkeypatch
         ]
     )
     monkeypatch.setattr(preproduction.router, "available", lambda *_: True)
-    monkeypatch.setattr(preproduction.config, "preference", lambda *_: None)
-    monkeypatch.setattr(preproduction.config, "model_for", lambda *_: "judge-model")
     monkeypatch.setattr(
         preproduction.router,
         "generate",
@@ -379,8 +377,6 @@ def test_still_judge_does_not_replace_findings_from_another_source(tmp_path, mon
     }
     job.write("findings", existing)
     monkeypatch.setattr(preproduction.router, "available", lambda *_: True)
-    monkeypatch.setattr(preproduction.config, "preference", lambda *_: None)
-    monkeypatch.setattr(preproduction.config, "model_for", lambda *_: "judge-model")
     reply = {"passed": False, "anatomy_ok": False, "region": [0.1], "note": "bad hand"}
     monkeypatch.setattr(
         preproduction.router,
@@ -396,10 +392,12 @@ def test_still_judge_does_not_replace_findings_from_another_source(tmp_path, mon
 
 
 @needs_ffmpeg
-def test_the_judge_uses_the_judge_model_when_configured(tmp_path, studio, monkeypatch):
+def test_the_judge_is_asked_as_a_judge_and_names_no_vendors_model(tmp_path, studio, monkeypatch):
+    # Each provider runs the check on its own judge model (ADR 0023). The engine once read the first
+    # listed provider's judge model and handed it to every provider, a fallback included.
     from fakes import make_job
 
-    from kalainova import config, qa
+    from kalainova import qa
 
     job = make_job(
         tmp_path,
@@ -455,11 +453,6 @@ def test_the_judge_uses_the_judge_model_when_configured(tmp_path, studio, monkey
             ],
         },
     )
-    monkeypatch.setattr(
-        config,
-        "model_for",
-        lambda prov, cap: "custom-judge-haiku" if cap == "judge" else "opus-llm",
-    )
     studio.replies = [
         json.dumps(
             {
@@ -473,7 +466,8 @@ def test_the_judge_uses_the_judge_model_when_configured(tmp_path, studio, monkey
     qa.run(job)
     judge_calls = [c for c in studio.calls if c["capability"] in ("judge", "llm")]
     assert len(judge_calls) == 1
-    assert judge_calls[0].get("model") == "custom-judge-haiku"
+    assert judge_calls[0]["capability"] == "judge" and judge_calls[0]["judging"] is True
+    assert judge_calls[0]["model"] is None
 
 
 @pytest.mark.parametrize(

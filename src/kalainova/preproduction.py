@@ -21,10 +21,11 @@ from typing import Any, Protocol
 import numpy as np
 from PIL import Image, ImageDraw
 
-from . import config, media, motion, prompts, shotmake, takes, timeline
+from . import media, motion, prompts, shotmake, takes, timeline
 from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 from .providers import router
+from .providers.contract import Billable, JudgeRequest, TextRequest
 
 Fields = dict[str, Any]
 ANIMATIC_FILE = "animatic.mp4"
@@ -87,19 +88,18 @@ def _shot_cost(piece: _Scene, beat: Fields, length: float, always: int) -> float
     """Priced as the shot will be asked for: a shot with a character on the pinned reference model,
     one without (B-roll) on the plain one. A price needs no key."""
     kw = shotmake.shot_kw(piece.resolved, piece.lock, "video", beat)
-    model = {"model": kw["model"]} if kw.get("model") else {}
-    asked = {"duration": length, "image": True, "references": bool(kw.get("references")), **model}
-    quote = router.price(piece.job, "video", **asked)
+    asked = Billable(capability="video", duration=length, image=True, references=bool(kw))
+    quote = router.price(piece.job, asked, pin=kw.pin)
     if quote is None or quote[1] is None:
         return None
     total = quote[1] * always
     if beat.get("on_camera"):
-        sync = router.price(piece.job, "lipsync", duration=length)
+        sync = router.price(piece.job, Billable(capability="lipsync", duration=length))
         if sync is not None and sync[1] is None:
             return None
         total += sync[1] if sync and sync[1] else 0.0
     if shotmake.end_frame_used(piece.job, beat, kw):
-        end = router.price(piece.job, "image")
+        end = router.price(piece.job, Billable(capability="image"))
         if end is None or end[1] is None:
             return None
         total += end[1]
@@ -137,7 +137,7 @@ def gate_active(job: Job) -> bool:
     if not has_moving:
         return False
     p = router.first_listed(job, "video")  # a missing key does not make the video free
-    return bool(p and not getattr(p, "free", False))
+    return bool(p and not p.free)
 
 
 def waiting_gate(job: Job) -> str | None:
@@ -171,7 +171,7 @@ def refuse_shot_still(job: Job, beat: Fields | str, still: Path) -> str | None:
 
 
 def reuse_accepted_still(
-    piece: Any, beat: Fields, still: Path, prompt: str, shot: Fields | None = None
+    piece: Any, beat: Fields, still: Path, prompt: str, shot: shotmake.Held | None = None
 ) -> bool:
     """If the animatic accepted a still for this beat and it exists on disk, reuse it as the asset,
     keeping the model and kit references that made it (`shot` is the still's request)."""
@@ -195,7 +195,7 @@ def reuse_accepted_still(
         beat_id=beat["id"],
         path=f"beats/{beat['id']}.still.png",
         rights=shotmake.rights(piece.data),
-        **shotmake.reused_origin(piece.job, still, shot or {}),
+        **shotmake.reused_origin(piece.job, still, shot or shotmake.Held()),
         prompt=prompt,
         synthetic=True,
         probe=media.summarize(still),
@@ -430,25 +430,20 @@ def still_judge_refusal(job: Job, beat: Fields, still: Path) -> str | None:
         return None
     if not (router.available(job, "judge") or router.available(job, "llm")):
         return None
-    cap = "judge" if router.available(job, "judge") else "llm"
-    pref = config.preference(cap, job.job)
-    prov = pref[0] if pref else "fake"
-    judge_model = config.model_for(prov, "judge") or config.model_for(prov, "llm")
+    # each provider runs the check on its own judge model: none is handed another vendor's model id
+    ask = JudgeRequest if router.available(job, "judge") else TextRequest
     bid = beat["id"]
     cue = f"Beat {bid}: {beat.get('text', '')}. Visual cue: {beat.get('visual_cue', '')}"
     try:
         from .plan import extract_json
 
-        _, res = router.generate(
-            job,
-            cap,
-            cap,
-            prompts.load("qa_still").format(cue=cue),
-            images=[still],
+        check = ask(
+            prompt=prompts.load("qa_still").format(cue=cue),
+            images=(still,),
             max_tokens=600,
-            model=judge_model,
-            note="qa-still-judge",
+            judging=True,
         )
+        _, res = router.generate(job, check, note="qa-still-judge")
         data = extract_json(res.text) if res and res.text else {}
     except Exception as exc:
         print(f"{job.id}: still judge error on {bid}: {exc}", file=sys.stderr)

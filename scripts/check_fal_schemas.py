@@ -49,6 +49,8 @@ def check_rehearsal(path: Path) -> int:
     report = json.loads(path.read_text())
     bad = 0
     for call in report.get("calls", []):
+        if call.get("provider") != "fal":
+            continue  # another vendor's requests are checked by its own adapter in the rehearsal
         for req in call.get("requests", []):
             model, sent = req["model"], set(req.get("payload") or {})
             try:

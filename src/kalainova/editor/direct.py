@@ -17,6 +17,7 @@ from typing import Any
 from .. import config, edit, media
 from ..jobfs import ContractError, Job
 from ..providers import router
+from ..providers.contract import MusicRequest, TextRequest
 from . import analyze, beats, choose, speech
 from . import notes as notes_mod
 
@@ -51,7 +52,7 @@ def _llm(job: Job):
         """The notes parser's LLM, with the same cap and ledger as every other call."""
 
         def llm(self, prompt: str, **kw):
-            return router.generate(job, "llm", "llm", prompt, note="notes", **kw)[1]
+            return router.generate(job, TextRequest(prompt=prompt, **kw), note="notes")[1]
 
     return Billed()
 
@@ -72,13 +73,7 @@ def settle(job: Job, footage: dict) -> dict:
 
 def _gen_music(job: Job, prompt: str, duration: float) -> tuple[dict, str]:
     p, res = router.generate(
-        job,
-        "music",
-        "music",
-        prompt,
-        job.work / "music.wav",
-        duration=duration,
-        est={"duration": duration},
+        job, MusicRequest(prompt=prompt, dst=job.work / "music.wav", duration=duration)
     )
     return {
         "id": "music",

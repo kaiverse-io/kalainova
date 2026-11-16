@@ -6,15 +6,16 @@ import json
 
 import pytest
 import requests
-from fakes import make_job, needs_ffmpeg
+from fakes import context, make_job, needs_ffmpeg
 
 from kalainova import assets, config, media, rehearse
 from kalainova.jobfs import ContractError
 from kalainova.providers import base, fal, rehearsal
+from kalainova.providers.contract import MusicRequest, Reference, VideoRequest
 
 pytestmark = needs_ffmpeg
 
-SCHEMA_OK = lambda model, payload: []  # noqa: E731 - the live schema is read in its own test
+SCHEMA_OK = lambda provider, model, payload: []  # noqa: E731 - the live schema is read in its own test
 
 BEAT = {
     "id": "b1",
@@ -58,7 +59,10 @@ def test_a_rehearsal_names_each_field_and_price_and_spends_nothing(tmp_path, stu
     field = config.video_spec("fal", sent["model"]).get("image_param", "image_url")
     assert sent["payload"][field].startswith(rehearsal.SCHEME + "upload/b1.still.png")
     assert report["shots"]["b1"][0]["start_frame_sent"] is True
-    assert report["estimate_total"] == pytest.approx(call["estimate"])
+    # every paid call the real run makes is priced, the still's check by a judge among them
+    others = [c for c in report["calls"] if c["capability"] != "video"]
+    assert {c["capability"] for c in others} <= {"judge", "llm"}
+    assert report["estimate_total"] == pytest.approx(sum(c["estimate"] for c in report["calls"]))
     assert "only" in report["animatic_gate"]  # the gate was passed in the copy, and it says so
 
     assert job.committed() == 0
@@ -82,10 +86,10 @@ class Paid(base.Provider):
     capabilities = ("video",)
     calls = 0
 
-    def estimate(self, capability, **request):
+    def estimate(self, billable, model=None):
         return 0.5
 
-    def video(self, prompt, dst, *, duration, aspect, image=None, **kw):
+    def video(self, req, ctx):
         Paid.calls += 1
         raise AssertionError("a rehearsal called a paid model")
 
@@ -117,16 +121,17 @@ def test_a_keyless_paid_model_listed_first_stops_it(tmp_path, studio, offline, m
     assert not [c for c in report["calls"] if c["capability"] == "video"]
 
 
-def test_a_converted_download_is_paired_with_its_call(tmp_path, offline):
+def test_a_request_is_paired_with_its_call_by_the_attempt(tmp_path, offline):
     # fal brings audio down as .src and converts it; the request still belongs to the router's call
     dst = tmp_path / ".1a2b3c4d.music.wav"
+    asked = MusicRequest(prompt="a warm bed", dst=dst, duration=6)
     with rehearsal.opened() as dry:
-        dry.begin(dst, "music", "fal", 0.04, "music")
-        fal.Fal().music("a warm bed", dst, duration=6)
+        dry.begin("1a2b3c4d", asked, "fal", 0.04, "music")
+        fal.Fal().music(asked, context(attempt="1a2b3c4d"))
     (call,) = dry.report()
     assert call["requests"][0]["model"] == config.model_for("fal", "music")
     assert not dry.loose
-    assert media.duration(dst) > 0
+    assert media.duration(dst) == pytest.approx(6, abs=0.2)  # the length the engine asked for
 
 
 def test_fal_writes_down_the_start_frame_and_the_references(tmp_path, offline, monkeypatch):
@@ -134,23 +139,23 @@ def test_fal_writes_down_the_start_frame_and_the_references(tmp_path, offline, m
     still, face = tmp_path / "still.png", tmp_path / "face.png"
     for path in (still, face):
         media.run(["-f", "lavfi", "-i", "testsrc2=size=360x640", "-frames:v", "1", str(path)])
-    refs = [{"path": face, "sha256": "a", "label": "the lead's face", "group": ""}]
+    refs = (Reference(path=face, sha256="a", label="the lead's face"),)
+    asked = VideoRequest(
+        prompt="she plays the drop",
+        dst=tmp_path / "clip.mp4",
+        duration=5,
+        aspect="9:16",
+        start=still,
+        references=refs,
+    )
     with rehearsal.opened() as dry:
         assert not fal.Fal().missing_env()  # no key is needed to send nothing
-        made = fal.Fal().video(
-            "she plays the drop",
-            tmp_path / "clip.mp4",
-            duration=5,
-            aspect="9:16",
-            image=still,
-            references=refs,
-            model=model,
-        )
+        made = fal.Fal().video(asked, context(model=model))
     (sent,) = dry.loose  # no router opened this call, so it is kept apart
     assert sent["model"] == model
     assert sent["payload"]["start_image_url"].startswith(rehearsal.SCHEME + "upload/still.png")
     assert media.duration(made.path) == pytest.approx(5, abs=0.2)
-    assert made.meta["start_frame_sent"] is True
+    assert made.sent is not None and made.sent.start_frame is True
     assert fal.Fal().missing_env() == ["FAL_KEY"]  # closed again
 
 
@@ -162,11 +167,11 @@ def test_only_one_rehearsal_runs_at_a_time():
 
 def test_a_field_fal_would_refuse_stops_the_rehearsal(tmp_path, studio, offline):
     # The schema check runs on every rehearsal, so nobody has to remember a script
-    def refuse(model, payload):
+    def refuse(provider, model, payload):
         return [f"not in {model}'s schema: ['tail_image_url']"] if "video" in model else []
 
     report = rehearse.run(_job(tmp_path, ["fal"]), check=refuse)
-    assert report["stopped"].startswith("fal would refuse: request")
+    assert report["stopped"].startswith("the vendor would refuse: request")
     assert "tail_image_url" in report["stopped"]
     (call,) = [c for c in report["calls"] if c["capability"] == "video"]
     assert call["requests"][0]["schema"] != "ok"
