@@ -113,11 +113,11 @@ What happens on one model call. The engine depends on the contract, never on a v
  Same paid file already saved? ──yes──▶ reuse it with no charge
    │ no
    ▼
+ Rehearsal open, and the first listed provider, key or not, costs money and cannot rehearse? ──yes──▶ stop
+   │ no
+   ▼
  Priced, or the job has no cap? ──no──▶ next listed provider
    │ yes
-   ▼
- Rehearsal open, and the provider costs money and cannot rehearse? ──yes──▶ stop before calling it
-   │ no
    ▼
  Reserve the estimate on the ledger ──over the cap──▶ stop the job
    │ within the cap
@@ -411,7 +411,7 @@ A camera test: one shot made on several models from the same start frame, prompt
 ```
 
 ### rehearse
-A dry run of a job's paid stage. The job is copied to a throwaway folder that sees the same kits and streams through links, and its stills and moving shots run there with a rehearsal open (`providers/rehearsal.py`). Each request a rented model would be sent is written down with its fields, the files it would upload named by hash, the router's estimate and the adapter's price; stand-in files of the asked-for shape let the line go on. A paid provider that cannot rehearse stops it. The animatic gate is passed in the copy only, and the report says the real run still waits there. Nothing is sent, nothing is spent, and no key is needed; the real job gets only `rehearsal.json` in its work folder, which `scripts/check_fal_schemas.py --rehearsal` checks against each model's live schema. Depends on `assets`, `preproduction`, `takes`, and `providers`.
+A dry run of a job's paid stage. The job is copied to a throwaway folder that sees the same kits and streams through links, and its stills and moving shots run there with a rehearsal open (`providers/rehearsal.py`). Each request a rented model would be sent is written down with its fields, the files it would upload named by hash, the router's estimate and the adapter's price; stand-in files of the asked-for shape let the line go on. The first listed provider for each request must be able to rehearse, key or not: a paid one that cannot stops it, because the real run would call it once its key is set. An adapter that downloads under another suffix and converts (fal's audio) is still paired with the router's call. The animatic gate is passed in the copy only, and the report says the real run still waits there. Nothing is sent, nothing is spent, and no key is needed; the real job gets only `rehearsal.json` in its work folder, which `scripts/check_fal_schemas.py --rehearsal` checks against each model's live schema. Depends on `assets`, `preproduction`, `takes`, and `providers`.
 
 ```
  job ──copy──▶ throwaway job (kits, streams linked read only)

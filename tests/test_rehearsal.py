@@ -92,9 +92,39 @@ def test_a_paid_model_that_cannot_rehearse_stops_it(tmp_path, studio, offline, m
     monkeypatch.setitem(base._REGISTRY, "paid", Paid)
     Paid.calls = 0
     report = rehearse.run(_job(tmp_path, ["paid"]))
-    assert "paid cannot rehearse video" in report["stopped"]
+    assert "paid is listed first for video and cannot rehearse" in report["stopped"]
     assert Paid.calls == 0
     assert any("would stop" in line for line in rehearse.lines(report))
+
+
+class Keyed(Paid):
+    """The same, with a key this machine does not have."""
+
+    name = "keyed"
+    env_key = "KEYED_TEST_KEY"
+
+
+def test_a_keyless_paid_model_listed_first_stops_it(tmp_path, studio, offline, monkeypatch):
+    # With its key set, the real run would call it; the rehearsal must not show fal's route instead
+    monkeypatch.setitem(base._REGISTRY, "keyed", Keyed)
+    monkeypatch.delenv("KEYED_TEST_KEY", raising=False)
+    Paid.calls = 0
+    report = rehearse.run(_job(tmp_path, ["keyed", "fal"]))
+    assert "keyed is listed first for video and cannot rehearse" in report["stopped"]
+    assert Paid.calls == 0
+    assert not [c for c in report["calls"] if c["capability"] == "video"]
+
+
+def test_a_converted_download_is_paired_with_its_call(tmp_path, offline):
+    # fal brings audio down as .src and converts it; the request still belongs to the router's call
+    dst = tmp_path / ".1a2b3c4d.music.wav"
+    with rehearsal.opened() as dry:
+        dry.begin(dst, "music", "fal", 0.04, "music")
+        fal.Fal().music("a warm bed", dst, duration=6)
+    (call,) = dry.report()
+    assert call["requests"][0]["model"] == config.model_for("fal", "music")
+    assert not dry.loose
+    assert media.duration(dst) > 0
 
 
 def test_fal_writes_down_the_start_frame_and_the_references(tmp_path, offline, monkeypatch):

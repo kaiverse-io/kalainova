@@ -67,6 +67,27 @@ class ProviderTimeout(TimeoutError):
     pass
 
 
+def _rehearses_first(job: Job, capability: str, names: list[str]) -> None:
+    """In a rehearsal, the first listed provider must be one that rehearses, key or not.
+
+    A paid provider skipped only for its missing key is the one the real run calls once the key is
+    set, so the rehearsal stops at it rather than showing the next provider's route and price.
+    """
+    for name in names:
+        try:
+            p = base.get(name)
+        except KeyError:
+            continue
+        if capability not in p.capabilities:
+            continue
+        if not (p.free or p.rehearses):
+            raise ContractError(
+                f"{job.id}: {name} is listed first for {capability} and cannot rehearse, so the "
+                "rehearsal stops before it; pin the job to a provider that can"
+            )
+        return
+
+
 def _usable(capability: str, names: list[str]) -> tuple[list[base.Provider], list[str]]:
     usable, skipped = [], []
     for name in names:
@@ -305,6 +326,8 @@ def generate(
                 file=sys.stderr,
             )
             return saved
+    if rehearsal.active() is not None:
+        _rehearses_first(job, capability, names)
     cap = job.job.get("cost_cap")
     errors = list(skipped)
     for p in usable:
