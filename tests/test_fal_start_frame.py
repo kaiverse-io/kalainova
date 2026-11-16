@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import requests
 
 from kalainova import config
 from kalainova.providers import fal
@@ -125,3 +126,29 @@ def test_a_reference_clip_is_priced_at_its_own_rate_and_billed_length(monkeypatc
     monkeypatch.setattr(config, "studio", lambda: TABLE)
     asked = {"duration": 1.9, "image": True, "references": True}
     assert fal.Fal().estimate("video", model=STARTS_APART, **asked) == pytest.approx(5 * 0.112)
+
+
+class _Reply:
+    def __init__(self, body, status=200, text=""):
+        self.body, self.status_code, self.text = body, status, text
+
+    def json(self):
+        return self.body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error")
+
+
+def test_fal_keeps_its_request_id_and_what_a_refusal_said(monkeypatch):
+    # The request id is what fal's bill lists; the 422's body names the field it refused
+    monkeypatch.setenv("FAL_KEY", "k")
+    sub = {"request_id": "req-1", "status_url": "s", "response_url": "r"}
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: _Reply(sub))
+    said = '{"detail":[{"msg":"Either frontal_image_url and reference_image_urls"}]}'
+    replies = {"s": _Reply({"status": "COMPLETED"}), "r": _Reply({}, 422, said)}
+    monkeypatch.setattr(requests, "get", lambda url, **kw: replies[url])
+    provider = fal.Fal()
+    with pytest.raises(requests.HTTPError, match="reference_image_urls"):
+        provider._run("some/model", {})
+    assert provider.request_id == "req-1"

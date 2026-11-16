@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import config, consistency, media, preproduction, shotmake, shots, soundbed, takes
+from . import config, consistency, media, preproduction, shotmake, shots, soundbed, takes, trace
 from .bar import identity
 from .jobfs import ContractError, Job
 from .providers import router
@@ -238,9 +238,9 @@ def _chained_still(piece: _Piece, beat: Fields, previous: Path, still: Path) -> 
 
 
 def _new_still(piece: _Piece, i: int, beat: Fields, prompt: str, still: Path) -> None:
-    if preproduction.reuse_accepted_still(piece, beat, still, prompt):
-        return
     kw = shotmake.shot_kw(piece.resolved, piece.lock, "image", beat)
+    if preproduction.reuse_accepted_still(piece, beat, still, prompt, kw):
+        return
     made, res = piece.gen(
         "image",
         "image",
@@ -345,11 +345,13 @@ def _moving_shot(piece: _Piece, beat: Fields, still: Path, prompt: str, span: fl
     return clip
 
 
+@trace.scoped
 def _make_pictures(piece: _Piece) -> None:
     if not piece.kinds & {"video", "still"}:
         return
     previous: Path | None = None
     for i, beat in enumerate(piece.packet["beats"]):
+        trace.relabel(shot=beat["id"])
         span = piece.span(i)
         if beat.get("graphics"):
             previous = shotmake.graphics_shot(
@@ -375,6 +377,7 @@ def _make_pictures(piece: _Piece) -> None:
         previous = _moving_shot(piece, beat, still, prompt, span)
 
 
+@trace.scoped
 def _sketch_pictures(piece: _Piece) -> None:
     """The animatic's pictures: each shot's first frame, made once for the full run to reuse.
 
@@ -383,6 +386,7 @@ def _sketch_pictures(piece: _Piece) -> None:
     """
     held: str | None = None
     for i, beat in enumerate(piece.packet["beats"]):
+        trace.relabel(shot=beat["id"])
         row: Fields = {"beat_id": beat["id"]}
         piece.sketch.append(row)
         if not piece.kinds & {"video", "still"} or beat.get("graphics"):

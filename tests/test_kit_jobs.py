@@ -216,6 +216,20 @@ def test_fal_sends_references_in_each_model_shape(root, monkeypatch):
     assert "@Element1 is lead" in sent["prompt"]
     assert "@Image1 is the start frame" in sent["prompt"]
 
+    # One picture of a character cannot be an element: fal wants a front and another angle
+    sent.clear()
+    provider.video(
+        "shot",
+        root / "o.mp4",
+        duration=4,
+        aspect="9:16",
+        model="fal-ai/kling-video/o3/pro/reference-to-video",
+        references=[face],
+    )
+    assert "elements" not in sent
+    assert len(sent["image_urls"]) == 1
+    assert "@Image1 is lead" in sent["prompt"] and "@Element" not in sent["prompt"]
+
 
 def test_fal_refuses_references_for_an_unlisted_model(root):
     face = {"path": picture(root, "f.png"), "label": "x", "group": ""}

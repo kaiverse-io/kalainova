@@ -60,6 +60,16 @@ def _audio_url(data: Fields) -> str:
     return str(found.get("url") or "")  # no URL fails at the fetch, where it is billed
 
 
+def _raise_for_status(resp: Any) -> None:
+    """raise_for_status, keeping what fal said: a 422 names the field it refused, and the
+    status line alone does not."""
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        said = str(getattr(resp, "text", "") or "")[:400]
+        raise requests.HTTPError(f"{exc}: {said}" if said else str(exc), response=resp) from exc
+
+
 @register
 class Fal(Provider):
     """Aggregator for image and video models via the fal queue API."""
@@ -128,14 +138,20 @@ class Fal(Provider):
     def _as_elements(
         self, spec: Fields, prompt: str, refs: list[Ref]
     ) -> tuple[str, Fields, Fields]:
-        """Kling-style: each character is one element, with a front image and other angles."""
+        """Kling-style: each character is one element, with a front image and other angles.
+
+        An element needs its front and one to three more angles (fal refuses an empty list with a
+        422), so a character with a single picture goes in as a plain reference image instead.
+        """
         groups: dict[str, list[Ref]] = {}
-        loose = []
+        images: list[tuple[str, Ref]] = []
         for ref in refs:
             if ref.get("group"):
                 groups.setdefault(ref["group"], []).append(ref)
             else:
-                loose.append(ref)
+                images.append((ref["label"], ref))
+        images = [(name, g[0]) for name, g in groups.items() if len(g) == 1] + images
+        groups = {name: g for name, g in groups.items() if len(g) > 1}
         elements = [
             {
                 "frontal_image_url": self._upload(group[0]["path"]),
@@ -144,8 +160,10 @@ class Fal(Provider):
             for group in groups.values()
         ]
         guide = [f"@Element{i} is {name}" for i, name in enumerate(groups, start=1)]
-        guide += [f"@Image{i} is {r['label']}" for i, r in enumerate(loose, start=1)]
-        payload = {"elements": elements, "image_urls": [self._upload(r["path"]) for r in loose]}
+        guide += [f"@Image{i} is {label}" for i, (label, _) in enumerate(images, start=1)]
+        payload: Fields = {"image_urls": [self._upload(r["path"]) for _, r in images]}
+        if elements:
+            payload["elements"] = elements
         return f"{prompt}. References: {'; '.join(guide)}.", payload, spec
 
     def _run(self, model: str, payload: Fields, timeout: float = 900) -> Fields:
@@ -156,16 +174,17 @@ class Fal(Provider):
         r = requests.post(
             f"https://queue.fal.run/{model}", headers=h, json=payload, timeout=TIMEOUT
         )
-        r.raise_for_status()
+        _raise_for_status(r)
         sub = r.json()
+        self.request_id = sub.get("request_id")  # what fal's bill and dashboard list
         status_url, response_url = sub["status_url"], sub["response_url"]
         deadline = time.time() + timeout
         while time.time() < deadline:
             resp = requests.get(status_url, headers=h, timeout=TIMEOUT)
-            resp.raise_for_status()  # a 401/404 must fail now, not after the timeout
+            _raise_for_status(resp)  # a 401/404 must fail now, not after the timeout
             if resp.json().get("status") == "COMPLETED":
                 out = requests.get(response_url, headers=h, timeout=TIMEOUT)
-                out.raise_for_status()  # a failed job surfaces as an error on this fetch
+                _raise_for_status(out)  # a failed job surfaces as an error on this fetch
                 result: Fields = out.json()
                 return result
             time.sleep(3)

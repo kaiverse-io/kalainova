@@ -170,10 +170,11 @@ def refuse_shot_still(job: Job, beat: Fields | str, still: Path) -> str | None:
     return None
 
 
-def reuse_accepted_still(piece: Any, beat: Fields, still: Path, prompt: str) -> bool:
-    """If the animatic accepted a still for this beat and it exists on disk, reuse it
-    as the asset.
-    """
+def reuse_accepted_still(
+    piece: Any, beat: Fields, still: Path, prompt: str, shot: Fields | None = None
+) -> bool:
+    """If the animatic accepted a still for this beat and it exists on disk, reuse it as the asset,
+    keeping the model and kit references that made it (`shot` is the still's request)."""
     review = piece.data.get("animatic_reviewed") or {}
     accepted = (review.get("stills") or {}).get(beat["id"])
     if not accepted:
@@ -194,8 +195,7 @@ def reuse_accepted_still(piece: Any, beat: Fields, still: Path, prompt: str) -> 
         beat_id=beat["id"],
         path=f"beats/{beat['id']}.still.png",
         rights=shotmake.rights(piece.data),
-        provider="animatic",
-        model="accepted animatic still",
+        **shotmake.reused_origin(piece.job, still, shot or {}),
         prompt=prompt,
         synthetic=True,
         probe=media.summarize(still),

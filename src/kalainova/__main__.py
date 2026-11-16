@@ -46,7 +46,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import assets, edit, plan, production_cli, qa, qachecks, render, studio_cli
+from . import assets, edit, plan, production_cli, qa, qachecks, render, studio_cli, trace
 from .jobfs import REPO, ContractError, home, open_job
 
 
@@ -97,6 +97,7 @@ def _make(a) -> int:
     job = open_job(a.job)
     order = ["plan", "assets", "edit", "compile", "render", "qa"]
     for st in order[order.index(a.from_stage) :]:
+        trace.relabel(stage=st)
         t0 = time.time()
         STAGES[st](job, a.force)
         print(f"  {st:<8} ok  {time.time() - t0:5.1f}s")
@@ -234,6 +235,7 @@ def _identity_line(picture: Path, kit: str) -> str:
     return identity.kit_line(picture, refs, f"{kit_id}@{version}")
 
 
+@trace.scoped
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="kalainova")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -319,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     studio_cli.add_parsers(sub)
     production_cli.add_parsers(sub)
     a = p.parse_args(argv)
-
+    trace.relabel(stage=getattr(a, "stage", None) or a.cmd)  # every call it makes says so
     try:
         handled = studio_cli.dispatch(a)
         if handled is None:

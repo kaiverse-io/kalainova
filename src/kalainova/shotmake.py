@@ -6,13 +6,14 @@ follow the same promise and the same record.
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import config, consistency, media, shots, takes
+from . import config, consistency, media, shots, takes, trace
 from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 from .providers import base, router
@@ -69,6 +70,25 @@ def shot_kw(
 def kit_refs(shot: Fields) -> Fields | None:
     shas = [r["sha256"] for r in shot.get("references", []) if r["sha256"]]
     return {"kit_refs": shas} if shas else None
+
+
+def reused_origin(job: Job, path: Path, shot: Fields) -> Fields:
+    """Who made a file this job made earlier and now reuses, from the router's record of the same
+    bytes, so the reuse keeps its model and its kit references. The references count only when
+    the shot's pinned model is the one that made it."""
+    sha = sha256_file(path)
+    log = job.folder / router.GENERATIONS
+    lines = log.read_text().splitlines() if log.exists() else []
+    entries = [json.loads(line) for line in lines if line.strip()]
+    entry = next((e for e in reversed(entries) if e.get("sha256") == sha), None)
+    if entry is None:
+        return {"provider": "animatic", "model": "accepted animatic still"}
+    refs = kit_refs(shot) if shot.get("model") == entry["model"] else None
+    return {
+        "provider": entry["provider"],
+        "model": entry["model"],
+        "provenance": {**(refs or {}), "sha256": sha, "accepted_in": "animatic"},
+    }
 
 
 def last_frame(clip: Path, dst: Path) -> None:
@@ -281,12 +301,14 @@ def generated_ambience(
     )
 
 
+@trace.scoped
 def retake(job: Job, bid: str, note: str = "") -> Fields:
     """Another attempt at one shot with a new seed, leaving every other shot alone.
 
     A note adds to the prompt, so what a person saw wrong can be said once. The new take is used if
     it reads well, unless a person has already chosen one.
     """
+    trace.relabel(shot=bid)
     data = job.job
     packet = job.read("script_packet")
     beat = next((b for b in packet["beats"] if b["id"] == bid), None)

@@ -71,6 +71,29 @@
     },
     "units": {
       "type": "object"
+    },
+    "shot": {
+      "type": "string",
+      "description": "The shot the call was made for, when there is one"
+    },
+    "attempt": {
+      "type": "string",
+      "description": "One call's id; the same id is on its ledger entry and generation record"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The vendor's id for the request, as its bill lists it"
+    },
+    "error_detail": {
+      "type": "string",
+      "description": "What the vendor said when the call failed"
+    },
+    "engine": {
+      "type": "string",
+      "description": "The commit that ran the call, with +dirty for uncommitted code"
     }
   }
 }

@@ -22,15 +22,15 @@ import sys
 import threading
 import time
 import uuid
-from contextlib import suppress
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from .. import config, media, trace
+from .. import config, media
 from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
-from . import base, rehearsal
+from . import base, records, rehearsal
 
 # capability -> the position of the destination path in the call's arguments
 OUTPUT_ARG = {
@@ -48,7 +48,7 @@ OUTPUT_ARG = {
 # OSError covers connection, timeout, and HTTP errors. ValueError, KeyError, and IndexError cover a malformed reply.
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError, base.RefusalError)
 DEFAULT_DEADLINE_SEC = 600.0
-GENERATIONS = "generations.jsonl"
+GENERATIONS = records.GENERATIONS
 PICTURE_OUTPUTS = ("image", "video", "motion", "lipsync", "graphics")
 SOUND_OUTPUTS = ("song", "music")
 ASPECT_TOLERANCE = 0.03
@@ -234,69 +234,6 @@ def _request_key(capability: str, fn_name: str, args: tuple, kw: dict) -> str:
     return hashlib.sha256(json.dumps(request, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def _saved(
-    job: Job, key: str, dst: Path, names: list[str]
-) -> tuple[base.Provider, base.Result] | None:
-    """A recorded file, if it is still the same bytes from a provider this job still lists."""
-    path = job.folder / GENERATIONS
-    if not path.exists() or not dst.is_file():
-        return None
-    entries = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    entry = next((e for e in reversed(entries) if e["key"] == key), None)
-    if not entry or entry["provider"] not in names or entry["sha256"] != sha256_file(dst):
-        return None
-    provider = base.get(entry["provider"])
-    return provider, base.Result(
-        path=dst, model=entry["model"], words=entry["words"], meta=entry["meta"]
-    )
-
-
-def _record(job: Job, key: str, provider: base.Provider, res: base.Result, dst: Path) -> None:
-    entry = {
-        "key": key,
-        "provider": provider.name,
-        "model": res.model,
-        "file": dst.name,
-        "sha256": sha256_file(dst),
-        "cost": round(res.cost, 6),
-        "words": res.words,
-        "meta": res.meta,
-    }
-    with job.locked():
-        with open(job.folder / GENERATIONS, "a") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
-
-
-def _trace_attempt(
-    job: Job,
-    capability: str,
-    provider: base.Provider,
-    started_at: str,
-    started: float,
-    *,
-    outcome: str,
-    estimate: float | None,
-    settled: float = 0.0,
-    model_version: str | None = None,
-    error_class: str | None = None,
-) -> None:
-    """Telemetry is best-effort and must not change the provider call's result."""
-    with suppress(Exception):
-        trace.record(
-            job,
-            capability=capability,
-            provider=provider.name,
-            model=config.model_for(provider.name, capability),
-            model_version=model_version,
-            started_at=started_at,
-            elapsed_sec=time.monotonic() - started,
-            outcome=outcome,
-            estimated_cost=estimate or 0.0,
-            settled_cost=settled,
-            error_class=error_class,
-        )
-
-
 def generate(
     job: Job,
     capability: str,
@@ -319,7 +256,7 @@ def generate(
     dst = Path(args[OUTPUT_ARG[capability]]) if has_output else None
     key = _request_key(capability, fn_name, args, kw) if has_output else ""
     if has_output and not fresh:
-        saved = _saved(job, key, dst, names)
+        saved = records.saved(job, key, dst, names)
         if saved:
             print(
                 f"{job.id}: {capability}: reused {dst.name} from {saved[0].name}, no new charge",
@@ -349,9 +286,9 @@ def generate(
             )
         reservation = job.reserve(p.name, capability, estimate or 0.0)
         call_args = list(args)
-        attempt = None
+        attempt, aid, asked = None, uuid.uuid4().hex[:12], kw.get("model")
         if has_output:
-            attempt = dst.with_name(f".{uuid.uuid4().hex[:8]}.{dst.name}")
+            attempt = dst.with_name(f".{aid}.{dst.name}")
             call_args[OUTPUT_ARG[capability]] = attempt
             if dry is not None and not p.free:
                 dry.begin(attempt, capability, p.name, estimate, note or fn_name)
@@ -359,21 +296,18 @@ def generate(
         call_kw = {**kw, "deadline_sec": limit} if p.self_timed else kw
         started = time.monotonic()
         started_at = datetime.now(UTC).isoformat()
+        traced = partial(records.trace_attempt, job, capability, p, started_at, started, asked, aid)
         try:
             res = _call(
                 getattr(p, fn_name), tuple(call_args), call_kw, None if p.self_timed else limit
             )
         except TimeoutError as exc:  # ours, or an adapter's own wait: either may have been billed
-            _trace_attempt(
-                job,
-                capability,
-                p,
-                started_at,
-                started,
+            traced(
                 outcome="timeout",
                 estimate=estimate,
                 settled=estimate or 0.0,
                 error_class=type(exc).__name__,
+                detail=str(exc),
             )
             job.charge(
                 p.name,
@@ -381,34 +315,27 @@ def generate(
                 estimate or 0.0,
                 f"{note or fn_name}: timed out, may have been billed",
                 reservation,
+                records.audit(p, aid, asked),
             )
             errors.append(f"{p.name}: {exc}")
             continue
         except base.RefusalError as exc:
-            _trace_attempt(
-                job,
-                capability,
-                p,
-                started_at,
-                started,
+            traced(
                 outcome="refused",
                 estimate=estimate,
                 error_class=type(exc).__name__,
+                detail=str(exc),
             )
             job.release(reservation)
             errors.append(f"{p.name}: {type(exc).__name__}: {str(exc)[:300]}")
             continue
         except base.BilledError as exc:
-            _trace_attempt(
-                job,
-                capability,
-                p,
-                started_at,
-                started,
+            traced(
                 outcome="error",
                 estimate=estimate,
                 settled=exc.billed,
                 error_class=type(exc).__name__,
+                detail=str(exc),
             )
             job.charge(
                 p.name,
@@ -416,6 +343,7 @@ def generate(
                 exc.billed,
                 f"{note or fn_name}: billed, then failed",
                 reservation,
+                records.audit(p, aid, asked),
             )
             errors.append(f"{p.name}: {str(exc)[:300]}")
             continue
@@ -423,15 +351,8 @@ def generate(
             if isinstance(exc, ContractError):  # a rule the engine set, not a vendor's failure
                 job.release(reservation)
                 raise
-            _trace_attempt(
-                job,
-                capability,
-                p,
-                started_at,
-                started,
-                outcome="error",
-                estimate=estimate,
-                error_class=type(exc).__name__,
+            traced(
+                outcome="error", estimate=estimate, error_class=type(exc).__name__, detail=str(exc)
             )
             job.release(reservation)
             errors.append(f"{p.name}: {type(exc).__name__}: {str(exc)[:300]}")
@@ -440,20 +361,29 @@ def generate(
             job.release(reservation)
             raise
         if has_output:
+            billed = partial(
+                traced, outcome="error", estimate=estimate, settled=res.cost, meta=res.meta
+            )
             if not attempt.is_file():
-                job.charge(p.name, capability, res.cost, f"{note or fn_name}: no file", reservation)
+                billed(error_class="NoFile", detail="the provider returned no file")
+                audit = records.audit(p, aid, res.model or asked, res.meta)
+                job.charge(
+                    p.name, capability, res.cost, f"{note or fn_name}: no file", reservation, audit
+                )
                 errors.append(f"{p.name}: returned no file")
                 continue
             try:
                 _check_output(capability, attempt, kw)
             except PROVIDER_FAILURES as exc:
                 attempt.unlink(missing_ok=True)
+                billed(error_class=type(exc).__name__, detail=f"output rejected: {exc}")
                 job.charge(
                     p.name,
                     capability,
                     res.cost,
                     f"{note or fn_name}: output rejected",
                     reservation,
+                    records.audit(p, aid, res.model or asked, res.meta),
                 )
                 errors.append(f"{p.name}: rejected output: {str(exc)[:200]}")
                 continue
@@ -462,22 +392,20 @@ def generate(
             os.replace(attempt, dst)
             res.path = dst
             if not p.placeholder:
-                _record(job, key, p, res, dst)
+                records.record(job, key, p, res, dst, aid)
         if errors:
             print(
                 f"{job.id}: {capability}: used {p.name} after: {'; '.join(errors)}", file=sys.stderr
             )
-        job.charge(p.name, capability, res.cost, note or fn_name, reservation)
-        _trace_attempt(
-            job,
-            capability,
-            p,
-            started_at,
-            started,
+        audit = records.audit(p, aid, res.model or asked, res.meta)
+        job.charge(p.name, capability, res.cost, note or fn_name, reservation, audit)
+        traced(
             outcome="ok",
             estimate=estimate,
             settled=res.cost,
+            made=res.model or None,
             model_version=getattr(res, "version", None),
+            meta=res.meta,
         )
         return p, res
     raise ProviderError(f"{job.id}: every provider failed for {capability}: {'; '.join(errors)}")

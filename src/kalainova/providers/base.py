@@ -79,6 +79,9 @@ class Provider:
     self_timed = False
     # Can write down what it would send instead of sending it (providers/rehearsal.py)
     rehearses = False
+    # The vendor's id for the request this instance last sent, as its bill lists it. The router
+    # copies it to the trace row and the ledger entry; an adapter sets it as soon as it has one.
+    request_id: str | None = None
 
     def _unsupported(self, capability: str) -> Result:
         raise NotImplementedError(f"{self.name} does not implement {capability}")
