@@ -15,6 +15,7 @@ from typing import Any
 from . import media, prompts, render
 from .jobfs import ContractError, Job, open_child
 from .providers import router
+from .providers.contract import LipsyncRequest, TextRequest, VoiceRequest
 
 Cue = dict[str, Any]
 SLOWEST, FASTEST = 0.85, 1.3  # how far a line can be stretched before it stops sounding like speech
@@ -53,7 +54,8 @@ def translate(job: Job, cues: list[Cue], language: str) -> list[Cue]:
         text = prompts.load("dub_translate").format(
             language=language, cues=json.dumps(request, ensure_ascii=False)
         )
-        _, res = router.generate(job, "llm", "llm", text, max_tokens=4000, note=f"dub {language}")
+        ask = TextRequest(prompt=text, max_tokens=4000)
+        _, res = router.generate(job, ask, note=f"dub {language}")
         reply = extract_json(res.text)
         saved.write_text(json.dumps(reply, indent=2, ensure_ascii=False) + "\n")
     else:
@@ -78,16 +80,7 @@ def _voice_lines(
     out = []
     for cue in cues:
         raw = folder / f"{cue['id']:04d}.raw.wav"
-        router.generate(
-            job,
-            "voice",
-            "voice",
-            cue["text"],
-            raw,
-            voice=voice,
-            est={"chars": len(cue["text"])},
-            note="dub",
-        )
+        router.generate(job, VoiceRequest(text=cue["text"], dst=raw, voice=voice), note="dub")
         fitted = folder / f"{cue['id']:04d}.wav"
         slot = cue["end_sec"] - cue["start_sec"]
         tempo = tempo_for(media.duration(raw), slot)
@@ -177,15 +170,10 @@ def _lipsync(job: Job, child: Job) -> None:
     if not router.available(child, "lipsync"):
         raise ContractError(f"{job.id}: lipsync requested but no lipsync provider is configured")
     synced = child.work / "final.lipsync.mp4"
-    router.generate(
-        child,
-        "lipsync",
-        "lipsync",
-        str(child.work / "final.mp4"),
-        str(child.work / "mix.norm.wav"),
-        synced,
-        note="dub lipsync",
+    picture = LipsyncRequest(
+        video=child.work / "final.mp4", audio=child.work / "mix.norm.wav", dst=synced
     )
+    router.generate(child, picture, note="dub lipsync")
     synced.replace(child.work / "final.mp4")
 
 

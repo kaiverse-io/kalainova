@@ -15,6 +15,7 @@ from kalainova.editor import musiccuts as mc
 from kalainova.editor import musicvideo
 from kalainova.jobfs import ContractError, Job
 from kalainova.providers import router
+from kalainova.providers.contract import Inputs
 
 pytestmark = needs_ffmpeg
 SR = 48000
@@ -322,11 +323,9 @@ def test_song_video_stream_with_video_model_taking_no_reference_images_refuses(
     # stub only supports reference on vid-ref or when in support dict
     monkeypatch.setattr(
         Stub,
-        "reference_support",
-        lambda self, cap, model: (
-            {"max_images": 4}
-            if cap == "image"
-            else ({"max_images": 3} if model == "vid-ref" else {})
+        "inputs",
+        lambda self, cap, model=None: Inputs(
+            references=4 if cap == "image" else (3 if model == "vid-ref" else 0)
         ),
     )
 
@@ -414,10 +413,10 @@ def test_song_video_stream_pinned_model_passed_to_estimate(tmp_path, monkeypatch
     quoted_models = []
     real_quote = router.price
 
-    def spy_quote(job, cap, *args, **kwargs):
-        if cap == "video":
-            quoted_models.append(kwargs.get("model"))
-        return real_quote(job, cap, *args, **kwargs)
+    def spy_quote(job, billable, *args, **kwargs):
+        if billable.capability == "video" and kwargs.get("pin"):
+            quoted_models.append(kwargs["pin"].model)
+        return real_quote(job, billable, *args, **kwargs)
 
     with patch("kalainova.providers.router.price", side_effect=spy_quote):
         songs.video_job(song_job, "s6-video", stream="chan-pin")

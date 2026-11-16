@@ -10,6 +10,7 @@ from PIL import Image
 
 from kalainova.jobfs import CostCapExceeded
 from kalainova.providers import base, router
+from kalainova.providers.contract import ImageRequest
 
 
 def test_a_reservation_counts_against_the_cap_before_any_money_moves(tmp_path, monkeypatch):
@@ -68,10 +69,11 @@ class Priced(base.Provider):
     capabilities = ("image",)
     outcome = "ok"
 
-    def estimate(self, capability, **request):
+    def estimate(self, billable, model=None):
         return 1.0
 
-    def image(self, prompt, dst, *, width=64, height=64, **kw):
+    def image(self, req, ctx):
+        dst, width, height = req.dst, req.width, req.height
         if Priced.outcome == "billed":
             raise base.BilledError(0.75, "the file did not arrive")
         if Priced.outcome == "down":
@@ -94,7 +96,7 @@ def priced(monkeypatch, tmp_path):
 
 def test_a_call_settles_at_its_real_cost(priced):
     job, dst = priced
-    router.generate(job, "image", "image", "a prompt", dst, width=64, height=64)
+    router.generate(job, ImageRequest(prompt="a prompt", dst=dst, width=64, height=64))
     assert job.spent() == pytest.approx(0.5) and job.committed() == pytest.approx(0.5)
 
 
@@ -102,7 +104,7 @@ def test_money_the_vendor_took_stays_on_the_ledger_when_the_file_is_lost(priced)
     job, dst = priced
     Priced.outcome = "billed"
     with pytest.raises(router.ProviderError):
-        router.generate(job, "image", "image", "a prompt", dst, width=64, height=64)
+        router.generate(job, ImageRequest(prompt="a prompt", dst=dst, width=64, height=64))
     assert job.spent() == pytest.approx(0.75)
     assert job.committed() == pytest.approx(0.75), "no reservation is left open"
 
@@ -111,7 +113,7 @@ def test_a_failed_call_that_was_not_billed_costs_nothing(priced):
     job, dst = priced
     Priced.outcome = "down"
     with pytest.raises(router.ProviderError):
-        router.generate(job, "image", "image", "a prompt", dst, width=64, height=64)
+        router.generate(job, ImageRequest(prompt="a prompt", dst=dst, width=64, height=64))
     assert job.committed() == 0.0
 
 
@@ -119,5 +121,5 @@ def test_a_bug_in_an_adapter_is_raised_with_nothing_left_held(priced):
     job, dst = priced
     Priced.outcome = "bug"
     with pytest.raises(TypeError):
-        router.generate(job, "image", "image", "a prompt", dst, width=64, height=64)
+        router.generate(job, ImageRequest(prompt="a prompt", dst=dst, width=64, height=64))
     assert job.committed() == 0.0

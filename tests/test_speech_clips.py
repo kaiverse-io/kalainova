@@ -369,9 +369,9 @@ def test_a_transcript_call_says_how_long_the_source_is(tmp_path, studio, monkeyp
     seen = []
     real = router.generate
 
-    def spy(job, capability, *args, **kw):
-        seen.append(kw.get("est"))
-        return real(job, capability, *args, **kw)
+    def spy(job, request, **kw):
+        seen.append(request.billable())
+        return real(job, request, **kw)
 
     monkeypatch.setattr(router, "generate", spy)
     job = make_job(tmp_path)
@@ -379,4 +379,4 @@ def test_a_transcript_call_says_how_long_the_source_is(tmp_path, studio, monkeyp
     media.run(["-f", "lavfi", "-i", "sine=f=220:d=2", str(source)])
     studio.heard = _words((0.1, 0.5, "Hello."))
     speech.transcript(job, source)
-    assert seen[0]["duration"] == pytest.approx(2.0, abs=0.2)
+    assert seen[0].duration == pytest.approx(2.0, abs=0.2)

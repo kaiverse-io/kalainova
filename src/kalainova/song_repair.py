@@ -9,6 +9,7 @@ from . import config, media, takes
 from .bar import song as musicbar
 from .jobfs import ContractError, Job
 from .providers import base, router
+from .providers.contract import Repaint, SongRequest
 
 SHOT = "song"
 
@@ -27,7 +28,7 @@ def _repainter(job: Job) -> str:
             continue
         if "song" not in p.capabilities or not p.available("song"):
             continue
-        if getattr(p, "supports_song_repaint", lambda: False)():
+        if p.inputs("song").repaint:
             return name
         tried.append(name)
     raise ContractError(
@@ -100,29 +101,22 @@ def repair_take(
     dst = takes.take_path(job, SHOT, new_n, "-repaired.wav")
     style = prompt or style_text(song)
     seconds = media.duration(original)
-    provider, result = router.generate(
-        job,
-        "song",
-        "song",
-        lyrics_text(song),
-        dst,
+    seed = takes.seed_for(prompt or style, new_n)
+    repaired = SongRequest(
+        lyrics=lyrics_text(song),
+        dst=dst,
         style=style,
         duration=seconds,
-        seed=takes.seed_for(prompt or style, new_n),
-        task_type="repaint",
-        src_audio_path=original,
-        repainting_start=start,
-        repainting_end=end,
-        est={"duration": seconds},
-        only=[painter],
-        note="song repair",
+        seed=seed,
+        repaint=Repaint(source=original, start_sec=start, end_sec=end),
     )
+    provider, result = router.generate(job, repaired, only=[painter], note="song repair")
     # measured like any take, so the person compares two takes on the same readings
     report = musicbar.measure(dst, song, None)
     misses = [r["id"] for r in report["readings"] if not r["ok"]]
     new_take: dict[str, Any] = {
         "n": new_n,
-        "seed": int((result.meta or {}).get("seed", 0)),
+        "seed": int(result.seed if result.seed is not None else seed),
         "file": str(dst.relative_to(job.work)),
         "sha256": hashlib.sha256(dst.read_bytes()).hexdigest(),
         "ok": not misses,

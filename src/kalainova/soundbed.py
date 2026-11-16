@@ -9,6 +9,7 @@ from typing import Any
 from . import kits, media, shotmake
 from .blobstore import sha256_file
 from .jobfs import Job
+from .providers.contract import MusicRequest, SfxRequest
 
 Fields = dict[str, Any]
 Gen = Callable[..., tuple[Any, Any]]
@@ -52,7 +53,8 @@ def bed(
         if role == "music"
         else "soft cinematic whoosh transition"
     )
-    p, res = gen(role, role, text, dst, duration=secs, est={"duration": secs})
+    ask = MusicRequest if role == "music" else SfxRequest
+    p, res = gen(ask(prompt=text, dst=dst, duration=secs))
     add(
         **common,
         duration_sec=media.duration(dst),

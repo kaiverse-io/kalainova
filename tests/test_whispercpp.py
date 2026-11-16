@@ -5,8 +5,10 @@ import shutil
 import subprocess
 
 import pytest
+from fakes import context
 
 from kalainova.providers import whispercpp
+from kalainova.providers.contract import TranscribeRequest
 from kalainova.providers.whispercpp import MODEL_ENV, WhisperCpp
 
 DOC = {
@@ -89,7 +91,7 @@ def test_transcribe_through_a_fake_command(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(whispercpp.subprocess, "run", run)
-    res = WhisperCpp().transcribe(tmp_path / "a.wav")
+    res = WhisperCpp().transcribe(TranscribeRequest(src=tmp_path / "a.wav"), context())
     assert res.text == "Hello world."
     assert "-sow" in seen["cmd"] and seen["cmd"][seen["cmd"].index("-m") + 1] == str(model)
 
@@ -103,7 +105,7 @@ def test_a_failed_command_is_a_provider_failure(monkeypatch, tmp_path):
     failed = subprocess.CompletedProcess([], 1, "", "bad model")
     monkeypatch.setattr(whispercpp.subprocess, "run", lambda *a, **k: failed)
     with pytest.raises(RuntimeError, match="bad model"):
-        WhisperCpp().transcribe(tmp_path / "a.wav")
+        WhisperCpp().transcribe(TranscribeRequest(src=tmp_path / "a.wav"), context())
 
 
 @pytest.mark.skipif(

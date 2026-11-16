@@ -41,12 +41,13 @@ class FakeGraphics(base.Provider):
     free = True
     calls: list[dict] = []
 
-    def graphics(self, folder, dst, **kw):
+    def graphics(self, req, ctx):
+        folder, dst = req.folder, req.dst
         page = (folder / "index.html").read_text()
-        FakeGraphics.calls.append({"page": page, "fps": kw.get("fps"), "dst": dst.name})
+        FakeGraphics.calls.append({"page": page, "fps": req.fps, "dst": dst.name})
         w, h = (int(x) for x in re.search(r'data-width="(\d+)" data-height="(\d+)"', page).groups())
         seconds = float(re.search(r'data-duration="([\d.]+)"', page).group(1))
-        rate = kw.get("fps") or 30
+        rate = req.fps or 30
         media.run(
             ["-f", "lavfi", "-i", f"color=c=black@0.0:s={w}x{h}:d={seconds}:r={rate},format=rgba",
              "-f", "lavfi", "-i", f"color=c=white:s=200x200:d={seconds}:r={rate},format=rgba",

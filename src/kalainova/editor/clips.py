@@ -18,6 +18,7 @@ from typing import Any
 from .. import blobstore, config, consistency, edit, media, prompts
 from ..jobfs import ContractError, Job, open_child
 from ..providers import router
+from ..providers.contract import GraphicsRequest, TextRequest
 from ..render import drawn
 from . import speech
 
@@ -181,7 +182,7 @@ def choose(job: Job, words: list[speech.Word], count: int) -> list[dict[str, Any
     text = prompts.load("clip_finder").format(
         count=count, shortest=SHORTEST_SEC, longest=LONGEST_SEC, transcript=_packed(words)
     )
-    _, res = router.generate(job, "llm", "llm", text, max_tokens=2000, note="clips")
+    _, res = router.generate(job, TextRequest(prompt=text, max_tokens=2000), note="clips")
     picked = [snap(c, words) for c in extract_json(res.text).get("clips", [])]
     return [c for c in picked if c][:count]
 
@@ -300,9 +301,8 @@ def _render_card(child: Job, name: str, text: str, seconds: float) -> dict[str, 
         float(prof["fps"]),
     )  # fmt: skip
     dst = child.work / f"{name}.mp4"
-    provider, res = router.generate(
-        child, "graphics", "graphics", folder, dst, fps=float(prof["fps"]), note=f"clips {name}"
-    )
+    card = GraphicsRequest(folder=folder, dst=dst, fps=float(prof["fps"]))
+    provider, res = router.generate(child, card, note=f"clips {name}")
     return {
         "id": name,
         "kind": "video",

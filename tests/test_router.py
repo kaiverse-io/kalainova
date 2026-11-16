@@ -12,6 +12,14 @@ from PIL import Image
 from kalainova import media, trace
 from kalainova.jobfs import CostCapExceeded, Job
 from kalainova.providers import base, router
+from kalainova.providers.contract import (
+    ImageRequest,
+    InvalidRequestError,
+    Pin,
+    TextRequest,
+    TranscribeRequest,
+    VideoRequest,
+)
 
 
 class Flaky(base.Provider):
@@ -27,7 +35,8 @@ class Flaky(base.Provider):
     blank = False
     clip = "testsrc2=s=64x64:d=1:r=8"
 
-    def image(self, prompt, dst, *, width=64, height=64, **kw):
+    def image(self, req, ctx):
+        prompt, dst, width, height = req.prompt, req.dst, req.width, req.height
         type(self).calls += 1
         if type(self).fails:
             raise type(self).fails
@@ -42,11 +51,12 @@ class Flaky(base.Provider):
         picture.save(dst, format="PNG")
         return base.Result(path=dst, cost=self.cost, model="flaky-1")
 
-    def video(self, prompt, dst, **kw):
+    def video(self, req, ctx):
+        dst = req.dst
         media.run(["-f", "lavfi", "-i", type(self).clip, "-pix_fmt", "yuv420p", str(dst)])
         return base.Result(path=dst, cost=self.cost, model="flaky-1")
 
-    def llm(self, prompt, **kw):
+    def llm(self, req, ctx):
         type(self).calls += 1
         return base.Result(text="ok", cost=self.cost, model="flaky-1")
 
@@ -73,7 +83,7 @@ class Priced(Flaky):
     calls = 0
     fails = None
 
-    def transcribe(self, src, **kw):
+    def transcribe(self, req, ctx):
         type(self).calls += 1
         return base.Result(model="priced-1", words=[], cost=1.0)
 
@@ -85,7 +95,7 @@ class Impatient(Flaky):
     calls = 0
     fails = None
 
-    def image(self, prompt, dst, **kw):
+    def image(self, req, ctx):
         type(self).calls += 1
         raise TimeoutError("the model did not answer")
 
@@ -95,7 +105,7 @@ class Refusing(Flaky):
     calls = 0
     fails = None
 
-    def llm(self, prompt, **kw):
+    def llm(self, req, ctx):
         type(self).calls += 1
         raise base.RefusalError("request declined")
 
@@ -105,7 +115,8 @@ class Hung(Flaky):
     calls = 0
     fails = None
 
-    def image(self, prompt, dst, **kw):
+    def image(self, req, ctx):
+        dst = req.dst
         type(self).calls += 1
         time.sleep(1.0)
         dst.write_bytes(b"late")  # an abandoned call finishing after the engine moved on
@@ -166,13 +177,14 @@ def job_with(tmp_path, order, cap=None):
     return Job(folder)
 
 
-def image(job, name="a.png", prompt="p", **kw):
-    return router.generate(job, "image", "image", prompt, job.work / name, **kw)
+def image(job, name="a.png", prompt="p", width=64, height=64, pin=None, **kw):
+    asked = ImageRequest(prompt=prompt, dst=job.work / name, width=width, height=height, pin=pin)
+    return router.generate(job, asked, **kw)
 
 
 def test_a_call_writes_a_trace_row(tmp_path):
     job = job_with(tmp_path, ["flaky"])
-    router.generate(job, "llm", "llm", "say hello")
+    router.generate(job, TextRequest(prompt="say hello"))
     rows = trace.load(job)
     assert len(rows) == 1
     assert rows[0]["capability"] == "llm"
@@ -184,7 +196,7 @@ def test_a_call_writes_a_trace_row(tmp_path):
 def test_a_refused_call_writes_refused(tmp_path):
     job = job_with(tmp_path, ["refusing"])
     with pytest.raises(router.ProviderError, match="request declined"):
-        router.generate(job, "llm", "llm", "say hello")
+        router.generate(job, TextRequest(prompt="say hello"))
     assert trace.load(job)[0]["outcome"] == "refused"
 
 
@@ -195,7 +207,7 @@ def test_a_trace_write_that_raises_does_not_fail_the_call(tmp_path, monkeypatch)
         raise OSError("trace storage unavailable")
 
     monkeypatch.setattr(trace, "record", fail)
-    provider, result = router.generate(job, "llm", "llm", "say hello")
+    provider, result = router.generate(job, TextRequest(prompt="say hello"))
     assert provider.name == "flaky"
     assert result.text == "ok"
 
@@ -284,7 +296,7 @@ def test_a_clip_with_no_picture_in_it_is_refused(tmp_path, flat):
     job = job_with(tmp_path, ["flaky"])
     Flaky.clip = f"color=c={flat}:s=64x64:d=1:r=8"
     with pytest.raises(router.ProviderError, match="no picture"):
-        router.generate(job, "video", "video", "p", job.work / "c.mp4")
+        router.generate(job, clip(job))
     assert not (job.work / "c.mp4").exists()
 
 
@@ -298,7 +310,7 @@ def test_a_clip_with_no_picture_in_it_is_refused(tmp_path, flat):
 def test_a_dark_clip_or_a_fade_from_black_is_still_a_picture(tmp_path, dark):
     job = job_with(tmp_path, ["flaky"])
     Flaky.clip = dark
-    assert router.generate(job, "video", "video", "p", job.work / "c.mp4")[0].name == "flaky"
+    assert router.generate(job, clip(job))[0].name == "flaky"
 
 
 def test_a_bad_file_fails_over_to_the_next_provider(tmp_path):
@@ -312,7 +324,8 @@ def test_a_bad_file_fails_over_to_the_next_provider(tmp_path):
 def test_a_larger_image_of_the_right_shape_is_accepted(tmp_path):
     job = job_with(tmp_path, ["flaky"])
     assert image(job, width=32, height=32)[0].name == "flaky"
-    assert router._check_output("image", job.work / "a.png", {"width": 16, "height": 16}) is None
+    smaller = ImageRequest(prompt="p", dst=job.work / "a.png", width=16, height=16)
+    assert router._check_output(smaller, job.work / "a.png") is None
 
 
 def test_a_capped_job_refuses_an_unpriced_provider_before_calling_it(tmp_path, monkeypatch):
@@ -339,8 +352,8 @@ def test_the_cap_stops_a_call_before_it_is_made(tmp_path):
 
 def test_llm_calls_are_charged_and_not_saved(tmp_path):
     job = job_with(tmp_path, ["flaky"])
-    router.generate(job, "llm", "llm", "same prompt")
-    router.generate(job, "llm", "llm", "same prompt")
+    router.generate(job, TextRequest(prompt="same prompt"))
+    router.generate(job, TextRequest(prompt="same prompt"))
     assert Flaky.calls == 2
     assert job.spent() == 2.0
 
@@ -391,8 +404,16 @@ def yaml_preference(path):
     return yaml.safe_load(path.read_text())["preference"]
 
 
-def transcribe(job, **kw):
-    return router.generate(job, "transcribe", "transcribe", job.work / "a.wav", **kw)
+def transcribe(job, seconds=0.0, **kw):
+    src = job.work / "a.wav"
+    if seconds:
+        src.parent.mkdir(parents=True, exist_ok=True)
+        media.run(["-f", "lavfi", "-i", f"sine=d={seconds}:r=16000", str(src)])
+    return router.generate(job, TranscribeRequest(src=src), **kw)
+
+
+def clip(job):
+    return VideoRequest(prompt="p", dst=job.work / "c.mp4", duration=1.0, aspect="1:1")
 
 
 def test_a_capped_job_refuses_a_priced_call_that_estimates_to_zero(tmp_path):
@@ -403,9 +424,9 @@ def test_a_capped_job_refuses_a_priced_call_that_estimates_to_zero(tmp_path):
     assert job.spent() == 0
 
 
-def test_a_capped_job_makes_the_same_call_once_it_says_how_long_it_is(tmp_path):
+def test_a_capped_job_makes_the_same_call_once_its_file_has_a_length(tmp_path):
     job = job_with(tmp_path, ["priced"], cap=5.0)
-    assert transcribe(job, est={"duration": 120.0})[0].name == "priced"
+    assert transcribe(job, seconds=2.0)[0].name == "priced"
     assert job.spent() == 1.0
 
 
@@ -428,3 +449,51 @@ def test_a_bare_timeout_from_an_adapter_is_charged_and_the_next_provider_is_used
     assert p.name == "backup"
     assert Impatient.calls == 1
     assert job.spent() == 2.0  # the timed-out call may have been billed
+
+
+class Seeing(Flaky):
+    """Writes down the model the router handed it."""
+
+    name = "seeing"
+    calls = 0
+    fails = None
+    models: list = []
+
+    def image(self, req, ctx):
+        Seeing.models.append(ctx.model)
+        result = Flaky.image(self, req, ctx)
+        result.seed = 5
+        result.meta = {"seed": 999, "start_frame_sent": "the adapter's word", "own": "kept"}
+        return result
+
+
+def test_a_malformed_request_stops_the_walk_instead_of_spending_elsewhere(tmp_path):
+    job = job_with(tmp_path, ["flaky", "backup"], cap=10.0)
+    Flaky.fails = InvalidRequestError("v answered 422: elements need a second angle")
+    with pytest.raises(router.ProviderError, match="malformed.*second angle"):
+        image(job)
+    assert Backup.calls == 0
+    assert job.committed() == 0 and job.spent() == 0
+
+
+def test_a_pinned_model_goes_only_to_the_provider_the_pin_names(tmp_path, monkeypatch):
+    monkeypatch.setitem(base._REGISTRY, "seeing", Seeing)
+    Seeing.models = []
+    job = job_with(tmp_path, ["flaky", "seeing"])
+    Flaky.fails = ConnectionError("down")
+    image(job, pin=Pin(provider="flaky", model="flaky-model-id"))
+    assert Seeing.models == [None]  # the fallback uses its own default, not another vendor's id
+    Seeing.models = []
+    image(job, name="b.png", pin=Pin(provider="seeing", model="its-own"))
+    assert Seeing.models == ["its-own"]
+
+
+def test_an_adapter_cannot_write_the_names_the_engine_records(tmp_path, monkeypatch):
+    monkeypatch.setitem(base._REGISTRY, "seeing", Seeing)
+    job = job_with(tmp_path, ["seeing"])
+    _, res = image(job)
+    assert (
+        res.meta["seed"] == 5 and "start_frame_sent" not in res.meta and res.meta["own"] == "kept"
+    )
+    record = json.loads((job.folder / router.GENERATIONS).read_text())
+    assert record["meta"]["seed"] == 5

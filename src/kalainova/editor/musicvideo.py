@@ -16,6 +16,7 @@ from typing import Any
 from .. import config, consistency, media, shots, streams, takes
 from ..jobfs import ContractError, Job, open_child
 from ..providers import router
+from ..providers.contract import Billable, Pin
 from . import musiccuts as mc
 
 Say = Callable[[str], None]
@@ -149,16 +150,15 @@ def estimate(
     moving = [(s, r) for s, k, r in zip(spans, kinds, held, strict=True) if k == "video"]
     seconds = sum(s["end"] - s["start"] for s in spans)
     total, unpriced, needs = 0.0, False, set()
+    pin = Pin(provider=only[0], model=model) if model and only else None  # the stream's own pin
     for span, with_refs in moving:  # B-roll goes to the plain model, at its own price
-        quote = router.price(
-            job,
-            "video",
+        asked = Billable(
+            capability="video",
             duration=span["end"] - span["start"] + pad,
             image=True,
             references=with_refs,
-            only=only,
-            model=model if with_refs else None,
         )
+        quote = router.price(job, asked, only=only, pin=pin if with_refs else None)
         if quote is None or quote[1] is None:
             unpriced = True
         else:
@@ -166,7 +166,7 @@ def estimate(
             needs |= {f"{quote[0]} needs {key}" for key in quote[2]}
     stills = 0.0
     for _ in spans if image_only else []:  # every shot starts from a rented still
-        still = router.price(job, "image", only=image_only)
+        still = router.price(job, Billable(capability="image"), only=image_only)
         if still is None or still[1] is None:
             unpriced = True
         else:

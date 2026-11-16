@@ -1,7 +1,11 @@
 """fal.ai: an aggregator for image, video, song, and lip sync models, through its queue API.
 
-Model ids and unit prices live in config/studio.yaml. A failure after the model has finished is
-billed, because the vendor has already charged for it.
+Two parts (ADR 0023). `FalQueue` is the transport: it submits to fal's queue with the router's
+labels as X-Fal-Tags, polls, cancels what nobody waits for, uploads inputs, and fills the call's
+receipt from fal's request id and X-Fal-Billable-Units at this account's unit price. `Fal` maps the
+engine's requests to each model's fields, which config/studio.yaml's model tables name, and maps
+fal's replies back. Model ids and unit prices live in config/studio.yaml. A failure after the model
+has finished is billed, because the vendor has already charged for it.
 """
 
 from __future__ import annotations
@@ -19,9 +23,27 @@ import requests
 from .. import media
 from ..config import audio_spec, model_for, price_for, reference_spec, video_spec
 from . import rehearsal
-from .base import BilledError, Provider, Result, register
+from .base import Provider, register
+from .contract import (
+    Billable,
+    BilledError,
+    Context,
+    ImageRequest,
+    LipsyncRequest,
+    MotionRequest,
+    MusicRequest,
+    Reference,
+    Result,
+    Sent,
+    SeparateRequest,
+    SongRequest,
+    TranscribeRequest,
+    VideoRequest,
+    Word,
+)
+from .transport import TIMEOUT, Reply, Transport, raise_for, request_id
 
-TIMEOUT = 120
+QUEUE = "https://queue.fal.run/"
 SCHEMA = "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id="  # public, no key
 PRICING = (
     "https://api.fal.ai/v1/models/pricing"  # this account's unit prices, read with the same key
@@ -29,17 +51,8 @@ PRICING = (
 INLINE_MOST_BYTES = 64 * 1024  # fal advises against data URIs past a few KB; larger files upload
 FAL_UPLOAD = "https://rest.alpha.fal.ai/storage/upload/initiate"  # VERIFY against fal's docs
 ASPECTS = ("9:16", "4:5", "1:1", "16:9", "3:4", "4:3")
+AUDIO_AT = ("audio.url", "audio_file.url")  # where a music model puts its file; models differ
 Fields = dict[str, Any]
-Ref = dict[str, Any]
-
-
-def _download(url: str, dst: Path) -> Path:
-    with requests.get(url, stream=True, timeout=TIMEOUT) as r:
-        r.raise_for_status()
-        with open(dst, "wb") as fh:
-            for chunk in r.iter_content(1 << 16):
-                fh.write(chunk)
-    return dst
 
 
 def aspect_for(width: int, height: int) -> str:
@@ -54,31 +67,15 @@ def _billed_length(spec: Fields, duration: float) -> tuple[int, int | str]:
     return billed, billed if spec.get("duration_type") == "int" else str(billed)
 
 
-def _seed_of(data: Fields, seed: int | None) -> Fields:
-    used = data.get("seed", seed)
-    return {"seed": used} if used is not None else {}
+def _seed(reply: Reply, given: int | None) -> int | None:
+    used = reply.get("seed", given)
+    return int(used) if isinstance(used, int | float) else None
 
 
-def _audio_url(data: Fields) -> str:
-    """Where a music model put its file. The field's name differs between models."""
-    found = data.get("audio") or data.get("audio_file") or {}
-    return str(found.get("url") or "")  # no URL fails at the fetch, where it is billed
-
-
-def _raise_for_status(resp: Any) -> None:
-    """raise_for_status, keeping what fal said: a 422 names the field it refused, and the
-    status line alone does not."""
-    try:
-        resp.raise_for_status()
-    except requests.HTTPError as exc:
-        said = str(getattr(resp, "text", "") or "")[:400]
-        raise requests.HTTPError(f"{exc}: {said}" if said else str(exc), response=resp) from exc
-
-
-def _tags(tags: dict[str, str]) -> str:
+def _tags(tags: dict[str, str] | Any) -> str:
     """The labels as fal's X-Fal-Tags header: key=value pairs, at most 10, no commas."""
     clean = []
-    for key, value in list(tags.items())[:10]:
+    for key, value in list(dict(tags).items())[:10]:
         k = "".join(c for c in key if c.isalnum() or c in "._-")[:64]
         v = "".join(c for c in str(value) if c.isprintable() and c.isascii() and c != ",")[:256]
         if k and v:
@@ -141,6 +138,83 @@ def schema_problems(model: str, payload: Fields) -> list[str]:
     return found + ([f"{model} requires {sorted(need - sent)}"] if need - sent else [])
 
 
+class FalQueue(Transport):
+    """fal's queue: submit, poll until done, fetch the reply. A wait that runs out cancels."""
+
+    platform = "fal"
+
+    @staticmethod
+    def _key() -> str:
+        return os.environ["FAL_KEY"]
+
+    def _send(
+        self, endpoint: str, payload: Fields, ctx: Context, *, wait: float, params: dict[str, str]
+    ) -> Reply:
+        h = {"Authorization": f"Key {self._key()}", "content-type": "application/json"}
+        tagged = {**h, **({"X-Fal-Tags": _tags(ctx.labels)} if ctx.labels else {})}
+        r = requests.post(QUEUE + endpoint, headers=tagged, json=payload, timeout=TIMEOUT)
+        raise_for(r, self.platform)
+        sub = r.json()
+        ctx.receipt.request_id = sub.get("request_id")  # what fal's bill and dashboard list
+        status_url, response_url = sub["status_url"], sub["response_url"]
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            resp = requests.get(status_url, headers=h, timeout=TIMEOUT)
+            raise_for(resp, self.platform)  # a 401/404 must fail now, not after the timeout
+            if resp.json().get("status") == "COMPLETED":
+                out = requests.get(response_url, headers=h, timeout=TIMEOUT)
+                raise_for(out, self.platform)  # a failed job surfaces as an error on this fetch
+                self._note_charge(endpoint, getattr(out, "headers", None) or {}, ctx)
+                return Reply(data=out.json())
+            time.sleep(3)
+        cancel = sub.get("cancel_url")
+        if cancel:  # stop paying for a request nobody is waiting on
+            requests.put(cancel, headers=h, timeout=TIMEOUT)
+        raise TimeoutError(f"fal {endpoint} timed out")
+
+    @staticmethod
+    def _note_charge(model: str, headers: Any, ctx: Context) -> None:
+        """What fal says it billed: the units in X-Fal-Billable-Units, priced at this account's
+        unit price from fal's pricing API. Either missing leaves the price table's figure."""
+        found = request_id(headers)
+        if found and not ctx.receipt.request_id:
+            ctx.receipt.request_id = found
+        units = headers.get("x-fal-billable-units") or headers.get("X-Fal-Billable-Units")
+        if units in (None, ""):
+            return
+        ctx.receipt.billed_units = float(units)
+        price = unit_price(model)
+        if price is not None:
+            ctx.receipt.vendor_cost = round(
+                (ctx.receipt.vendor_cost or 0.0) + ctx.receipt.billed_units * price, 6
+            )
+
+    def _upload(self, path: Path) -> str:
+        """A URL for an input file. Small files travel inline; the rest go through fal's storage."""
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if path.stat().st_size <= INLINE_MOST_BYTES:
+            return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
+        init = requests.post(
+            FAL_UPLOAD,
+            headers={"Authorization": f"Key {self._key()}"},
+            json={"content_type": mime, "file_name": path.name},
+            timeout=TIMEOUT,
+        )
+        raise_for(init, self.platform)
+        spot = init.json()
+        put = requests.put(
+            spot["upload_url"], headers={"Content-Type": mime}, data=path.read_bytes(), timeout=600
+        )
+        raise_for(put, self.platform)
+        return str(spot["file_url"])
+
+    def problems(self, model: str, payload: Fields) -> list[str]:
+        return schema_problems(model, payload)
+
+    def list_price(self, model: str) -> dict[str, Any] | None:
+        return list_price(model)
+
+
 @register
 class Fal(Provider):
     """Aggregator for image and video models via the fal queue API."""
@@ -157,43 +231,39 @@ class Fal(Provider):
         "separate",
     )
     env_key = "FAL_KEY"
-    rehearses = True  # _run, _upload and _fetch are its only ways out
-    list_price = staticmethod(list_price)  # what prices.correction reads, once a day
+    rehearses = True  # everything goes out through its transport
+    transport: Transport = FalQueue()
 
-    def price_key(self, capability: str, request: Fields) -> str:
-        if capability == "video" and request.get("references"):
+    def price_key(self, billable: Billable) -> str:
+        if billable.capability == "video" and billable.references:
             return "reference_to_video"
-        return "image_to_video" if capability == "video" and request.get("image") else capability
+        return (
+            "image_to_video"
+            if billable.capability == "video" and billable.image
+            else billable.capability
+        )
 
-    def estimate(self, capability: str, **request: Any) -> float | None:
+    def estimate(self, billable: Billable, model: str | None = None) -> float | None:
         """A clip is billed at the length the model allows, which is never shorter than the ask."""
-        if capability == "video" and request.get("duration"):
-            key = self.price_key(capability, request)
-            name = request.get("model") or model_for("fal", key)
+        if billable.capability == "video" and billable.duration:
+            name = model or model_for("fal", self.price_key(billable))
             spec = (
-                reference_spec("fal", "video", name) if request.get("references") else {}
+                reference_spec("fal", "video", name) if billable.references else {}
             ) or video_spec("fal", name)
             if spec:
-                request = {
-                    **request,
-                    "duration": float(_billed_length(spec, request["duration"])[0]),
-                }
-        if capability in ("song", "separate") and not request.get("model"):
-            request = {**request, "model": model_for("fal", capability)}
-        return super().estimate(capability, **request)
-
-    def takes_end_image(self, capability: str, model: str | None = None) -> bool:
-        if capability != "video":
-            return False
-        name = model or model_for("fal", "image_to_video")
-        plain, with_refs = video_spec("fal", name), reference_spec("fal", "video", name)
-        return bool(plain.get("end_image_param") or with_refs.get("end_image_param"))
-
-    def reference_support(self, capability: str, model: str) -> Fields:
-        return reference_spec("fal", capability, model)
+                billed = float(_billed_length(spec, billable.duration)[0])
+                billable = Billable(
+                    capability="video",
+                    duration=billed,
+                    image=billable.image,
+                    references=billable.references,
+                )
+        if billable.capability in ("song", "separate") and not model:
+            model = model_for("fal", billable.capability)
+        return super().estimate(billable, model)
 
     def _with_references(
-        self, capability: str, model: str, prompt: str, refs: list[Ref]
+        self, capability: str, model: str, prompt: str, refs: tuple[Reference, ...]
     ) -> tuple[str, Fields, Fields]:
         """Prompt naming each reference, payload fields, the model's spec. Refuses unknown ones."""
         spec = reference_spec("fal", capability, model)
@@ -201,289 +271,212 @@ class Fal(Provider):
             raise ValueError(f"{model} is not listed under reference_models for {capability}")
         if spec.get("elements"):
             return self._as_elements(spec, prompt, refs)
-        guide = [
-            f"{spec['tag'].format(n=i)} is {ref['label']}" for i, ref in enumerate(refs, start=1)
-        ]
-        urls = [self._upload(ref["path"]) for ref in refs]
+        guide = [f"{spec['tag'].format(n=i)} is {ref.label}" for i, ref in enumerate(refs, start=1)]
+        urls = [self.transport.upload(ref.path) for ref in refs]
         return f"{prompt}. References: {'; '.join(guide)}.", {spec["images_param"]: urls}, spec
 
     def _as_elements(
-        self, spec: Fields, prompt: str, refs: list[Ref]
+        self, spec: Fields, prompt: str, refs: tuple[Reference, ...]
     ) -> tuple[str, Fields, Fields]:
         """Kling-style: each character is one element, with a front image and other angles.
 
         An element needs its front and one to three more angles (fal refuses an empty list with a
         422), so a character with a single picture goes in as a plain reference image instead.
         """
-        groups: dict[str, list[Ref]] = {}
-        images: list[tuple[str, Ref]] = []
+        groups: dict[str, list[Reference]] = {}
+        images: list[tuple[str, Reference]] = []
         for ref in refs:
-            if ref.get("group"):
-                groups.setdefault(ref["group"], []).append(ref)
+            if ref.group:
+                groups.setdefault(ref.group, []).append(ref)
             else:
-                images.append((ref["label"], ref))
+                images.append((ref.label, ref))
         images = [(name, g[0]) for name, g in groups.items() if len(g) == 1] + images
         groups = {name: g for name, g in groups.items() if len(g) > 1}
+        up = self.transport.upload
         elements = [
             {
-                "frontal_image_url": self._upload(group[0]["path"]),
-                "reference_image_urls": [self._upload(r["path"]) for r in group[1:]],
+                "frontal_image_url": up(group[0].path),
+                "reference_image_urls": [up(r.path) for r in group[1:]],
             }
             for group in groups.values()
         ]
         guide = [f"@Element{i} is {name}" for i, name in enumerate(groups, start=1)]
         guide += [f"@Image{i} is {label}" for i, (label, _) in enumerate(images, start=1)]
-        payload: Fields = {"image_urls": [self._upload(r["path"]) for _, r in images]}
+        payload: Fields = {"image_urls": [up(r.path) for _, r in images]}
         if elements:
             payload["elements"] = elements
         return f"{prompt}. References: {'; '.join(guide)}.", payload, spec
 
-    def _run(self, model: str, payload: Fields, timeout: float = 900) -> Fields:
-        dry = rehearsal.active()
-        if dry is not None:
-            return dry.request(model, payload)
-        h = {"Authorization": f"Key {os.environ[self.env_key]}", "content-type": "application/json"}
-        tagged = {**h, **({"X-Fal-Tags": _tags(self.tags)} if self.tags else {})}
-        r = requests.post(
-            f"https://queue.fal.run/{model}", headers=tagged, json=payload, timeout=TIMEOUT
-        )
-        _raise_for_status(r)
-        sub = r.json()
-        self.request_id = sub.get("request_id")  # what fal's bill and dashboard list
-        status_url, response_url = sub["status_url"], sub["response_url"]
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            resp = requests.get(status_url, headers=h, timeout=TIMEOUT)
-            _raise_for_status(resp)  # a 401/404 must fail now, not after the timeout
-            if resp.json().get("status") == "COMPLETED":
-                out = requests.get(response_url, headers=h, timeout=TIMEOUT)
-                _raise_for_status(out)  # a failed job surfaces as an error on this fetch
-                self._note_charge(model, getattr(out, "headers", None) or {})
-                result: Fields = out.json()
-                return result
-            time.sleep(3)
-        cancel = sub.get("cancel_url")
-        if cancel:  # stop paying for a request nobody is waiting on
-            requests.put(cancel, headers=h, timeout=TIMEOUT)
-        raise TimeoutError(f"fal {model} timed out")
+    def _send(self, model: str, payload: Fields, ctx: Context, wait: float = 900) -> Reply:
+        return self.transport.send(model, payload, ctx, model=model, wait=wait)
 
-    def _note_charge(self, model: str, headers: Any) -> None:
-        """What fal says it billed: the units in X-Fal-Billable-Units, priced at this account's
-        unit price from fal's pricing API. Either missing leaves the price table's figure."""
-        units = headers.get("x-fal-billable-units") or headers.get("X-Fal-Billable-Units")
-        if units in (None, ""):
-            return
-        self.billed_units = float(units)
-        price = unit_price(model)
-        if price is not None:
-            self.charged = round((self.charged or 0.0) + self.billed_units * price, 6)
-
-    def _upload(self, path: Path) -> str:
-        """A URL for an input file. Small files travel inline; the rest go through fal's storage."""
-        dry = rehearsal.active()
-        if dry is not None:
-            return dry.upload(path)
-        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        if path.stat().st_size <= INLINE_MOST_BYTES:
-            return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
-        init = requests.post(
-            FAL_UPLOAD,
-            headers={"Authorization": f"Key {os.environ[self.env_key]}"},
-            json={"content_type": mime, "file_name": path.name},
-            timeout=TIMEOUT,
-        )
-        init.raise_for_status()
-        spot = init.json()
-        put = requests.put(
-            spot["upload_url"], headers={"Content-Type": mime}, data=path.read_bytes(), timeout=600
-        )
-        put.raise_for_status()
-        return str(spot["file_url"])
-
-    @staticmethod
-    def _fetch(url: str, dst: Path, billed: float) -> None:
-        """Bring a finished file down. The vendor has charged already, so a failure is billed."""
-        dry = rehearsal.active()
-        if dry is not None and url.startswith(rehearsal.SCHEME):
-            dry.stand_in(url, dst)
-            return
-        try:
-            _download(url, dst)
-        except OSError as exc:
-            raise BilledError(billed, f"fal finished but the file did not arrive: {exc}") from exc
-
-    def _fetch_audio(self, url: str, dst: Path, billed: float) -> None:
+    def _fetch_audio(self, reply: Reply, dst: Path, billed: float) -> None:
         """Bring a finished track down as a 48 kHz stereo file."""
         raw = dst.with_suffix(".src")
-        self._fetch(url, raw, billed)
+        self.transport.fetch(reply, raw, at=AUDIO_AT, billed=billed)
         media.run(["-i", str(raw), "-ar", "48000", "-ac", "2", str(dst)])
         raw.unlink(missing_ok=True)
 
-    def image(self, prompt: str, dst: Path, *, width: int, height: int, **kw: Any) -> Result:
-        model = kw.get("model") or model_for("fal", "image")
-        payload: Fields = {"prompt": prompt, "num_images": 1, "output_format": "png"}
-        if kw.get("size_mode") == "pixels":
-            payload["image_size"] = {"width": width, "height": height}
-        else:  # Nano Banana-family models take an aspect ratio, not pixel sizes
-            payload["aspect_ratio"] = aspect_for(width, height)
-            if model_for("fal", "image_resolution"):
-                payload["resolution"] = model_for("fal", "image_resolution")
-        refs = kw.get("references")
-        if refs:
-            payload["prompt"], fields, spec = self._with_references("image", model, prompt, refs)
+    def image(self, req: ImageRequest, ctx: Context) -> Result:
+        model = ctx.model or model_for("fal", "image")
+        payload: Fields = {
+            "prompt": req.prompt,
+            "num_images": 1,
+            "output_format": "png",
+            "aspect_ratio": aspect_for(req.width, req.height),  # Nano Banana-family models
+        }
+        if model_for("fal", "image_resolution"):
+            payload["resolution"] = model_for("fal", "image_resolution")
+        if req.references:
+            payload["prompt"], fields, spec = self._with_references(
+                "image", model, req.prompt, req.references
+            )
             payload.update(fields, **spec.get("extra", {}))
-        if kw.get("seed") is not None:
-            payload["seed"] = kw["seed"]
-        data = self._run(model, payload)
-        cost = price_for("fal", "image").get("per_image", 0)
-        self._fetch(data["images"][0]["url"], dst, cost)
-        return Result(path=dst, cost=cost, model=model, meta=_seed_of(data, kw.get("seed")))
+        if req.seed is not None:
+            payload["seed"] = req.seed
+        reply = self._send(model, payload, ctx)
+        cost = float(price_for("fal", "image").get("per_image", 0))
+        self.transport.fetch(reply, req.dst, at=("images.0.url",), billed=cost)
+        return Result(path=req.dst, cost=cost, model=model, seed=_seed(reply, req.seed))
 
-    def video(
-        self,
-        prompt: str,
-        dst: Path,
-        *,
-        duration: float,
-        aspect: str,
-        image: Path | None = None,
-        **kw: Any,
-    ) -> Result:
-        refs = kw.get("references")
-        seed = kw.get("seed")
-        key = "reference_to_video" if refs else "image_to_video" if image else "video"
-        model = kw.get("model") or model_for("fal", key)
+    def video(self, req: VideoRequest, ctx: Context) -> Result:
+        refs = req.references
+        key = "reference_to_video" if refs else "image_to_video" if req.start else "video"
+        model = ctx.model or model_for("fal", key)
         fields: Fields = {}
-        text = prompt
+        text = req.prompt
         if refs:  # a clip conditioned on the locked references, with the model's own audio left off
-            text, fields, spec = self._with_references("video", model, prompt, refs)
+            text, fields, spec = self._with_references("video", model, req.prompt, refs)
         else:
             spec = video_spec("fal", model)
-        billed, length = _billed_length(spec, duration)
-        payload = {"prompt": text, "duration": length, **fields}
+        billed, length = _billed_length(spec, req.duration)
+        payload: Fields = {"prompt": text, "duration": length, **fields}
         aspect_field = spec.get("aspect_param", "aspect_ratio")
         if aspect_field:  # a model whose schema lists none is sent none
-            payload[aspect_field] = aspect
+            payload[aspect_field] = req.aspect
         payload.update(spec.get("extra", {}))
         # The locked still is the first frame wherever the model has a field for one: every plain
         # clip, and a reference clip whose model takes the first frame apart from its references.
         start_field = (
             spec.get("start_image_param") if refs else spec.get("image_param", "image_url")
         )
-        start_sent = False
-        if image and start_field:
-            payload[start_field] = self._upload(image)
-            start_sent = True
-        end = kw.get("end_image")
-        end_used = bool(end and spec.get("end_image_param"))
-        if end is not None and end_used:
-            payload[spec["end_image_param"]] = self._upload(end)
-        seeded = seed is not None and spec.get("takes_seed", True)
+        start_sent = bool(req.start and start_field)
+        if req.start and start_field:
+            payload[start_field] = self.transport.upload(req.start)
+        end_used = bool(req.end and spec.get("end_image_param"))
+        if req.end is not None and end_used:
+            payload[spec["end_image_param"]] = self.transport.upload(req.end)
+        seeded = req.seed is not None and spec.get("takes_seed", True)
         if seeded:
-            payload["seed"] = seed
-        data = self._run(model, payload, timeout=1800)
-        cost = billed * price_for("fal", key, model).get("per_sec", 0)
-        self._fetch(data["video"]["url"], dst, cost)
-        meta = {
-            "billed_sec": billed,
-            "start_frame_sent": start_sent,
-            "end_frame_sent": end_used,
+            payload["seed"] = req.seed
+        reply = self._send(model, payload, ctx, wait=1800)
+        cost = billed * float(price_for("fal", key, model).get("per_sec", 0))
+        self.transport.fetch(reply, req.dst, at=("video.url",), billed=cost)
+        return Result(
+            path=req.dst,
+            cost=cost,
+            model=model,
             # a model whose schema has no seed was sent none, so the take cannot be remade by it
-            **(_seed_of(data, seed) if seeded else {"seed_sent": False}),
-        }
-        return Result(path=dst, cost=cost, model=model, meta=meta)
+            seed=_seed(reply, req.seed) if seeded else None,
+            sent=Sent(start_frame=start_sent, end_frame=end_used, seeded=bool(seeded)),
+            billed_seconds=float(billed),
+        )
 
-    def lipsync(self, video: Path, audio: Path, dst: Path, **kw: Any) -> Result:
+    def lipsync(self, req: LipsyncRequest, ctx: Context) -> Result:
         """The clip with its mouth matched to the line. The shorter of the two sets the length."""
-        model = kw.get("model") or model_for("fal", "lipsync")
+        model = ctx.model or model_for("fal", "lipsync")
         payload = {
-            "video_url": self._upload(video),
-            "audio_url": self._upload(audio),
+            "video_url": self.transport.upload(req.video),
+            "audio_url": self.transport.upload(req.audio),
             "sync_mode": "cut_off",
         }
-        data = self._run(model, payload, timeout=1800)
-        cost = media.duration(video) / 60 * price_for("fal", "lipsync").get("per_min", 0)
-        self._fetch(data["video"]["url"], dst, cost)
-        return Result(path=dst, cost=cost, model=model)
+        reply = self._send(model, payload, ctx, wait=1800)
+        cost = media.duration(req.video) / 60 * float(price_for("fal", "lipsync").get("per_min", 0))
+        self.transport.fetch(reply, req.dst, at=("video.url",), billed=cost)
+        return Result(path=req.dst, cost=cost, model=model)
 
-    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+    def motion(self, req: MotionRequest, ctx: Context) -> Result:
         """Animate the character image using the driving video."""
-        model = kw.get("model") or model_for("fal", "motion")
+        model = ctx.model or model_for("fal", "motion")
         payload = {
-            "image_url": self._upload(character_image),
-            "video_url": self._upload(driving_video),
+            "image_url": self.transport.upload(req.character),
+            "video_url": self.transport.upload(req.driving),
         }
-        data = self._run(model, payload, timeout=1800)
-        cost = price_for("fal", "motion", model).get("cost_usd", 0.02)
-        self._fetch(data["video"]["url"], dst, cost)
-        return Result(path=dst, cost=cost, model=model)
+        reply = self._send(model, payload, ctx, wait=1800)
+        cost = float(price_for("fal", "motion", model).get("cost_usd", 0.02))
+        self.transport.fetch(reply, req.dst, at=("video.url",), billed=cost)
+        return Result(path=req.dst, cost=cost, model=model)
 
-    def song(
-        self, lyrics: str, dst: Path, *, style: str = "", duration: float | None = None, **kw: Any
-    ) -> Result:
-        model = kw.get("model") or model_for("fal", "song")
+    def song(self, req: SongRequest, ctx: Context) -> Result:
+        if req.repaint is not None:
+            raise ValueError("fal's song models cannot repaint a span of a take")
+        model = ctx.model or model_for("fal", "song")
         spec = audio_spec("fal", model)
-        payload: Fields = {spec.get("style_field", "prompt"): style, "lyrics": lyrics}
-        if kw.get("instrumental") and spec.get("instrumental_lyrics"):
+        payload: Fields = {spec.get("style_field", "prompt"): req.style, "lyrics": req.lyrics}
+        if req.instrumental and spec.get("instrumental_lyrics"):
             payload["lyrics"] = spec["instrumental_lyrics"]
-        if duration:
-            payload["duration"] = int(duration)
-        data = self._run(model, payload, timeout=900)
+        if req.duration:
+            payload["duration"] = int(req.duration)
+        reply = self._send(model, payload, ctx)
         row = price_for("fal", "song", model)
-        cost = row.get("per_track", 0) + (duration or 0) * row.get("per_sec", 0)
-        self._fetch_audio(_audio_url(data), dst, cost)
-        return Result(path=dst, cost=cost, model=model, meta=_seed_of(data, kw.get("seed")))
+        cost = float(row.get("per_track", 0)) + (req.duration or 0) * float(row.get("per_sec", 0))
+        self._fetch_audio(reply, req.dst, cost)
+        return Result(path=req.dst, cost=cost, model=model, seed=_seed(reply, req.seed))
 
-    def separate(self, src: Path, vocals: Path, rest: Path, **kw: Any) -> Result:
+    def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Vocals, and everything else mixed back together from the model's other stems."""
-        model = kw.get("model") or model_for("fal", "separate")
+        model = ctx.model or model_for("fal", "separate")
         payload: Fields = {
-            "audio_url": self._upload(src),
+            "audio_url": self.transport.upload(req.src),
             "model": "htdemucs",  # four stems; the six-stem model splits the rest further
             "output_format": "wav",
         }
-        data = self._run(model, payload, timeout=1800)
-        cost = media.duration(src) * price_for("fal", "separate", model).get("per_sec", 0)
-        names = [n for n in ("drums", "bass", "other") if (data.get(n) or {}).get("url")]
-        if not (data.get("vocals") or {}).get("url") or not names:
+        reply = self._send(model, payload, ctx, wait=1800)
+        cost = media.duration(req.src) * float(
+            price_for("fal", "separate", model).get("per_sec", 0)
+        )
+        stems = ("drums", "bass", "other")
+        names = list(stems) if reply.rehearsed else [n for n in stems if reply.get(f"{n}.url")]
+        if not (reply.rehearsed or reply.get("vocals.url")) or not names:
             raise BilledError(cost, "fal finished but returned no stems")
-        self._fetch(data["vocals"]["url"], vocals, cost)
+        self.transport.fetch(reply, req.vocals, at=("vocals.url",), billed=cost)
         parts = []
         for name in names:
-            part = rest.with_name(f"{rest.stem}.{name}.wav")
-            self._fetch(data[name]["url"], part, cost)
+            part = req.rest.with_name(f"{req.rest.stem}.{name}.wav")
+            self.transport.fetch(reply, part, at=(f"{name}.url",), billed=cost)
             parts.append(part)
         args = [arg for part in parts for arg in ("-i", str(part))]
         mix = f"amix=inputs={len(parts)}:normalize=0"
-        media.run([*args, "-filter_complex", mix, "-ar", "48000", "-ac", "2", str(rest)])
+        media.run([*args, "-filter_complex", mix, "-ar", "48000", "-ac", "2", str(req.rest)])
         for part in parts:
             part.unlink(missing_ok=True)
-        return Result(path=vocals, cost=cost, model=model)
+        return Result(path=req.vocals, cost=cost, model=model)
 
-    def music(self, prompt: str, dst: Path, *, duration: float, **kw: Any) -> Result:
-        model = kw.get("model") or model_for("fal", "music")
-        data = self._run(model, {"prompt": prompt})
-        cost = price_for("fal", "music").get("per_track", 0)
-        self._fetch_audio(_audio_url(data), dst, cost)
-        return Result(path=dst, cost=cost, model=model)
+    def music(self, req: MusicRequest, ctx: Context) -> Result:
+        model = ctx.model or model_for("fal", "music")
+        reply = self._send(model, {"prompt": req.prompt}, ctx)
+        cost = float(price_for("fal", "music").get("per_track", 0))
+        self._fetch_audio(reply, req.dst, cost)
+        return Result(path=req.dst, cost=cost, model=model)
 
-    def transcribe(self, src: Path, **kw: Any) -> Result:
-        model = kw.get("model") or model_for("fal", "transcribe")
-        data = self._run(model, {"audio_url": self._upload(src), "chunk_level": "word"})
-        words = [
+    def transcribe(self, req: TranscribeRequest, ctx: Context) -> Result:
+        model = ctx.model or model_for("fal", "transcribe")
+        payload = {"audio_url": self.transport.upload(req.src), "chunk_level": "word"}
+        reply = self._send(model, payload, ctx)
+        words: list[Word] = [
             {
                 "start_sec": c["timestamp"][0],
                 "end_sec": c["timestamp"][1],
                 "text": c["text"].strip(),
                 "confidence": 0.9,
             }
-            for c in data.get("chunks", [])
+            for c in reply.get("chunks", [])
             if c.get("timestamp")
         ]
-        minutes = media.duration(src) / 60
+        minutes = media.duration(req.src) / 60
         return Result(
             words=words,
-            text=data.get("text", ""),
+            text=str(reply.get("text", "")),
             model=model,
-            cost=price_for("fal", "transcribe").get("per_min", 0) * minutes,
+            cost=float(price_for("fal", "transcribe").get("per_min", 0)) * minutes,
         )

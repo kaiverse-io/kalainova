@@ -18,10 +18,10 @@ from typing import Any
 
 import requests
 
-from . import config, prompts
+from . import HTTP_HEADERS, config, prompts
 from .jobfs import ContractError, Job
 from .providers import base, router
-from .providers.search import HEADERS
+from .providers.contract import SearchRequest, TextRequest
 
 SNAPSHOTS = "research"
 FETCH_TIMEOUT = 30
@@ -63,7 +63,7 @@ def fetch_text(url: str) -> str:
     """What a page says, as text. Empty when it is not a page this can read."""
     if not re.match(r"https?://", url):
         return ""
-    with requests.get(url, headers=HEADERS, timeout=FETCH_TIMEOUT, stream=True) as reply:
+    with requests.get(url, headers=HTTP_HEADERS, timeout=FETCH_TIMEOUT, stream=True) as reply:
         reply.raise_for_status()
         kind = reply.headers.get("content-type", "text/html").lower()
         if not any(t in kind for t in TEXT_TYPES):
@@ -100,13 +100,12 @@ def _snapshot(job: Job, source_id: str, text: str) -> tuple[str, str]:
 
 def _hits_from(job: Job, name: str, query: str, limit: int) -> list[dict[str, Any]]:
     try:
-        _, res = router.generate(
-            job, "search", "search", query, only=[name], limit=limit, note=f"search: {query[:60]}"
-        )
+        ask = SearchRequest(query=query, limit=limit)
+        _, res = router.generate(job, ask, only=[name], note=f"search: {query[:60]}")
     except (router.ProviderError, OSError) as exc:
         print(f"{job.id}: {name} found nothing: {exc}")
         return []
-    return [{**hit, "found_by": name} for hit in res.meta.get("hits", [])]
+    return [{**hit, "found_by": name} for hit in res.hits]
 
 
 def _source_id(n: int) -> str:
@@ -227,7 +226,7 @@ def draft(job: Job) -> None:
         question=data["question"],
         sources=json.dumps(_context(job, data), ensure_ascii=False),
     )
-    _, res = router.generate(job, "llm", "llm", text, max_tokens=4000, note="research")
+    _, res = router.generate(job, TextRequest(prompt=text, max_tokens=4000), note="research")
     reply = extract_json(res.text)
     data["findings"] = list(reply.get("findings") or [])
     data["gaps"] = [str(g) for g in reply.get("gaps") or []]

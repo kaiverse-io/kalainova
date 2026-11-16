@@ -10,7 +10,8 @@ from __future__ import annotations
 import pytest
 
 from kalainova import config
-from kalainova.providers import base, remote
+from kalainova.providers import base, remote, transport
+from kalainova.providers.contract import Billable, Context, TextRequest
 
 base.names()
 ROUTES = [
@@ -25,7 +26,7 @@ def test_every_paid_provider_in_the_preference_order_can_price_a_call(capability
     provider = base.get(name)
     if capability not in provider.capabilities or provider.free:
         return
-    assert provider.estimate(capability) is not None, (
+    assert provider.estimate(Billable(capability=capability)) is not None, (
         f"{name} has no price for {capability} in config/studio.yaml, "
         "so a job with a cost cap refuses it"
     )
@@ -36,6 +37,9 @@ class _Answered:
 
     def raise_for_status(self) -> None:
         return None
+
+    headers = {"content-type": "application/json", "request-id": "req-1"}
+    content = b"{}"
 
     def json(self) -> dict:
         return {
@@ -56,12 +60,14 @@ def test_a_call_settles_at_the_price_of_the_model_that_answered(
 ):
     sent: dict = {}
 
-    def post(url, headers, json, timeout):
+    def post(url, headers, json, params, timeout):
         sent.update(json)
         return _Answered()
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(remote.requests, "post", post)
-    result = getattr(remote.Anthropic(), method)("check this")
+    monkeypatch.setattr(transport.requests, "post", post)
+    ctx = Context(attempt="a1")
+    result = getattr(remote.Anthropic(), method)(TextRequest(prompt="check this"), ctx)
     assert sent["model"] == model
     assert result.cost == pytest.approx(expected)
+    assert ctx.receipt.request_id == "req-1"  # what the vendor's bill lists

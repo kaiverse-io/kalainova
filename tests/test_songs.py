@@ -447,12 +447,12 @@ def test_hearing_the_lyrics_says_how_long_the_audio_is(tmp_path, studio, monkeyp
     seen = []
     real = router.generate
 
-    def spy(job, capability, *args, **kw):
-        if capability == "transcribe":
-            seen.append(kw.get("est"))
-        return real(job, capability, *args, **kw)
+    def spy(job, request, **kw):
+        if request.capability == "transcribe":
+            seen.append(request.billable())
+        return real(job, request, **kw)
 
     monkeypatch.setattr(router, "generate", spy)
     studio.heard = _heard()
     songs.run(_job(tmp_path))
-    assert seen and all(e and e["duration"] > 0 for e in seen)
+    assert seen and all(e.duration > 0 for e in seen)

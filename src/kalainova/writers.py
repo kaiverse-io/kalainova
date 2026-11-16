@@ -12,6 +12,7 @@ from typing import Any
 from . import consistency, prompts
 from .jobfs import ContractError, Job
 from .providers import router
+from .providers.contract import TextRequest
 
 WRITERS = {
     "song": ("song", "song_writer"),
@@ -68,9 +69,8 @@ def ensure(job: Job, kind: str) -> None:
             if last_error
             else ""
         )
-        _, res = router.generate(
-            job, "llm", "llm", text + _fixed(job) + retry, max_tokens=8000, note=f"write {kind}"
-        )
+        ask = TextRequest(prompt=text + _fixed(job) + retry, max_tokens=8000)
+        _, res = router.generate(job, ask, note=f"write {kind}")
         try:
             draft: dict[str, Any] = extract_json(res.text)
             draft["schema_version"] = "0.1"

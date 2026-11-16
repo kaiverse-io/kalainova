@@ -9,15 +9,17 @@ import pytest
 from fakes import make_job
 
 from kalainova.providers import prices
+from kalainova.providers.contract import Billable
 
 MODEL = "vendor/video-model"
+VIDEO = Billable(capability="video", duration=5.0, references=True)
 
 
 class Vendor:
     name = "vendor"
     listed = None
 
-    def price_key(self, capability, request):
+    def price_key(self, billable):
         return "reference_to_video"
 
     def list_price(self, model):
@@ -38,34 +40,34 @@ def table(monkeypatch):
 
 def test_the_table_stands_when_nothing_says_otherwise(tmp_path, table):
     job = make_job(tmp_path)
-    assert prices.correction(job, Vendor(), "video", {"model": MODEL}) == (1.0, "")
+    assert prices.correction(job, Vendor(), VIDEO, MODEL) == (1.0, "")
 
 
 def test_a_higher_list_price_raises_the_estimate(tmp_path, table):
     # 16 Nov 2026: the table said $0.112/s, the vendor listed $0.14 for this account
     Vendor.listed = {"unit_price": 0.14, "unit": "seconds"}
-    factor, why = prices.correction(make_job(tmp_path), Vendor(), "video", {"model": MODEL})
+    factor, why = prices.correction(make_job(tmp_path), Vendor(), VIDEO, MODEL)
     assert factor == pytest.approx(1.25) and "list price" in why
 
 
 def test_a_reviewed_row_or_another_unit_is_not_raised_by_the_list(tmp_path, table):
     job = make_job(tmp_path)
     Vendor.listed = {"unit_price": 0.045, "unit": "seconds"}  # a base rate below 1080p's
-    assert prices.correction(job, Vendor(), "video", {"model": MODEL})[0] == 1.0  # never lowers
+    assert prices.correction(job, Vendor(), VIDEO, MODEL)[0] == 1.0  # never lowers
     Vendor.listed = {"unit_price": 9.0, "unit": "1000 tokens"}
     (tmp_path / prices.LISTED).unlink()
-    assert prices.correction(job, Vendor(), "video", {"model": MODEL})[0] == 1.0
+    assert prices.correction(job, Vendor(), VIDEO, MODEL)[0] == 1.0
     table[MODEL]["checked"] = "1080p rate from the model page"
     Vendor.listed = {"unit_price": 0.5, "unit": "seconds"}
     (tmp_path / prices.LISTED).unlink()
-    assert prices.correction(job, Vendor(), "video", {"model": MODEL})[0] == 1.0
+    assert prices.correction(job, Vendor(), VIDEO, MODEL)[0] == 1.0
 
 
 def test_a_bill_above_the_table_raises_later_estimates_and_is_reported(tmp_path, table, capsys):
     job = make_job(tmp_path)
     prices.learn(job, "vendor", MODEL, {"table_cost": 0.56, "vendor_cost": 0.70, "billed_units": 5})
     assert "billed $0.7000" in capsys.readouterr().err
-    factor, why = prices.correction(job, Vendor(), "video", {"model": MODEL})
+    factor, why = prices.correction(job, Vendor(), VIDEO, MODEL)
     assert factor == pytest.approx(1.25) and "bill" in why
     row = json.loads((tmp_path / prices.LEARNED).read_text())
     assert row["ratio"] == pytest.approx(1.25) and row["billed_units"] == 5
@@ -98,7 +100,7 @@ def test_a_price_that_cannot_be_checked_refuses_the_paid_call(tmp_path, monkeypa
     class Paid:
         name, free = "paid", False
 
-        def estimate(self, capability, **est):
+        def estimate(self, billable, model=None):
             return 1.0
 
     def broken(*a, **kw):
@@ -106,4 +108,4 @@ def test_a_price_that_cannot_be_checked_refuses_the_paid_call(tmp_path, monkeypa
 
     monkeypatch.setattr(prices, "correction", broken)
     with pytest.raises(ContractError, match="could not be checked"):
-        router._corrected(make_job(tmp_path), Paid(), "video", {}, "m")
+        router._corrected(make_job(tmp_path), Paid(), VIDEO, "m")

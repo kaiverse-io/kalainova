@@ -9,10 +9,21 @@ import types
 from pathlib import Path
 
 import pytest
-from fakes import Reply, needs_ffmpeg
+from fakes import Reply, Wire, context, needs_ffmpeg
 
 from kalainova import media
-from kalainova.providers import base, fal, hyperframes, mac, remote, search, spaces
+from kalainova.providers import base, fal, hyperframes, mac, remote, search, spaces, transport
+from kalainova.providers.contract import (
+    GraphicsRequest,
+    LipsyncRequest,
+    MusicRequest,
+    SearchRequest,
+    SeparateRequest,
+    SongRequest,
+    UnauthorizedError,
+    VideoRequest,
+    VoiceRequest,
+)
 
 
 @pytest.fixture
@@ -26,7 +37,7 @@ def eleven(monkeypatch):
         return replies.pop(0)
 
     replies: list[Reply] = []
-    monkeypatch.setattr(remote.requests, "post", post)
+    monkeypatch.setattr(transport.requests, "post", post)
     monkeypatch.setattr(media, "run", lambda args, **k: made.append(args))
     return remote.ElevenLabs(), sent, replies, made
 
@@ -38,8 +49,8 @@ def _speech(blob=b"pcm"):
 def test_speech_is_asked_for_losslessly_and_read_as_raw_samples(eleven, tmp_path):
     provider, sent, replies, made = eleven
     replies.append(_speech())
-    res = provider.voice("A line.", tmp_path / "v.wav")
-    assert "output_format=pcm_48000" in sent[0]["url"]
+    res = provider.voice(VoiceRequest(text="A line.", dst=tmp_path / "v.wav"), context())
+    assert sent[0]["params"]["output_format"] == "pcm_48000"
     assert res.meta["audio_format"] == "pcm_48000"
     assert made[0][:6] == ["-f", "s16le", "-ar", "48000", "-ac", "1"]
 
@@ -47,8 +58,8 @@ def test_speech_is_asked_for_losslessly_and_read_as_raw_samples(eleven, tmp_path
 def test_a_plan_without_lossless_audio_falls_back_and_the_record_says_so(eleven, tmp_path):
     provider, sent, replies, made = eleven
     replies += [Reply(status=403, text="output_format not allowed on this tier"), _speech()]
-    res = provider.voice("A line.", tmp_path / "v.wav")
-    assert "mp3_44100_128" in sent[1]["url"]
+    res = provider.voice(VoiceRequest(text="A line.", dst=tmp_path / "v.wav"), context())
+    assert sent[1]["params"]["output_format"] == "mp3_44100_128"
     assert res.meta["audio_format"] == "mp3_44100_128"
     assert made[0][0] == "-i", "an mp3 needs no raw format"
 
@@ -56,8 +67,8 @@ def test_a_plan_without_lossless_audio_falls_back_and_the_record_says_so(eleven,
 def test_some_other_failure_is_not_mistaken_for_a_plan_limit(eleven, tmp_path):
     provider, sent, replies, _ = eleven
     replies.append(Reply(status=401, text="bad key"))
-    with pytest.raises(OSError):
-        provider.voice("A line.", tmp_path / "v.wav")
+    with pytest.raises(UnauthorizedError):
+        provider.voice(VoiceRequest(text="A line.", dst=tmp_path / "v.wav"), context())
     assert len(sent) == 1
 
 
@@ -68,9 +79,15 @@ def test_a_song_goes_as_a_chunked_composition_plan(eleven, tmp_path):
         {"kind": "verse", "lines": ["One", "Two"], "style": "soft"},
         {"kind": "chorus", "lines": ["Three", "Four", "Five", "Six"]},
     ]
-    provider.song(
-        "ignored", tmp_path / "s.wav", style="pop", duration=60, sections=sections, avoid="dark"
+    asked = SongRequest(
+        lyrics="ignored",
+        dst=tmp_path / "s.wav",
+        style="pop",
+        duration=60,
+        sections=sections,
+        avoid="dark",
     )
+    provider.song(asked, context())
     body = sent[0]["json"]
     assert body["model_id"] == "music_v2_5" and "prompt" not in body
     chunks = body["composition_plan"]["chunks"]
@@ -91,34 +108,41 @@ def test_a_song_plan_stays_inside_the_apis_limits():
 def test_a_song_with_no_sections_goes_as_a_prompt(eleven, tmp_path):
     provider, sent, replies, _ = eleven
     replies.append(Reply(content=b"pcm"))
-    provider.song("The words", tmp_path / "s.wav", style="pop", duration=30)
+    provider.song(
+        SongRequest(lyrics="The words", dst=tmp_path / "s.wav", style="pop", duration=30), context()
+    )
     assert sent[0]["json"]["prompt"] == "pop\nThe words"
 
 
 @pytest.fixture
 def falapi(monkeypatch, tmp_path):
     monkeypatch.setenv("FAL_KEY", "k")
-    sent = {}
-
-    def run(self, model, payload, timeout=900):
-        sent.update(model=model, payload=payload)
-        return {"video": {"url": "u"}, "audio": {"url": "u"}, "images": [{"url": "u"}], "seed": 77}
-
-    monkeypatch.setattr(fal.Fal, "_run", run)
-    monkeypatch.setattr(fal, "_download", lambda url, dst: Path(dst).write_bytes(b"x"))
+    reply = {"video": {"url": "u"}, "audio": {"url": "u"}, "images": [{"url": "u"}], "seed": 77}
+    wire = Wire(default=reply, files={"u": b"x"})
+    monkeypatch.setattr(fal.Fal, "transport", wire)
     monkeypatch.setattr(media, "run", lambda *a, **k: None)
-    return fal.Fal(), sent, tmp_path
+
+    class Sent:
+        def __getitem__(self, key):
+            last = wire.sent[-1]
+            return last["endpoint"] if key == "model" else last[key]
+
+    return fal.Fal(), Sent(), tmp_path
 
 
 def test_a_seed_is_sent_and_the_seed_used_is_kept(falapi):
     provider, sent, tmp = falapi
-    res = provider.video("p", tmp / "a.mp4", duration=5, aspect="16:9", seed=42)
-    assert sent["payload"]["seed"] == 42 and res.meta["seed"] == 77
+    res = provider.video(
+        VideoRequest(prompt="p", dst=tmp / "a.mp4", duration=5, aspect="16:9", seed=42), context()
+    )
+    assert sent["payload"]["seed"] == 42 and res.seed == 77
 
 
 def test_with_no_seed_asked_none_is_sent(falapi):
     provider, sent, tmp = falapi
-    provider.video("p", tmp / "a.mp4", duration=5, aspect="16:9")
+    provider.video(
+        VideoRequest(prompt="p", dst=tmp / "a.mp4", duration=5, aspect="16:9"), context()
+    )
     assert "seed" not in sent["payload"]
 
 
@@ -126,7 +150,8 @@ def test_a_big_input_goes_through_storage_and_a_small_one_stays_inline(falapi, m
     provider, _, tmp = falapi
     small = tmp / "small.png"
     small.write_bytes(b"x" * 100)
-    assert provider._upload(small).startswith("data:image/png")
+    queue = fal.FalQueue()
+    assert queue._upload(small).startswith("data:image/png")
     calls = {}
 
     def post(url, **kw):
@@ -143,7 +168,7 @@ def test_a_big_input_goes_through_storage_and_a_small_one_stays_inline(falapi, m
     monkeypatch.setattr(fal.requests, "put", put)
     big = tmp / "big.png"
     big.write_bytes(b"x" * (fal.INLINE_MOST_BYTES + 1))
-    assert provider._upload(big) == "https://cdn.example/f"
+    assert queue._upload(big) == "https://cdn.example/f"
     assert calls["init"][1]["content_type"] == "image/png" and calls["put"] == "https://put.example"
 
 
@@ -151,9 +176,10 @@ def test_a_lost_file_after_the_vendor_finished_is_still_billed(monkeypatch, tmp_
     def gone(url, dst):
         raise OSError("connection reset")
 
-    monkeypatch.setattr(fal, "_download", gone)
+    monkeypatch.setattr(fal.FalQueue, "_download", lambda self, url, dst: gone(url, dst))
+    finished = transport.Reply(data={"video": {"url": "u"}})
     with pytest.raises(base.BilledError) as caught:
-        fal.Fal._fetch("u", tmp_path / "a.mp4", 1.68)
+        fal.FalQueue().fetch(finished, tmp_path / "a.mp4", at=("video.url",), billed=1.68)
     assert caught.value.billed == 1.68
 
 
@@ -168,7 +194,7 @@ def test_a_lip_sync_sends_the_clip_and_the_line(falapi):
     media_duration = media.duration
     try:
         media.duration = lambda p: 6.0
-        res = monkey.lipsync(clip, line, tmp / "o.mp4")
+        res = monkey.lipsync(LipsyncRequest(video=clip, audio=line, dst=tmp / "o.mp4"), context())
     finally:
         media.duration = media_duration
     assert sent["model"] == "fal-ai/sync-lipsync/v2"
@@ -178,7 +204,8 @@ def test_a_lip_sync_sends_the_clip_and_the_line(falapi):
 
 def test_a_fal_song_sends_style_and_words_apart(falapi):
     provider, sent, tmp = falapi
-    provider.song("[verse]\nWords", tmp / "s.wav", style="pop", duration=90)
+    words = SongRequest(lyrics="[verse]\nWords", dst=tmp / "s.wav", style="pop", duration=90)
+    provider.song(words, context())
     assert sent["model"] == "minimax/music-3"
     assert sent["payload"] == {"prompt": "pop", "lyrics": "[verse]\nWords", "duration": 90}
 
@@ -208,14 +235,15 @@ def machine(monkeypatch, tmp_path):
 
 
 def test_a_song_runs_in_its_own_environment_with_its_own_seed(machine, tmp_path):
-    res = mac.Mac().song(
-        "[Verse]\nWords", tmp_path / "s.wav", style="pop", duration=60, seed=7, bpm=96
+    asked = SongRequest(
+        lyrics="[Verse]\nWords", dst=tmp_path / "s.wav", style="pop", duration=60, seed=7, bpm=96
     )
+    res = mac.Mac().song(asked, context())
     cmd = machine["cmd"]
     assert cmd[0] == "/song/env/python" and Path(cmd[1]) == mac.SONG_RUNNERS["heartmula"]
     assert cmd[cmd.index("--seed") + 1] == "7" and cmd[cmd.index("--bpm") + 1] == "96"
     assert machine["lyrics"] == "[Verse]\nWords"
-    assert res.meta["seed"] == 7 and res.model == "heartmula"
+    assert res.seed == 7 and res.model == "heartmula"
 
 
 def test_each_song_engine_has_its_runner_on_disk():
@@ -225,24 +253,32 @@ def test_each_song_engine_has_its_runner_on_disk():
 def test_a_song_with_no_engine_set_up_is_a_provider_failure(machine, tmp_path, monkeypatch):
     monkeypatch.delenv(mac.SONG_PYTHON_ENV)
     with pytest.raises(RuntimeError, match=mac.SONG_PYTHON_ENV):
-        mac.Mac().song("Words", tmp_path / "s.wav")
+        mac.Mac().song(SongRequest(lyrics="Words", dst=tmp_path / "s.wav"), context())
 
 
 def test_a_take_asks_a_clip_for_its_own_seed(machine, tmp_path):
-    res = mac.Mac().video("waves", tmp_path / "c.mp4", duration=2.0, aspect="16:9", seed=123)
+    asked = VideoRequest(
+        prompt="waves", dst=tmp_path / "c.mp4", duration=2.0, aspect="16:9", seed=123
+    )
+    res = mac.Mac().video(asked, context())
     assert machine["cmd"][machine["cmd"].index("--seed") + 1] == "123"
-    assert res.meta["seed"] == 123
+    assert res.seed == 123
 
 
 def test_sound_is_only_asked_for_when_a_job_wants_it(machine, tmp_path):
-    mac.Mac().video("waves", tmp_path / "c.mp4", duration=2.0, aspect="16:9")
+    clip = VideoRequest(prompt="waves", dst=tmp_path / "c.mp4", duration=2.0, aspect="16:9")
+    mac.Mac().video(clip, context())
     assert "--no-audio" in machine["cmd"]
-    mac.Mac().video("waves", tmp_path / "d.mp4", duration=2.0, aspect="16:9", audio=True)
+    loud = VideoRequest(
+        prompt="waves", dst=tmp_path / "d.mp4", duration=2.0, aspect="16:9", sound=True
+    )
+    mac.Mac().video(loud, context())
     assert "--no-audio" not in machine["cmd"]
 
 
 def test_a_long_shot_gets_the_time_it_needs_past_a_flat_deadline(machine, tmp_path):
-    mac.Mac().video("waves", tmp_path / "c.mp4", duration=30.0, aspect="16:9", deadline_sec=1900)
+    long = VideoRequest(prompt="waves", dst=tmp_path / "c.mp4", duration=30.0, aspect="16:9")
+    mac.Mac().video(long, context(deadline_sec=1900))
     assert machine["timeout"] > 30 * 24 * mac.SECONDS_PER_VIDEO_FRAME
 
 
@@ -287,13 +323,14 @@ def test_a_hosted_app_gets_only_the_fields_it_takes(monkeypatch, tmp_path):
     module = types.SimpleNamespace(Client=Client)
     monkeypatch.setitem(sys.modules, "gradio_client", module)
     monkeypatch.setattr(media, "run", lambda args, **k: sent.setdefault("made", args[1]))
-    res = spaces.Spaces().song("Words", tmp_path / "s.wav", style="pop", duration=45, seed=9)
+    asked = SongRequest(lyrics="Words", dst=tmp_path / "s.wav", style="pop", duration=45, seed=9)
+    res = spaces.Spaces().song(asked, context())
     assert sent["space"] == "mrfakename/HeartMuLa" and sent["api_name"] == "/generate_music"
     assert (
         sent["lyrics"] == "Words" and sent["tags"] == "pop" and sent["max_duration_seconds"] == 45
     )
     assert "seed" not in sent, "this app has no seed field"
-    assert sent["made"] == "/tmp/made.wav" and res.meta["seed"] == 9
+    assert sent["made"] == "/tmp/made.wav" and res.seed == 9
 
 
 def test_a_hosted_app_that_takes_a_seed_gets_it_and_one_with_no_length_gets_none():
@@ -306,7 +343,7 @@ def test_a_hosted_app_that_takes_a_seed_gets_it_and_one_with_no_length_gets_none
 def test_a_hosted_song_needs_an_app_named_in_config(monkeypatch, tmp_path):
     monkeypatch.setattr(spaces.config, "space_spec", lambda name: {})
     with pytest.raises(ValueError, match="names no app"):
-        spaces.Spaces().song("Words", tmp_path / "s.wav")
+        spaces.Spaces().song(SongRequest(lyrics="Words", dst=tmp_path / "s.wav"), context())
 
 
 @pytest.mark.parametrize(
@@ -329,20 +366,17 @@ def test_a_hosted_app_needs_its_extra_installed(monkeypatch):
 
 def test_a_music_model_that_finished_without_a_file_is_still_billed(falapi, monkeypatch):
     provider, _, folder = falapi
-    monkeypatch.setattr(fal.Fal, "_run", lambda self, m, p, timeout=900: {})
-
-    def no_url(url, dst):
-        raise OSError(f"bad url: {url!r}")
-
-    monkeypatch.setattr(fal, "_download", no_url)
+    provider.transport.default = {}  # finished, and named no file
     with pytest.raises(base.BilledError):
-        provider.music("a theme", folder / "m.wav", duration=5)
+        provider.music(MusicRequest(prompt="a theme", dst=folder / "m.wav", duration=5), context())
 
 
 def test_a_song_engine_is_told_only_what_was_asked():
-    asked = {"bpm": 96, "key": "C major", "language": "", "instrumental": True}
+    asked = SongRequest(
+        lyrics="", dst=Path("s.wav"), bpm=96, musical_key="C major", language="", instrumental=True
+    )
     assert mac._song_options(asked) == ["--bpm", "96", "--key", "C major", "--instrumental"]
-    assert mac._song_options({}) == []
+    assert mac._song_options(SongRequest(lyrics="", dst=Path("s.wav"))) == []
 
 
 def test_the_scholarly_search_skips_a_work_with_nowhere_to_read_it(monkeypatch):
@@ -359,7 +393,7 @@ def test_the_scholarly_search_skips_a_work_with_nowhere_to_read_it(monkeypatch):
         ]
     }
     monkeypatch.setattr(search.requests, "get", lambda url, **kw: Reply(body=works))
-    hits = search.OpenAlex().search("a question").meta["hits"]
+    hits = search.OpenAlex().search(SearchRequest(query="a question"), context()).hits
     assert [h["title"] for h in hits] == ["A paper"]
     assert hits[0]["publisher"] == "A Journal" and hits[0]["text"] == "Short abstract"
 
@@ -380,7 +414,7 @@ def test_a_mix_splits_into_vocals_and_the_rest_at_the_mix_rate(monkeypatch, tmp_
     monkeypatch.setattr(mac, "_run", split)
     monkeypatch.setattr(media, "run", lambda args, **k: ran.append(args))
     mix, sung, rest = (tmp_path / n for n in ("mix.wav", "sung.wav", "rest.wav"))
-    result = mac.Mac().separate(mix, sung, rest)
+    result = mac.Mac().separate(SeparateRequest(src=mix, vocals=sung, rest=rest), context())
     assert result.path == sung
     assert [args[-1] for args in ran] == [str(sung), str(rest)]
     assert all("48000" in args for args in ran)
@@ -395,7 +429,10 @@ def test_a_split_that_left_no_stems_is_a_provider_failure(monkeypatch, tmp_path)
 
     monkeypatch.setattr(mac, "_run", nothing)
     with pytest.raises(RuntimeError, match=r"other\.wav"):
-        mac.Mac().separate(tmp_path / "m.wav", tmp_path / "a.wav", tmp_path / "b.wav")
+        split = SeparateRequest(
+            src=tmp_path / "m.wav", vocals=tmp_path / "a.wav", rest=tmp_path / "b.wav"
+        )
+        mac.Mac().separate(split, context())
 
 
 def test_a_composition_renders_in_its_own_folder_to_the_right_format(monkeypatch, tmp_path):
@@ -407,7 +444,9 @@ def test_a_composition_renders_in_its_own_folder_to_the_right_format(monkeypatch
 
     monkeypatch.setattr(hyperframes.shutil, "which", lambda name: "/bin/npx")
     monkeypatch.setattr(hyperframes.subprocess, "run", run)
-    hyperframes.HyperFrames().graphics(tmp_path, tmp_path / "o.mov")
+    hyperframes.HyperFrames().graphics(
+        GraphicsRequest(folder=tmp_path, dst=tmp_path / "o.mov"), context()
+    )
     assert seen["cwd"] == tmp_path
     assert seen["cmd"][seen["cmd"].index("--format") + 1] == "mov"
 
@@ -417,7 +456,9 @@ def test_a_failed_composition_is_a_provider_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(hyperframes.shutil, "which", lambda name: "/bin/npx")
     monkeypatch.setattr(hyperframes.subprocess, "run", lambda *a, **k: failed)
     with pytest.raises(RuntimeError, match="a chart broke"):
-        hyperframes.HyperFrames().graphics(tmp_path, tmp_path / "o.mp4")
+        hyperframes.HyperFrames().graphics(
+            GraphicsRequest(folder=tmp_path, dst=tmp_path / "o.mp4"), context()
+        )
 
 
 def test_a_composition_needs_node(monkeypatch):

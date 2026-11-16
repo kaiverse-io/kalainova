@@ -8,10 +8,19 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from fakes import context
 from PIL import Image
 
 from kalainova import media
 from kalainova.providers import base, mac
+from kalainova.providers.contract import (
+    Billable,
+    ImageRequest,
+    MusicRequest,
+    TranscribeRequest,
+    VideoRequest,
+    VoiceRequest,
+)
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 
@@ -59,7 +68,7 @@ def test_it_is_registered_and_free():
     base.names()
     provider = base._REGISTRY["mac"]()
     assert provider.free and not provider.placeholder
-    assert provider.estimate("video", duration=5.0) == 0.0
+    assert provider.estimate(Billable(capability="video", duration=5.0)) == 0.0
 
 
 @pytest.mark.parametrize(("aspect", "shape"), [("16:9", (1472, 832)), ("9:16", (832, 1472))])
@@ -67,7 +76,10 @@ def test_a_clip_is_asked_for_in_a_shape_and_length_the_model_accepts(
     calls, tmp_path, aspect, shape
 ):
     out = tmp_path / "c.mp4"
-    res = mac.Mac().video("waves, cinematic film still, 35mm", out, duration=5.0, aspect=aspect)
+    asked = VideoRequest(
+        prompt="waves, cinematic film still, 35mm", dst=out, duration=5.0, aspect=aspect
+    )
+    res = mac.Mac().video(asked, context())
     cmd = calls[0]
     width, height = int(cmd[cmd.index("--width") + 1]), int(cmd[cmd.index("--height") + 1])
     frames = int(cmd[cmd.index("--num-frames") + 1])
@@ -79,9 +91,13 @@ def test_a_clip_is_asked_for_in_a_shape_and_length_the_model_accepts(
 
 
 def test_a_clip_uses_the_fixed_runner_and_is_never_told_to_be_a_still(calls, tmp_path):
-    mac.Mac().video(
-        "waves, cinematic film still, 35mm", tmp_path / "c.mp4", duration=2.0, aspect="16:9"
+    asked = VideoRequest(
+        prompt="waves, cinematic film still, 35mm",
+        dst=tmp_path / "c.mp4",
+        duration=2.0,
+        aspect="16:9",
     )
+    mac.Mac().video(asked, context())
     cmd = calls[0]
     assert Path(cmd[1]) == mac.LTX_RUNNER and mac.LTX_RUNNER.is_file()
     assert "film still" not in cmd[cmd.index("--prompt") + 1]
@@ -89,9 +105,14 @@ def test_a_clip_uses_the_fixed_runner_and_is_never_told_to_be_a_still(calls, tmp
 
 
 def test_a_clip_starts_from_its_still_when_given_one(calls, tmp_path):
-    mac.Mac().video(
-        "waves", tmp_path / "c.mp4", duration=2.0, aspect="16:9", image=tmp_path / "s.png"
+    asked = VideoRequest(
+        prompt="waves",
+        dst=tmp_path / "c.mp4",
+        duration=2.0,
+        aspect="16:9",
+        start=tmp_path / "s.png",
     )
+    mac.Mac().video(asked, context())
     cmd = calls[0]
     assert cmd[cmd.index("--image") + 1] == str(tmp_path / "s.png")
     assert cmd[cmd.index("--image-strength") + 1] == "1.0"  # 1.0 pins the first frame to the still
@@ -100,7 +121,7 @@ def test_a_clip_starts_from_its_still_when_given_one(calls, tmp_path):
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_still_comes_back_as_a_png_in_a_size_the_model_can_make(calls, tmp_path):
     out = tmp_path / "s.png"
-    mac.Mac().image("a bridge", out, width=3840, height=2160)
+    mac.Mac().image(ImageRequest(prompt="a bridge", dst=out, width=3840, height=2160), context())
     cmd = calls[0]
     width, height = int(cmd[cmd.index("--width") + 1]), int(cmd[cmd.index("--height") + 1])
     assert width % 16 == 0 and height % 16 == 0
@@ -111,7 +132,7 @@ def test_a_still_comes_back_as_a_png_in_a_size_the_model_can_make(calls, tmp_pat
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_music_is_instrumental_at_mix_rate(calls, tmp_path):
     out = tmp_path / "m.wav"
-    mac.Mac().music("slow piano", out, duration=3.2)
+    mac.Mac().music(MusicRequest(prompt="slow piano", dst=out, duration=3.2), context())
     cmd = calls[0]
     assert cmd[cmd.index("--lyrics") + 1] == "[instrumental]"
     assert cmd[cmd.index("--duration") + 1] == "4"
@@ -122,7 +143,8 @@ def test_music_is_instrumental_at_mix_rate(calls, tmp_path):
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_voice_line_is_timed_by_what_was_heard_in_the_scripts_spelling(calls, tmp_path):
     out = tmp_path / "v.wav"
-    res = mac.Mac().voice("Exact script words.", out, voice="bm_george")
+    asked = VoiceRequest(text="Exact script words.", dst=out, voice="bm_george")
+    res = mac.Mac().voice(asked, context())
     assert media.summarize(out)["sample_rate_hz"] == 48000
     assert calls[0][calls[0].index("--lang_code") + 1] == "b"
     assert [w["text"] for w in res.words] == ["Exact", "script", "words."]
@@ -132,7 +154,7 @@ def test_a_voice_line_is_timed_by_what_was_heard_in_the_scripts_spelling(calls, 
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_transcript_keeps_what_was_heard(calls, tmp_path):
-    res = mac.Mac().transcribe(tmp_path / "a.wav")
+    res = mac.Mac().transcribe(TranscribeRequest(src=tmp_path / "a.wav"), context())
     assert res.text == "Heard words here."
     assert [w["text"] for w in res.words] == ["Heard", "words", "here."]
 

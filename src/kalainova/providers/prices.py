@@ -26,6 +26,7 @@ from typing import Any
 
 from .. import config
 from ..jobfs import Job
+from .contract import Billable
 
 LEARNED = "prices.learned.jsonl"
 LISTED = ".cache/vendor-prices.json"
@@ -79,16 +80,18 @@ def listed(job: Job, provider: str, model: str, fetch: Any = None) -> dict[str, 
 
 
 def correction(
-    job: Job, provider: Any, capability: str, request: dict[str, Any]
+    job: Job, provider: Any, billable: Billable, model: str | None = None
 ) -> tuple[float, str]:
-    """How much to raise a table estimate, and why: 1.0 and "" when the table stands."""
-    model = request.get("model") or ""
+    """How much to raise a table estimate, and why: 1.0 and "" when the table stands. With no pin,
+    the model checked is the provider's default for the call, the one it will use."""
+    key = provider.price_key(billable)
+    model = model or config.model_for(provider.name, key)
     if not model:
         return 1.0, ""
     found = [(1.0, "")]
-    row = config.price_for(provider.name, provider.price_key(capability, request), model) or {}
+    row = config.price_for(provider.name, key, model) or {}
     rate, reviewed = row.get("per_sec"), row.get("checked")
-    vendor = listed(job, provider.name, model, getattr(provider, "list_price", None))
+    vendor = listed(job, provider.name, model, provider.list_price)
     if vendor and rate and not reviewed and vendor.get("unit") == "seconds":
         found.append((float(vendor["unit_price"]) / float(rate), "the vendor's list price"))
     bills = _learned(job, provider.name, model)

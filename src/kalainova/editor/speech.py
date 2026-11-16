@@ -16,6 +16,7 @@ from typing import Any
 from .. import config, media
 from ..jobfs import ContractError, Job
 from ..providers import router
+from ..providers.contract import TranscribeRequest
 from . import auto_editor, choose
 
 Word = dict[str, Any]
@@ -37,19 +38,12 @@ def transcript(job: Job, source: Path) -> list[Word] | None:
     if not router.available(job, "transcribe"):
         return None
     try:
-        _, res = router.generate(
-            job,
-            "transcribe",
-            "transcribe",
-            source,
-            est={"duration": media.duration(source)},
-            note="transcript",
-        )
+        _, res = router.generate(job, TranscribeRequest(src=source), note="transcript")
     except (router.ProviderError, OSError) as exc:
         print(f"{job.id}: no transcript of {source.name}: {exc}")
         return None
     saved.write_text(json.dumps(res.words))
-    return list(res.words)
+    return [dict(w) for w in res.words]
 
 
 def _is_filler(word: Word) -> bool:

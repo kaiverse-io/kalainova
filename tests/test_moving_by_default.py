@@ -59,7 +59,7 @@ class Priced(base.Provider):
     name = "priced-video"
     capabilities = ("video",)
 
-    def estimate(self, capability, **request):
+    def estimate(self, billable, model=None):
         return 4.0
 
 

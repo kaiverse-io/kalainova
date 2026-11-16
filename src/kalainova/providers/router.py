@@ -1,52 +1,59 @@
 """The one way the engine calls a model.
 
-generate() walks the job's provider list and, for each attempt, applies the same rules:
+generate() takes one typed request (providers/contract.py), walks the job's provider list, and for
+each attempt applies the same rules:
 
-  price     a job with a cost cap refuses a provider it cannot estimate
+  price     a job with a cost cap refuses a provider it cannot estimate; a price that cannot be
+            checked refuses (providers/prices.py)
+  gates     a paid call passes the studio's gates first (gates.py): none goes while spend is stopped
   deadline  a call that outlives its deadline is abandoned, and its estimate is charged
-  failure   a provider failure moves to the next listed provider and says so on stderr;
+  failure   a provider failure moves to the next listed provider and says so on stderr; a request
+            the vendor refuses as malformed stops the walk, since the engine's mapping is at fault;
             a bug in an adapter (TypeError, AttributeError) is raised, not hidden
   output    a file must match the request and hold a picture, and only then reaches its destination
   reuse     a paid file is recorded the moment it exists, so a restart does not pay twice
   rehearsal while one is open, nothing is sent: a paid provider that cannot rehearse refuses
+  pins      a pinned model goes to the provider the pin names only; any other uses its own default
+
+Each attempt gets a fresh `Context` with its labels and a `Receipt` the adapter fills, so what the
+vendor said about the call is kept whether the call succeeds or fails.
 
 Only providers named in the list are tried. Nothing is added to it here.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 from .. import config, gates, media, trace
-from ..blobstore import sha256_file
 from ..jobfs import ContractError, Job
 from . import base, prices, records, rehearsal
+from .contract import (
+    RECORDED,
+    Billable,
+    BilledError,
+    Context,
+    ImageRequest,
+    InvalidRequestError,
+    MotionRequest,
+    Pin,
+    RefusalError,
+    Request,
+    Result,
+)
 
-# capability -> the position of the destination path in the call's arguments
-OUTPUT_ARG = {
-    "voice": 1,
-    "image": 1,
-    "video": 1,
-    "music": 1,
-    "song": 1,
-    "sfx": 1,
-    "lipsync": 2,
-    "motion": 2,
-    "separate": 1,
-    "graphics": 1,
-}
-# OSError covers connection, timeout, and HTTP errors. ValueError, KeyError, and IndexError cover a malformed reply.
-PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError, base.RefusalError)
+# OSError covers connection, timeout, and HTTP errors. ValueError, KeyError, and IndexError cover a
+# malformed reply.
+PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError, RefusalError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = records.GENERATIONS
 PICTURE_OUTPUTS = ("image", "video", "motion", "lipsync", "graphics")
@@ -59,11 +66,11 @@ class ProviderError(ContractError):
     """Every listed provider was tried and none produced a result."""
 
 
-class NoProvider(ProviderError, LookupError):
+class NoProviderError(ProviderError, LookupError):
     """No listed provider implements the capability and is ready to use."""
 
 
-class ProviderTimeout(TimeoutError):
+class ProviderTimeoutError(TimeoutError):
     pass
 
 
@@ -89,23 +96,24 @@ def _rehearses_first(job: Job, capability: str, names: list[str]) -> None:
 
 
 def _corrected(
-    job: Job, p: base.Provider, capability: str, est: dict[str, Any], model: str | None = None
+    job: Job, p: base.Provider, billable: Billable, model: str | None = None
 ) -> float | None:
     """The provider's estimate, raised where the vendor's list price or this studio's own bills
     say the price table is low (providers/prices.py). A quote and a reservation both come here."""
-    estimate = p.estimate(capability, **est)
+    estimate = p.estimate(billable, model)
     if p.free:
         return estimate
     try:
-        factor, why = prices.correction(job, p, capability, {"model": model, **est})
+        factor, why = prices.correction(job, p, billable, model)
     except Exception as exc:  # noqa: BLE001 - any failure to check a price refuses the paid call
         raise ContractError(
-            f"{job.id}: {capability} on {p.name}: the price could not be checked ({exc}), so "
-            "nothing is spent; fix the studio's price records and run again"
+            f"{job.id}: {billable.capability} on {p.name}: the price could not be checked ({exc}), "
+            "so nothing is spent; fix the studio's price records and run again"
         ) from exc
     if estimate and factor > 1:
         print(
-            f"{job.id}: {capability} on {p.name}: estimate x{factor}, from {why}", file=sys.stderr
+            f"{job.id}: {billable.capability} on {p.name}: estimate x{factor}, from {why}",
+            file=sys.stderr,
         )
         return round(estimate * factor, 6)
     return estimate
@@ -133,17 +141,15 @@ def available(job: Job, capability: str) -> bool:
 
 
 def refuse_too_long(job: Job, capability: str, seconds: float) -> None:
-    """Before any spend: a model's stated longest output is a limit, and a longer ask is not made."""
+    """Before any spend: a model's stated longest output is a limit; a longer ask is not made."""
     first = first_usable(job, capability)
     if not first:
         return
-    name = first.name
-    model = config.model_for(name, capability)
-    most = config.audio_spec(name, model).get("max_sec")
-    if most and seconds > float(most):
+    most = first.inputs(capability).longest_sec
+    if most and seconds > most:
         raise ProviderError(
-            f"{job.id}: {model} makes at most {float(most):g}s and the piece asks for "
-            f"{seconds:g}s; shorten it or list a model that makes longer tracks"
+            f"{job.id}: {first.default_model(capability)} makes at most {most:g}s and the piece "
+            f"asks for {seconds:g}s; shorten it or list a model that makes longer tracks"
         )
 
 
@@ -153,17 +159,23 @@ def first_usable(job: Job, capability: str) -> base.Provider | None:
     return usable[0] if usable else None
 
 
+def _pinned(pin: Pin | None, provider: str) -> str | None:
+    return pin.model if pin and pin.provider == provider else None
+
+
 def quote(
-    job: Job, capability: str, *, only: list[str] | None = None, **est
+    job: Job, billable: Billable, *, only: list[str] | None = None, pin: Pin | None = None
 ) -> tuple[str, float | None] | None:
     """What the first ready provider would charge for one call, without making it.
 
     None when no provider is ready. The estimate is None when that provider has no price for it.
     """
-    usable, _ = _usable(capability, only or config.preference(capability, job.job))
+    usable, _ = _usable(
+        billable.capability, only or config.preference(billable.capability, job.job)
+    )
     if not usable:
         return None
-    return usable[0].name, usable[0].estimate(capability, **est)
+    return usable[0].name, usable[0].estimate(billable, _pinned(pin, usable[0].name))
 
 
 def first_listed(job: Job, capability: str, only: list[str] | None = None) -> base.Provider | None:
@@ -179,28 +191,30 @@ def first_listed(job: Job, capability: str, only: list[str] | None = None) -> ba
 
 
 def price(
-    job: Job, capability: str, *, only: list[str] | None = None, **est
+    job: Job, billable: Billable, *, only: list[str] | None = None, pin: Pin | None = None
 ) -> tuple[str, float | None, list[str]] | None:
     """What the first listed provider would charge, and what it still needs before a paid run.
     A price comes from the table, so a quote needs no key. None when no provider is listed."""
-    p = first_listed(job, capability, only)
+    p = first_listed(job, billable.capability, only)
     if p is None:
         return None
-    return p.name, _corrected(job, p, capability, est), p.missing_env(capability)
+    model = _pinned(pin, p.name)
+    return p.name, _corrected(job, p, billable, model), p.missing_env(billable.capability)
 
 
 def _deadline(capability: str) -> float:
     return float((config.studio().get("deadlines_sec") or {}).get(capability, DEFAULT_DEADLINE_SEC))
 
 
-def _call(fn, args: tuple, kw: dict, deadline: float):
+def _call(fn: Callable[..., Result], args: tuple[Any, ...], deadline: float | None) -> Result:
     """Run on a worker thread so the engine can stop waiting. Python cannot kill the thread, so an
-    abandoned call may finish later. It writes to its own temporary path, never to the destination."""
+    abandoned call may finish later. It writes to its own temporary path, never to the
+    destination."""
     box: dict[str, Any] = {}
 
-    def run():
+    def run() -> None:
         try:
-            box["result"] = fn(*args, **kw)
+            box["result"] = fn(*args)
         except BaseException as exc:  # handed to the caller, which decides what it means
             box["error"] = exc
 
@@ -208,21 +222,23 @@ def _call(fn, args: tuple, kw: dict, deadline: float):
     worker.start()
     worker.join(deadline)
     if worker.is_alive():
-        raise ProviderTimeout(f"no result after {deadline:g}s")
+        raise ProviderTimeoutError(f"no result after {deadline:g}s")
     if "error" in box:
         raise box["error"]
-    return box["result"]
+    result: Result = box["result"]
+    return result
 
 
-def _check_output(capability: str, path: Path, kw: dict) -> None:
-    """Refuse a file that is unreadable or is not what was asked for. Raises ValueError or OSError."""
-    if capability == "image":
+def _check_output(request: Request, path: Path) -> None:
+    """Refuse a file that is unreadable or not what was asked for. Raises ValueError or OSError."""
+    capability = request.capability
+    if isinstance(request, ImageRequest):
         from PIL import Image
 
         with Image.open(path) as im:
             width, height = im.size
             im.verify()
-        want_w, want_h = kw.get("width"), kw.get("height")
+        want_w, want_h = request.width, request.height
         if want_w and want_h:
             if abs(width / height - want_w / want_h) > ASPECT_TOLERANCE * (want_w / want_h):
                 raise ValueError(f"image is {width}x{height}, wrong shape for {want_w}x{want_h}")
@@ -236,49 +252,32 @@ def _check_output(capability: str, path: Path, kw: dict) -> None:
         raise ValueError("no sound: the file is silent, the model's decode failed")
 
 
-def _request_key(capability: str, fn_name: str, args: tuple, kw: dict) -> str:
-    def plain(value):
-        if isinstance(value, Path):
-            return sha256_file(value) if value.is_file() else str(value)
-        if isinstance(value, dict):
-            return {k: plain(v) for k, v in value.items()}
-        if isinstance(value, list | tuple):
-            return [plain(v) for v in value]
-        return value
-
-    at = OUTPUT_ARG[capability]
-    request = {
-        "capability": capability,
-        "fn": fn_name,
-        "dst": Path(args[at]).name,
-        "args": [plain(a) for i, a in enumerate(args) if i != at],
-        "kw": {k: plain(v) for k, v in kw.items()},
-    }
-    return hashlib.sha256(json.dumps(request, sort_keys=True, default=str).encode()).hexdigest()
+def _settle(p: base.Provider, res: Result, ctx: Context) -> None:
+    """The result's typed facts under the engine's names, then its price checked against the
+    vendor's own figure. An adapter's meta never overrides a name the engine records."""
+    res.meta = {k: v for k, v in (res.meta or {}).items() if k not in RECORDED}
+    res.meta.update(res.recorded())
+    records.settle_at_vendor(p, res, ctx.receipt)
 
 
 def generate(
     job: Job,
-    capability: str,
-    fn_name: str,
-    *args,
-    est: dict | None = None,
+    request: Request,
+    *,
     note: str = "",
     fresh: bool = False,
     only: list[str] | None = None,
-    **kw,
-) -> tuple[base.Provider, base.Result]:
+) -> tuple[base.Provider, Result]:
+    capability = request.capability
     names = only or config.preference(capability, job.job)
     usable, skipped = _usable(capability, names)
     if not usable:
-        raise NoProvider(
+        raise NoProviderError(
             f"{job.id}: no provider for {capability}: tried {', '.join(names) or 'nothing'} "
             f"({'; '.join(skipped) or 'none listed'})"
         )
-    has_output = capability in OUTPUT_ARG
-    dst = Path(args[OUTPUT_ARG[capability]]) if has_output else None
-    key = _request_key(capability, fn_name, args, kw) if has_output else ""
-    if has_output and not fresh:
+    dst, key = request.output(), request.key()
+    if dst is not None and not fresh:
         saved = records.saved(job, key, dst, names)
         if saved:
             print(
@@ -288,169 +287,179 @@ def generate(
             return saved
     if rehearsal.active() is not None:
         _rehearses_first(job, capability, names)
-    cap = job.job.get("cost_cap")
     errors = list(skipped)
     for p in usable:
-        estimate = _corrected(job, p, capability, est or {}, kw.get("model"))
-        if estimate is None and cap is not None:
-            errors.append(f"{p.name}: no price for {capability}, and this job has a cost cap")
+        res = _attempt(job, p, request, key, note or request.method, errors)
+        if res is None:
             continue
-        if not estimate and not p.free and cap is not None:
-            # A priced call that estimates to nothing would go out unseen by the cap.
-            errors.append(
-                f"{p.name}: the estimate for {capability} is zero, and this job has a cost cap; "
-                "the caller must say how much it is asking for"
-            )
-            continue
-        dry = rehearsal.active()
-        if dry is not None and not (p.free or p.rehearses):
-            raise ContractError(
-                f"{job.id}: {p.name} cannot rehearse {capability}, so the rehearsal stops before it"
-            )
-        if not p.free and dry is None:
-            gates.refuse_paid(job, p.name, capability)
-        reservation = job.reserve(p.name, capability, estimate or 0.0)
-        call_args = list(args)
-        attempt, aid, asked = None, uuid.uuid4().hex[:12], kw.get("model")
-        if has_output:
-            attempt = dst.with_name(f".{aid}.{dst.name}")
-            call_args[OUTPUT_ARG[capability]] = attempt
-            if dry is not None and not p.free:
-                dry.begin(attempt, capability, p.name, estimate, note or fn_name)
-        limit = _deadline(capability)
-        call_kw = {**kw, "deadline_sec": limit} if p.self_timed else kw
-        started = time.monotonic()
-        started_at = datetime.now(UTC).isoformat()
-        traced = partial(records.trace_attempt, job, capability, p, started_at, started, asked, aid)
-        p.request_id = p.charged = p.billed_units = None
-        p.tags = {"job": job.id, "attempt": aid, **trace.labels()}
-        try:
-            res = _call(
-                getattr(p, fn_name), tuple(call_args), call_kw, None if p.self_timed else limit
-            )
-        except TimeoutError as exc:  # ours, or an adapter's own wait: either may have been billed
-            traced(
-                outcome="timeout",
-                estimate=estimate,
-                settled=estimate or 0.0,
-                error_class=type(exc).__name__,
-                detail=str(exc),
-            )
-            job.charge(
-                p.name,
-                capability,
-                estimate or 0.0,
-                f"{note or fn_name}: timed out, may have been billed",
-                reservation,
-                records.audit(p, aid, asked),
-            )
-            errors.append(f"{p.name}: {exc}")
-            continue
-        except base.RefusalError as exc:
-            traced(
-                outcome="refused",
-                estimate=estimate,
-                error_class=type(exc).__name__,
-                detail=str(exc),
-            )
-            job.release(reservation)
-            errors.append(f"{p.name}: {type(exc).__name__}: {str(exc)[:300]}")
-            continue
-        except base.BilledError as exc:
-            traced(
-                outcome="error",
-                estimate=estimate,
-                settled=exc.billed,
-                error_class=type(exc).__name__,
-                detail=str(exc),
-            )
-            job.charge(
-                p.name,
-                capability,
-                exc.billed,
-                f"{note or fn_name}: billed, then failed",
-                reservation,
-                records.audit(p, aid, asked),
-            )
-            errors.append(f"{p.name}: {str(exc)[:300]}")
-            continue
-        except PROVIDER_FAILURES as exc:
-            if isinstance(exc, ContractError):  # a rule the engine set, not a vendor's failure
-                job.release(reservation)
-                raise
-            traced(
-                outcome="error", estimate=estimate, error_class=type(exc).__name__, detail=str(exc)
-            )
-            job.release(reservation)
-            errors.append(f"{p.name}: {type(exc).__name__}: {str(exc)[:300]}")
-            continue
-        except BaseException:  # a bug in an adapter, or the cap: raised, with nothing left held
-            job.release(reservation)
-            raise
-        records.settle_at_vendor(p, res)
-        prices.learn(job, p.name, res.model or asked or "", res.meta or {})
-        if has_output:
-            billed = partial(
-                traced, outcome="error", estimate=estimate, settled=res.cost, meta=res.meta
-            )
-            if not attempt.is_file():
-                billed(error_class="NoFile", detail="the provider returned no file")
-                audit = records.audit(p, aid, res.model or asked, res.meta)
-                job.charge(
-                    p.name, capability, res.cost, f"{note or fn_name}: no file", reservation, audit
-                )
-                errors.append(f"{p.name}: returned no file")
-                continue
-            try:
-                _check_output(capability, attempt, kw)
-            except PROVIDER_FAILURES as exc:
-                attempt.unlink(missing_ok=True)
-                billed(error_class=type(exc).__name__, detail=f"output rejected: {exc}")
-                job.charge(
-                    p.name,
-                    capability,
-                    res.cost,
-                    f"{note or fn_name}: output rejected",
-                    reservation,
-                    records.audit(p, aid, res.model or asked, res.meta),
-                )
-                errors.append(f"{p.name}: rejected output: {str(exc)[:200]}")
-                continue
-            if dry is not None and not p.free:
-                dry.settle(attempt, res.cost, res.model, res.meta)
-            os.replace(attempt, dst)
-            res.path = dst
-            if not p.placeholder:
-                records.record(job, key, p, res, dst, aid)
         if errors:
             print(
                 f"{job.id}: {capability}: used {p.name} after: {'; '.join(errors)}", file=sys.stderr
             )
-        audit = records.audit(p, aid, res.model or asked, res.meta)
-        job.charge(p.name, capability, res.cost, note or fn_name, reservation, audit)
-        traced(
-            outcome="ok",
-            estimate=estimate,
-            settled=res.cost,
-            made=res.model or None,
-            model_version=getattr(res, "version", None),
-            meta=res.meta,
-        )
         return p, res
     raise ProviderError(f"{job.id}: every provider failed for {capability}: {'; '.join(errors)}")
 
 
+def _priced(
+    job: Job, p: base.Provider, request: Request, errors: list[str]
+) -> tuple[bool, float | None]:
+    """Whether this provider may be tried under the job's cap, and its corrected estimate."""
+    capability, cap = request.capability, job.job.get("cost_cap")
+    estimate = _corrected(job, p, request.billable(), request.model_for(p.name))
+    if estimate is None and cap is not None:
+        errors.append(f"{p.name}: no price for {capability}, and this job has a cost cap")
+        return False, None
+    if not estimate and not p.free and cap is not None:
+        # A priced call that estimates to nothing would go out unseen by the cap.
+        errors.append(
+            f"{p.name}: the estimate for {capability} is zero, and this job has a cost cap; "
+            "the caller must say how much it is asking for"
+        )
+        return False, None
+    return True, estimate
+
+
+def _attempt(
+    job: Job, p: base.Provider, request: Request, key: str, note: str, errors: list[str]
+) -> Result | None:
+    """One provider's try. A result, or None to move on to the next; raises what must stop."""
+    capability = request.capability
+    ok, estimate = _priced(job, p, request, errors)
+    if not ok:
+        return None
+    dry = rehearsal.active()
+    if dry is not None and not (p.free or p.rehearses):
+        raise ContractError(
+            f"{job.id}: {p.name} cannot rehearse {capability}, so the rehearsal stops before it"
+        )
+    if not p.free and dry is None:
+        gates.refuse_paid(job, p.name, capability)
+    reservation = job.reserve(p.name, capability, estimate or 0.0)
+    one = _Try(job, p, request, key, note, errors, estimate, reservation)
+    if dry is not None and not p.free:
+        dry.begin(one.aid, request, p.name, estimate, note, key=key, model=one.model)
+    try:
+        res = _call(getattr(p, request.method), (one.sent, one.ctx), one.limit)
+    except BaseException as exc:  # noqa: BLE001 - each kind is sorted in _Try.failed
+        one.failed(exc)
+        return None
+    return one.kept(res, dry)
+
+
+class _Try:
+    """One attempt at one provider: its id, its context, and how its outcome is written down."""
+
+    def __init__(
+        self,
+        job: Job,
+        p: base.Provider,
+        request: Request,
+        key: str,
+        note: str,
+        errors: list[str],
+        estimate: float | None,
+        reservation: Any,
+    ) -> None:
+        self.job, self.p, self.request, self.key, self.note = job, p, request, key, note
+        self.errors, self.estimate, self.reservation = errors, estimate, reservation
+        self.aid, self.model = uuid.uuid4().hex[:12], request.model_for(p.name)
+        self.dst = request.output()
+        self.attempt = self.dst.with_name(f".{self.aid}.{self.dst.name}") if self.dst else None
+        self.sent = request.writing_to(self.attempt) if self.attempt else request
+        deadline = _deadline(request.capability)
+        self.limit = None if p.self_timed else deadline
+        self.ctx = Context(
+            job=job.id,
+            attempt=self.aid,
+            labels={"job": job.id, "attempt": self.aid, **trace.labels()},
+            model=self.model,
+            deadline_sec=deadline if p.self_timed else None,
+        )
+        self.trace = partial(
+            records.trace_attempt, job, request.capability, p, datetime.now(UTC).isoformat(),
+            time.monotonic(), self.model, self.aid, self.ctx.receipt,
+        )  # fmt: skip
+
+    def charge(
+        self, amount: float, why: str, made: str | None, meta: dict[str, Any] | None = None
+    ) -> None:
+        audit = records.audit(self.aid, made, meta, self.ctx.receipt)
+        note = f"{self.note}: {why}" if why else self.note
+        self.job.charge(self.p.name, self.request.capability, amount, note, self.reservation, audit)
+
+    def _moved_on(self, said: str) -> None:
+        self.errors.append(f"{self.p.name}: {said}")
+
+    def failed(self, exc: BaseException) -> None:
+        """Write a failed call down, then move on, or raise what must stop the walk."""
+        kind, said = type(exc).__name__, str(exc)
+        if isinstance(exc, TimeoutError):  # ours, or an adapter's own wait: either may be billed
+            self.trace(outcome="timeout", estimate=self.estimate, settled=self.estimate or 0.0,
+                       error_class=kind, detail=said)  # fmt: skip
+            self.charge(self.estimate or 0.0, "timed out, may have been billed", self.model)
+            return self._moved_on(said)
+        if isinstance(exc, BilledError):
+            self.trace(outcome="error", estimate=self.estimate, settled=exc.billed,
+                       error_class=kind, detail=said)  # fmt: skip
+            self.charge(exc.billed, "billed, then failed", self.model)
+            return self._moved_on(said[:300])
+        self.job.release(self.reservation)
+        if isinstance(exc, ContractError) or not isinstance(exc, PROVIDER_FAILURES):
+            raise exc  # a rule the engine set, a bug in an adapter, or the cap: nothing left held
+        refused = isinstance(exc, RefusalError)
+        self.trace(outcome="refused" if refused else "error", estimate=self.estimate,
+                   error_class=kind, detail=said)  # fmt: skip
+        if isinstance(
+            exc, InvalidRequestError
+        ):  # the engine's mapping is wrong; a fallback hides it
+            raise ProviderError(
+                f"{self.job.id}: {self.p.name} refused the {self.request.capability} request as "
+                f"malformed, so no other provider is tried and nothing more is spent: {said[:400]}"
+            ) from exc
+        return self._moved_on(f"{kind}: {said[:300]}")
+
+    def kept(self, res: Result, dry: rehearsal.Rehearsal | None) -> Result | None:
+        """A returned call, settled, its file checked and moved into place, and written down."""
+        _settle(self.p, res, self.ctx)
+        made = res.model or self.model
+        prices.learn(self.job, self.p.name, made or "", res.meta)
+        if self.attempt is not None and self.dst is not None:
+            problem = self._file_problem()
+            if problem:
+                self.trace(outcome="error", estimate=self.estimate, settled=res.cost,
+                           meta=res.meta, error_class=problem[0], detail=problem[1])  # fmt: skip
+                self.charge(res.cost, problem[2], made, res.meta)
+                self._moved_on(problem[3])
+                return None
+            if dry is not None and not self.p.free:
+                dry.settle(self.aid, res.cost, res.model, res.meta)
+            os.replace(self.attempt, self.dst)
+            res.path = self.dst
+            if not self.p.placeholder:
+                records.record(
+                    self.job, self.key, self.p, res, self.dst, self.aid, self.ctx.receipt
+                )
+        self.charge(res.cost, "", made, res.meta)
+        self.trace(outcome="ok", estimate=self.estimate, settled=res.cost, made=res.model or None,
+                   model_version=res.version, meta=res.meta)  # fmt: skip
+        return res
+
+    def _file_problem(self) -> tuple[str, str, str, str] | None:
+        """Why the returned file cannot be kept: error class, detail, ledger note, walk note."""
+        assert self.attempt is not None
+        if not self.attempt.is_file():
+            return "NoFile", "the provider returned no file", "no file", "returned no file"
+        try:
+            _check_output(self.sent, self.attempt)
+        except PROVIDER_FAILURES as exc:
+            self.attempt.unlink(missing_ok=True)
+            said = f"output rejected: {exc}"
+            return type(exc).__name__, said, "output rejected", f"rejected output: {str(exc)[:200]}"
+        return None
+
+
 def motion(job: Job, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Path:
     """Transfer the driving clip's motion to a character image through the selected provider."""
-    _, result = generate(
-        job,
-        "motion",
-        "motion",
-        character_image,
-        driving_video,
-        dst,
-        est={"duration": media.duration(driving_video)},
-        note="motion transfer",
-        **kw,
-    )
+    request = MotionRequest(character=character_image, driving=driving_video, dst=dst, **kw)
+    _, result = generate(job, request, note="motion transfer")
     return result.path or dst

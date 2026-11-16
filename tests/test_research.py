@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 
 import pytest
-from fakes import make_job
+from fakes import context, make_job
 
 from kalainova import plan, research
 from kalainova.jobfs import ContractError
 from kalainova.providers import search as search_providers
+from kalainova.providers import transport
+from kalainova.providers.contract import SearchRequest
 
 PAGE = "The bridge first opened in 1849.\nIts tolls ended in 1988, closing the collector's post."
 
@@ -223,7 +225,7 @@ def test_an_openalex_abstract_is_put_back_in_order(monkeypatch):
     monkeypatch.setattr(
         search_providers.requests, "get", lambda *a, **k: Reply({"results": [work]})
     )
-    hit = search_providers.OpenAlex().search("q").meta["hits"][0]
+    hit = search_providers.OpenAlex().search(SearchRequest(query="q"), context()).hits[0]
     assert hit["text"] == "The bridge failed"
     assert hit["reliability"] == "primary" and hit["publisher"] == "A Journal"
 
@@ -231,7 +233,7 @@ def test_an_openalex_abstract_is_put_back_in_order(monkeypatch):
 def test_a_wikipedia_hit_points_at_the_page(monkeypatch):
     body = {"pages": [{"key": "Bridge", "title": "Bridge"}]}
     monkeypatch.setattr(search_providers.requests, "get", lambda *a, **k: Reply(body))
-    hit = search_providers.Wikipedia().search("q").meta["hits"][0]
+    hit = search_providers.Wikipedia().search(SearchRequest(query="q"), context()).hits[0]
     assert hit["url"] == "https://en.wikipedia.org/wiki/Bridge"
 
 
@@ -244,8 +246,8 @@ def test_exa_needs_a_key_and_sends_it(monkeypatch):
         return Reply({"results": [{"url": "https://a.example", "title": "A", "text": "Words."}]})
 
     monkeypatch.setenv("EXA_API_KEY", "k")
-    monkeypatch.setattr(search_providers.requests, "post", post)
-    hit = search_providers.Exa().search("q").meta["hits"][0]
+    monkeypatch.setattr(transport.requests, "post", post)
+    hit = search_providers.Exa().search(SearchRequest(query="q"), context()).hits[0]
     assert sent["headers"]["x-api-key"] == "k" and hit["text"] == "Words."
 
 

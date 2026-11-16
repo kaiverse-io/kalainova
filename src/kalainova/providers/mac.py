@@ -23,7 +23,22 @@ from typing import Any
 
 from .. import media
 from ..config import model_for
-from .base import Provider, Result, register
+from .base import Provider, register
+from .contract import (
+    Context,
+    ImageRequest,
+    Inputs,
+    MotionRequest,
+    MusicRequest,
+    Result,
+    Sent,
+    SeparateRequest,
+    SongRequest,
+    TranscribeRequest,
+    VideoRequest,
+    VoiceRequest,
+    Word,
+)
 from .local import estimate_words
 
 PYTHON_ENV = "KALAINOVA_MLX_PYTHON"
@@ -87,14 +102,9 @@ def _weights_revision(repo: str) -> str | None:
     return ref.read_text().strip() if ref.is_file() else None
 
 
-def _made_by(repo: str, seed: int | str | None = None) -> dict[str, Any]:
-    meta: dict[str, Any] = {}
+def _made_by(repo: str) -> dict[str, Any]:
     revision = _weights_revision(repo)
-    if revision:
-        meta["weights_revision"] = revision
-    if seed is not None:
-        meta["seed"] = int(seed)
-    return meta
+    return {"weights_revision": revision} if revision else {}
 
 
 def _heard(audio: Path, timeout: float | None = None) -> list[dict[str, Any]]:
@@ -116,25 +126,23 @@ def _heard(audio: Path, timeout: float | None = None) -> list[dict[str, Any]]:
         return list(json.loads(found.read_text()).get("segments") or []) if found else []
 
 
-def _timed_words(audio: Path, text: str) -> list[dict[str, Any]]:
+def _timed_words(audio: Path, text: str) -> list[Word]:
     """Whisper gives a sentence's real start and end; the script's words are spread inside it."""
     segments = _heard(audio)
     if not segments:
         return estimate_words(text, media.duration(audio))
     start, end = float(segments[0]["start"]), float(segments[-1]["end"])
     words = estimate_words(text, max(end - start, 0.1), offset=start)
-    return [{**w, "confidence": 0.85} for w in words]
+    for w in words:
+        w["confidence"] = 0.85
+    return words
 
 
-def _song_options(kw: dict[str, Any]) -> list[str]:
+def _song_options(req: SongRequest) -> list[str]:
     """What a song asks of its engine beyond the words, in the runners' shared flags."""
-    options = [
-        arg
-        for flag, key in (("--bpm", "bpm"), ("--key", "key"), ("--language", "language"))
-        if kw.get(key)
-        for arg in (flag, str(kw[key]))
-    ]
-    return [*options, "--instrumental"] if kw.get("instrumental") else options
+    asked = (("--bpm", req.bpm), ("--key", req.musical_key), ("--language", req.language))
+    options = [arg for flag, value in asked if value for arg in (flag, str(value))]
+    return [*options, "--instrumental"] if req.instrumental else options
 
 
 @register
@@ -145,8 +153,10 @@ class Mac(Provider):
     free = True
     self_timed = True
 
-    def supports_song_repaint(self) -> bool:
-        return model_for("mac", "song") == "ace-step"
+    def inputs(self, capability: str, model: str | None = None) -> Inputs:
+        if capability == "song":
+            return Inputs(repaint=(model or model_for("mac", "song")) == "ace-step")
+        return super().inputs(capability, model)
 
     def missing_env(self, capability: str = "") -> list[str]:
         missing = super().missing_env(capability)
@@ -155,8 +165,9 @@ class Mac(Provider):
                 missing.append(SONG_PYTHON_ENV)
         return missing
 
-    def voice(self, text: str, dst: Path, *, voice: str | None = None, **kw: Any) -> Result:
-        name = voice or "am_michael"
+    def voice(self, req: VoiceRequest, ctx: Context) -> Result:
+        text, dst = req.text, req.dst
+        name = req.voice or "am_michael"
         model = model_for("mac", "voice")
         with tempfile.TemporaryDirectory() as tmp:
             _run(
@@ -170,7 +181,7 @@ class Mac(Provider):
                     "--file_prefix", "v",
                     "--join_audio",
                 ],
-                kw.get("deadline_sec"),
+                ctx.deadline_sec,
             )  # fmt: skip
             raw = next(Path(tmp).glob("v*.wav"))
             media.run(["-i", str(raw), "-ar", "48000", "-ac", "1", str(dst)])
@@ -178,11 +189,12 @@ class Mac(Provider):
             path=dst, model=f"{model}:{name}", words=_timed_words(dst, text), meta=_made_by(model)
         )
 
-    def image(self, prompt: str, dst: Path, *, width: int, height: int, **kw: Any) -> Result:
+    def image(self, req: ImageRequest, ctx: Context) -> Result:
+        prompt, dst, width, height = req.prompt, req.dst, req.width, req.height
         scale = min(1.0, STILL_MOST_PIXELS / (width * height)) ** 0.5
         w, h = int(width * scale) // 16 * 16, int(height * scale) // 16 * 16
         command = model_for("mac", "image")
-        seed = kw.get("seed") if kw.get("seed") is not None else _seed(prompt)
+        seed = req.seed if req.seed is not None else int(_seed(prompt))
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / "i.png"
             _run(
@@ -196,31 +208,29 @@ class Mac(Provider):
                     "--quantize", "8",
                     "--output", str(raw),
                 ],
-                kw.get("deadline_sec"),
+                ctx.deadline_sec,
             )  # fmt: skip
             # the output keeps its name for the file, and the router's temporary name has no type
             made = Path(tmp) / "out.png"
             media.run(["-i", str(raw), "-frames:v", "1", "-update", "1", str(made)])
             made.replace(dst)
-        return Result(path=dst, model=command, meta=_made_by(command, seed))
+        return Result(path=dst, model=command, seed=int(seed), meta=_made_by(command))
 
-    def video(
-        self,
-        prompt: str,
-        dst: Path,
-        *,
-        duration: float,
-        aspect: str,
-        image: Path | None = None,
-        **kw: Any,
-    ) -> Result:
+    def video(self, req: VideoRequest, ctx: Context) -> Result:
+        prompt, dst, duration, aspect, image = (
+            req.prompt,
+            req.dst,
+            req.duration,
+            req.aspect,
+            req.start,
+        )
         w, h = VIDEO_SIZE if aspect == "16:9" else (VIDEO_SIZE[1], VIDEO_SIZE[0])
         # the model takes 8n+1 frames
         frames = math.ceil((duration + VIDEO_MARGIN_SEC) * VIDEO_FPS / 8) * 8 + 1
         # a style line written for stills; "film still" asks a video model for no motion
         prompt = prompt.replace("film still, ", "")
         model = model_for("mac", "video")
-        seed = kw.get("seed") if kw.get("seed") is not None else _seed(prompt)
+        seed = req.seed if req.seed is not None else int(_seed(prompt))
         raw = dst.with_suffix(".raw.mp4")
         cmd = [
             str(_python()), str(LTX_RUNNER),
@@ -232,17 +242,24 @@ class Mac(Provider):
             "--model-repo", model,
             "--output-path", str(raw),
         ]  # fmt: skip
-        if not kw.get("audio"):
+        if not req.sound:
             cmd.append("--no-audio")
         if image:
             cmd += ["--image", str(image), "--image-strength", "1.0"]
         needed = frames * SECONDS_PER_VIDEO_FRAME * DEADLINE_MARGIN
-        limit = kw.get("deadline_sec")
+        limit = ctx.deadline_sec
         _run(cmd, max(float(limit), needed) if limit else None)
         raw.replace(dst)
-        return Result(path=dst, model=model, meta=_made_by(model, seed))
+        return Result(
+            path=dst,
+            model=model,
+            seed=int(seed),
+            sent=Sent(start_frame=image is not None, end_frame=False, seeded=True),
+            meta=_made_by(model),
+        )
 
-    def motion(self, character_image: Path, driving_video: Path, dst: Path, **kw: Any) -> Result:
+    def motion(self, req: MotionRequest, ctx: Context) -> Result:
+        character_image, driving_video, dst = req.character, req.driving, req.dst
         model = model_for("mac", "motion")
         _run(
             [
@@ -254,11 +271,12 @@ class Mac(Provider):
                 "--output",
                 str(dst),
             ],
-            kw.get("deadline_sec"),
+            ctx.deadline_sec,
         )
         return Result(path=dst, model=model, meta={"character_image": character_image.name})
 
-    def music(self, prompt: str, dst: Path, *, duration: float, **kw: Any) -> Result:
+    def music(self, req: MusicRequest, ctx: Context) -> Result:
+        prompt, dst, duration = req.prompt, req.dst, req.duration
         model = model_for("mac", "music")
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / "m.wav"
@@ -273,21 +291,14 @@ class Mac(Provider):
                     "--seed", _seed(prompt),
                     "--output", str(raw),
                 ],
-                kw.get("deadline_sec"),
+                ctx.deadline_sec,
             )  # fmt: skip
             media.run(["-i", str(raw), "-ar", "48000", "-ac", "2", str(dst)])
         return Result(path=dst, model=model, meta=_made_by(model))
 
-    def song(
-        self,
-        lyrics: str,
-        dst: Path,
-        *,
-        style: str = "",
-        duration: float | None = None,
-        **kw: Any,
-    ) -> Result:
+    def song(self, req: SongRequest, ctx: Context) -> Result:
         """A song through the engine named in config, in its own environment, with its own seed."""
+        lyrics, dst, style, duration = req.lyrics, req.dst, req.style, req.duration
         engine = model_for("mac", "song") or "heartmula"
         python = os.environ.get(SONG_PYTHON_ENV)
         checkpoint = os.environ.get(SONG_CHECKPOINT_ENV)
@@ -296,7 +307,7 @@ class Mac(Provider):
                 f"a song on this machine needs {SONG_PYTHON_ENV}, {SONG_CHECKPOINT_ENV}, and a "
                 f"models.mac.song in {sorted(SONG_RUNNERS)}"
             )
-        seed = int(kw["seed"]) if kw.get("seed") is not None else int(_seed(lyrics + style))
+        seed = int(req.seed) if req.seed is not None else int(_seed(lyrics + style))
         with tempfile.TemporaryDirectory() as tmp:
             words, tags, raw = (Path(tmp) / name for name in ("lyrics.txt", "tags.txt", "s.wav"))
             words.write_text(lyrics)
@@ -310,23 +321,26 @@ class Mac(Provider):
                 "--seed", str(seed),
                 "--out", str(raw),
             ]  # fmt: skip
-            if kw.get("task_type") == "repaint":
+            if req.repaint is not None:
+                if engine != "ace-step":
+                    raise ValueError(f"{engine} cannot repaint a span of a take")
                 cmd += [
                     "--task-type",
                     "repaint",
                     "--src-audio",
-                    str(kw["src_audio_path"]),
+                    str(req.repaint.source),
                     "--repainting-start",
-                    str(kw["repainting_start"]),
+                    str(req.repaint.start_sec),
                     "--repainting-end",
-                    str(kw["repainting_end"]),
+                    str(req.repaint.end_sec),
                 ]
-            _run([*cmd, *_song_options(kw)], kw.get("deadline_sec"))
+            _run([*cmd, *_song_options(req)], ctx.deadline_sec)
             media.run(["-i", str(raw), "-ar", "48000", "-ac", "2", str(dst)])
-        return Result(path=dst, model=engine, meta={"seed": seed})
+        return Result(path=dst, model=engine, seed=seed)
 
-    def separate(self, src: Path, vocals: Path, rest: Path, **kw: Any) -> Result:
+    def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Split a mix with audio-separator, installed in the model environment."""
+        src, vocals, rest = req.src, req.vocals, req.rest
         with tempfile.TemporaryDirectory() as tmp:
             _run(
                 [
@@ -334,7 +348,7 @@ class Mac(Provider):
                     "--output_dir", tmp,
                     "--output_format", "WAV",
                 ],
-                kw.get("deadline_sec"),
+                ctx.deadline_sec,
             )  # fmt: skip
             found = sorted(Path(tmp).glob("*.wav"))
             sung = next((f for f in found if "vocals" in f.name.lower()), None)
@@ -345,9 +359,9 @@ class Mac(Provider):
                 media.run(["-i", str(stem), "-ar", "48000", "-ac", "2", "-f", "wav", str(dst)])
         return Result(path=vocals, model="audio-separator")
 
-    def transcribe(self, src: Path, **kw: Any) -> Result:
-        segments = _heard(src, kw.get("deadline_sec"))
-        words: list[dict[str, Any]] = []
+    def transcribe(self, req: TranscribeRequest, ctx: Context) -> Result:
+        segments = _heard(req.src, ctx.deadline_sec)
+        words: list[Word] = []
         for seg in segments:
             start, end = float(seg["start"]), float(seg["end"])
             words += estimate_words(seg["text"].strip(), max(end - start, 0.1), offset=start)

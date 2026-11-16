@@ -10,3 +10,6 @@ Media bytes live under the job's work dir (gitignored). JSON lives in the job fo
 """
 
 __version__ = "0.2.0"
+
+# What every request this engine makes on its own says about itself: the project, never a person.
+HTTP_HEADERS = {"User-Agent": "Kalainova/0.1 (https://github.com/kaiverse-io/kalainova)"}

@@ -64,3 +64,23 @@ source_modules =
 forbidden_modules =
     kalainova.publish
     kalainova.providers
+
+[importlinter:contract:vendors-stay-behind-the-port]
+name = Only the providers package reaches a vendor's adapter or transport; the engine asks the router in the contract's terms (ADR 0023)
+type = protected
+protected_modules =
+    kalainova.providers.fal
+    kalainova.providers.remote
+    kalainova.providers.compat
+    kalainova.providers.search
+    kalainova.providers.spaces
+    kalainova.providers.hyperframes
+    kalainova.providers.whispercpp
+    kalainova.providers.mac
+    kalainova.providers.local
+    kalainova.providers.transport
+allowed_importers =
+    kalainova.providers
+broken_contract_guidance =
+    Ask router.generate with a request from providers/contract.py, or describe what a model takes
+    with Provider.inputs; a vendor's own module is the adapter's business.

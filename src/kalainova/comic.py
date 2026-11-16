@@ -22,6 +22,7 @@ from .bar import identity
 from .jobfs import ContractError, Job
 from .kits import blob_path
 from .providers import router
+from .providers.contract import ImageRequest
 
 Arr = npt.NDArray[Any]
 
@@ -320,9 +321,12 @@ def _make_art(job: Job, panel: dict[str, Any], rect: Rect, ctx: dict[str, Any]) 
     dst = job.work / "panels" / f"{panel['id']}.png"
     w, h = art_size(rect.w, rect.h)
     beat = {"text": panel["art"], "visual_cue": panel["art"], **_shot_fields(panel)}
-    refs = shotmake.shot_kw(ctx["resolved"], ctx["lock"], "image", beat)
+    held = shotmake.shot_kw(ctx["resolved"], ctx["lock"], "image", beat)
     prompt = _art_prompt(ctx["resolved"], panel, ctx["style"])
-    provider, res = router.generate(job, "image", "image", prompt, dst, width=w, height=h, **refs)
+    art = ImageRequest(
+        prompt=prompt, dst=dst, width=w, height=h, references=held.references, pin=held.pin
+    )
+    provider, res = router.generate(job, art)
     return {
         k: v
         for k, v in {

@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 from . import kitrules, kits
 from .jobfs import ContractError, Job, dump, home
 from .providers import base, router
+from .providers.contract import Card, ImageRequest, Pin, Reference
 from .timeline import _label_font
 
 CELL_HEIGHT = 240
@@ -155,10 +156,10 @@ def make_test_stills(
     if not refs:
         raise ContractError(f"kit {kit_id} has no identity reference to test a look with")
     try:
-        support = base.get(provider).reference_support("image", model)
+        support = base.get(provider).inputs("image", model)
     except KeyError as exc:
         raise ContractError(str(exc)) from exc
-    if not support:
+    if not support.references:
         raise ContractError(
             f"{provider}/{model} takes no reference images, so a test still would not show the "
             "character. Pick one listed under reference_models in config/studio.yaml"
@@ -181,10 +182,15 @@ def make_test_stills(
         )
         dst = out_dir(kit_id) / f"test-{name}.png"
         dst.parent.mkdir(parents=True, exist_ok=True)
-        router.generate(
-            job, "image", "image", text + ".", dst,
-            width=1024, height=1024, title=name, palette=0, style="studio",
-            only=[provider], model=model, references=wanted[: support["max_images"]],
+        refs = tuple(
+            Reference(path=r["path"], label=r["label"], group=r["group"], sha256=r["sha256"])
+            for r in wanted[: support.references]
+        )
+        still = ImageRequest(
+            prompt=text + ".", dst=dst, width=1024, height=1024,
+            card=Card(title=name, palette=0, theme="studio"),
+            references=refs, pin=Pin(provider=provider, model=model),
         )  # fmt: skip
+        router.generate(job, still, only=[provider])
         made.append((name, dst))
     return made

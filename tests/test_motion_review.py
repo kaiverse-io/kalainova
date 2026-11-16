@@ -138,11 +138,11 @@ def test_qa_sends_the_judge_the_motion_strip_and_keeps_its_findings(tmp_path, st
         ],
     }
 
-    def judged(job_, capability, fn, text, **kw):
+    def judged(job_, request, **kw):
         if kw.get("note") == "qa-judge":
-            seen.update(kw)
+            seen.update(images=request.images)
             return None, type("Reply", (), {"text": json.dumps(reply)})
-        return real(job_, capability, fn, text, **kw)
+        return real(job_, request, **kw)
 
     real = router.generate
     monkeypatch.setattr(router, "generate", judged)
@@ -254,12 +254,17 @@ def test_qa_warns_about_a_long_character_shot_and_never_fails_on_it():
 
 
 def test_a_short_clip_is_priced_at_the_length_the_model_bills():
+    from kalainova.providers.contract import Billable
     from kalainova.providers.fal import Fal
 
     fal = Fal()
-    short = fal.estimate("video", duration=2.0, image=True)
-    assert short and short == fal.estimate("video", duration=3.0, image=True)
-    assert short < fal.estimate("video", duration=4.0, image=True)
+
+    def clip(seconds):
+        return fal.estimate(Billable(capability="video", duration=seconds, image=True))
+
+    short = clip(2.0)
+    assert short and short == clip(3.0)
+    assert short < clip(4.0)
 
 
 # ---- safe zones --------------------------------------------------------------------------

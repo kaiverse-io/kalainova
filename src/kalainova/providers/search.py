@@ -7,14 +7,16 @@ the open web and needs a key. A request names this project and never a person.
 from __future__ import annotations
 
 import os
-from typing import Any
 
 import requests
 
-from .base import Provider, Result, register
+from .. import HTTP_HEADERS
+from .base import Provider, register
+from .contract import Context, Hit, Result, SearchRequest
+from .transport import Https, Transport, raise_for
 
 TIMEOUT = 30
-HEADERS = {"User-Agent": "Kalainova/0.1 (https://github.com/kaiverse-io/kalainova)"}
+HEADERS = HTTP_HEADERS
 
 
 def _abstract(inverted: dict[str, list[int]] | None) -> str:
@@ -32,15 +34,15 @@ class Wikipedia(Provider):
     free = True
     synthetic = False
 
-    def search(self, query: str, *, limit: int = 5, **kw: Any) -> Result:
+    def search(self, req: SearchRequest, ctx: Context) -> Result:
         found = requests.get(
             "https://en.wikipedia.org/w/rest.php/v1/search/page",
-            params={"q": query, "limit": str(limit)},
+            params={"q": req.query, "limit": str(req.limit)},
             headers=HEADERS,
             timeout=TIMEOUT,
         )
-        found.raise_for_status()
-        hits = []
+        raise_for(found, self.name)
+        hits: list[Hit] = []
         for page in found.json().get("pages", []):
             title = str(page.get("key", ""))
             hits.append(
@@ -51,7 +53,7 @@ class Wikipedia(Provider):
                     "reliability": "reference",
                 }
             )
-        return Result(model="wikipedia", meta={"hits": hits})
+        return Result(model="wikipedia", hits=hits)
 
 
 @register
@@ -61,15 +63,15 @@ class OpenAlex(Provider):
     free = True
     synthetic = False
 
-    def search(self, query: str, *, limit: int = 5, **kw: Any) -> Result:
+    def search(self, req: SearchRequest, ctx: Context) -> Result:
         found = requests.get(
             "https://api.openalex.org/works",
-            params={"search": query, "per-page": str(limit)},
+            params={"search": req.query, "per-page": str(req.limit)},
             headers=HEADERS,
             timeout=TIMEOUT,
         )
-        found.raise_for_status()
-        hits = []
+        raise_for(found, self.name)
+        hits: list[Hit] = []
         for work in found.json().get("results", []):
             url = work.get("doi") or work.get("id")
             if not url:
@@ -85,7 +87,11 @@ class OpenAlex(Provider):
                     "text": _abstract(work.get("abstract_inverted_index")),
                 }
             )
-        return Result(model="openalex", meta={"hits": hits})
+        return Result(model="openalex", hits=hits)
+
+
+def _exa_headers() -> dict[str, str]:
+    return {**HEADERS, "x-api-key": os.environ["EXA_API_KEY"]}
 
 
 @register
@@ -94,16 +100,13 @@ class Exa(Provider):
     capabilities = ("search",)
     env_key = "EXA_API_KEY"
     synthetic = False
+    rehearses = True
+    transport: Transport = Https("exa", "https://api.exa.ai", _exa_headers)
 
-    def search(self, query: str, *, limit: int = 5, **kw: Any) -> Result:
-        found = requests.post(
-            "https://api.exa.ai/search",
-            headers={**HEADERS, "x-api-key": os.environ[self.env_key]},
-            json={"query": query, "numResults": limit, "contents": {"text": True}},
-            timeout=TIMEOUT,
-        )
-        found.raise_for_status()
-        hits = [
+    def search(self, req: SearchRequest, ctx: Context) -> Result:
+        body = {"query": req.query, "numResults": req.limit, "contents": {"text": True}}
+        reply = self.transport.send("search", body, ctx, wait=TIMEOUT)
+        hits: list[Hit] = [
             {
                 "url": str(item.get("url", "")),
                 "title": str(item.get("title") or item.get("url", "")),
@@ -111,7 +114,7 @@ class Exa(Provider):
                 "reliability": "unknown",
                 "text": str(item.get("text") or ""),
             }
-            for item in found.json().get("results", [])
+            for item in reply.get("results", [])
             if item.get("url")
         ]
-        return Result(model="exa", meta={"hits": hits})
+        return Result(model="exa", hits=hits)

@@ -13,7 +13,8 @@
 | Look sheet for a kit's candidate references | `kalainova look` | `lookdev.py`, `studio_cli.py` | `tests/test_preproduction.py` |
 | Plan review before spending | `kalainova shotplan` | `shots.py` | `tests/test_shots.py` |
 | Takes and retakes | `kalainova takes`, `take`, `retake` | `takes.py`, `shotmake.py` | `tests/test_takes.py` |
-| See every paid request and its price before spending | `kalainova rehearse`, `scripts/check_fal_schemas.py --rehearsal` | `rehearse.py`, `providers/rehearsal.py`, `providers/router.py`, `providers/fal.py` | `tests/test_rehearsal.py` |
+| See every paid request and its price before spending | `kalainova rehearse`, `scripts/check_fal_schemas.py --rehearsal` | `rehearse.py`, `providers/rehearsal.py`, `providers/transport.py`, `providers/router.py` | `tests/test_rehearsal.py` |
+| Add or swap a vendor without touching the engine (ADR 0023) | a new adapter in `providers/`, its rows in `config/studio.yaml` | `providers/contract.py`, `providers/base.py`, `providers/transport.py` | `tests/boundary/test_provider_contract.py`, `tests/test_request_keys.py`, `tests/test_transport.py` |
 | Stop every paid call in a studio at once | `kalainova stop --by NAME`, `kalainova resume --by NAME` | `gates.py`, `providers/router.py` | `tests/test_gates.py` |
 | Prices checked against the vendor and the studio's own bills | `kalainova ledger`, `scripts/check_fal_prices.py` | `providers/prices.py`, `providers/records.py`, `providers/fal.py`, `config/studio.yaml` | `tests/test_price_corrections.py`, `tests/test_call_audit.py`, `tests/test_prices.py` |
 | Judge every take by eye on one page | `kalainova review` | `reviewpage.py` | `tests/test_review_page.py` |

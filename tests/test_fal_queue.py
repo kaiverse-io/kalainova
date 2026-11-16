@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from fakes import Reply
+from fakes import Reply, context
 
 from kalainova.providers import fal
+from kalainova.providers.contract import Billable, UnauthorizedError
 
 
 @pytest.mark.parametrize(
@@ -18,11 +19,11 @@ from kalainova.providers import fal
     ],
 )
 def test_a_clip_is_priced_by_what_it_was_given(request_, expected):
-    assert fal.Fal().price_key("video", request_) == expected
+    assert fal.Fal().price_key(Billable(capability="video", **request_)) == expected
 
 
 def test_only_a_clip_changes_its_price_key():
-    assert fal.Fal().price_key("image", {"references": True}) == "image"
+    assert fal.Fal().price_key(Billable(capability="image", references=True)) == "image"
 
 
 class Queue:
@@ -49,17 +50,17 @@ class Queue:
 
 def test_a_queued_call_polls_until_the_model_is_done(monkeypatch):
     Queue(monkeypatch, [Reply(body={"status": "IN_QUEUE"}), Reply(body={"status": "COMPLETED"})])
-    assert fal.Fal()._run("m", {}) == {"done": True}
+    assert fal.FalQueue().send("m", {}, context()).data == {"done": True}
 
 
 def test_a_bad_key_fails_at_once_and_not_after_the_timeout(monkeypatch):
     Queue(monkeypatch, [Reply(status=401)])
-    with pytest.raises(OSError, match="401"):
-        fal.Fal()._run("m", {})
+    with pytest.raises(UnauthorizedError, match="401"):
+        fal.FalQueue().send("m", {}, context())
 
 
 def test_a_timed_out_call_is_cancelled_so_nobody_pays_for_it(monkeypatch):
     queue = Queue(monkeypatch, [])
     with pytest.raises(TimeoutError):
-        fal.Fal()._run("m", {}, timeout=-1)
+        fal.FalQueue().send("m", {}, context(), wait=-1)
     assert queue.cancelled == ["c"]

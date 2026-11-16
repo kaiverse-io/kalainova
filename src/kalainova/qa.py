@@ -12,6 +12,7 @@ import re
 from . import bar, config, media, prompts, qachecks, research, timeline
 from .jobfs import DOCUMENT_MEDIA, CostCapExceeded, Job
 from .providers import router
+from .providers.contract import JudgeRequest, TextRequest
 
 
 def _check(checks: list, cid: str, ok: bool, detail: str, severity: str = "fail") -> None:
@@ -386,23 +387,18 @@ def run(job: Job) -> dict:
         if sheet and passed_beats:
             from .plan import extract_json
 
-            cap = "judge" if router.available(job, "judge") else "llm"
-            pref = config.preference(cap, job.job)
-            prov = pref[0] if pref else "fake"
-            judge_model = config.model_for(prov, "judge") or config.model_for(prov, "llm")
-            _, res = router.generate(
-                job,
-                cap,
-                cap,
-                prompts.load("qa_rubric").format(
+            # each provider runs the check on its own judge model; none gets another vendor's id
+            ask = JudgeRequest if router.available(job, "judge") else TextRequest
+            rubric = ask(
+                prompt=prompts.load("qa_rubric").format(
                     shape=qachecks.shape(prof),
                     script=qachecks.judge_script(packet, exclude_beats=failed_beats),
                 ),
-                images=[job.work / sheet, *([job.work / motion] if motion else [])],
+                images=(job.work / sheet, *([job.work / motion] if motion else [])),
                 max_tokens=1600,
-                model=judge_model,
-                note="qa-judge",
+                judging=True,
             )
+            _, res = router.generate(job, rubric, note="qa-judge")
             judge = extract_json(res.text)
             _keep_findings(job, judge)
             checks.extend(qachecks.judged_shots(judge))
