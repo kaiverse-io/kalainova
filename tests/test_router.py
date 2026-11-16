@@ -133,7 +133,9 @@ def providers(monkeypatch, tmp_path):
         cls.clip = Flaky.clip
         monkeypatch.setitem(base._REGISTRY, cls.name, cls)
     monkeypatch.setattr(
-        base.config, "price_for", lambda provider, key: dict(PRICES.get(provider, {}).get(key, {}))
+        base.config,
+        "price_for",
+        lambda provider, key, model=None: dict(PRICES.get(provider, {}).get(key, {})),
     )
     yield
 

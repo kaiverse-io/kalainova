@@ -111,11 +111,19 @@ prices:
     image_to_video: {per_sec: 0.28}
     reference_to_video: {per_sec: 0.28}
     # A model's own row wins over its capability's. Without one, a cheaper model is estimated and
-    # recorded at the capability's rate. Audio off; fal's pages, read 2026-11-16.
-    fal-ai/kling-video/o3/pro/reference-to-video: {per_sec: 0.112}
-    fal-ai/kling-video/v3/pro/image-to-video: {per_sec: 0.112}
+    # recorded at the capability's rate.
+    # fal's pricing API, read 2026-11-16 (scripts/check_fal_prices.py). fal's model pages also say
+    # $0.112 with audio off, and the reference playground $0.224; the billed units of a real call
+    # settle it (X-Fal-Billable-Units, kept on every ledger line).
+    fal-ai/kling-video/o3/pro/reference-to-video: {per_sec: 0.14}
+    fal-ai/kling-video/v3/pro/image-to-video: {per_sec: 0.14}
+    # fal's model page, read 2026-11-16: $0.068/s at 480p, $0.14 at 720p, $0.28 at 1080p
+    alibaba/wan-3.0-prime/image-to-video: {per_sec: 0.28, checked: "1080p rate from fal's model page; the pricing API's 0.045 is a base unit"}
+    alibaba/wan-3.0-prime/reference-to-video: {per_sec: 0.28, checked: "1080p rate from fal's model page; the pricing API's 0.045 is a base unit"}
+    alibaba/wan-3.0-prime/text-to-video: {per_sec: 0.28, checked: "1080p rate from fal's model page; the pricing API's 0.045 is a base unit"}
     music: {per_track: 0.04}
     song: {per_track: 0.15}        # ESTIMATE
+    minimax/music-3: {per_track: 0.36, checked: "fal lists $0.002/s; 0.36 is three minutes at that rate, per track until billed units confirm"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007}    # ESTIMATE: per second of the mix. VERIFY on fal's page before a paid run
     lipsync: {per_min: 3.00}       # ESTIMATE

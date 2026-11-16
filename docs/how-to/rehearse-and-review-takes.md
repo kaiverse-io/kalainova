@@ -10,7 +10,7 @@ uv run kalainova rehearse <job>
 
 The job is copied to a throwaway folder that sees the same kits and streams, and its stills and moving shots run there. Each rented model's adapter writes down what it would send instead of sending it. Files it would upload are named by their hash, not sent. A stand-in file of the shape it asked for comes back, so the rest of the line runs. Nothing reaches a vendor, nothing is charged, and no key is needed.
 
-It prints one line per paid request: the model, the estimate, and the fields it would send. For each moving shot, it says whether the start frame and the end frame went with the request. Then it prints the total against what is left under the job's cap. The full record is `rehearsal.json` in the job's work folder. Check its fields against each model's live schema, which is free and needs no key:
+It prints one line per paid request: the model, the estimate, and the fields it would send. For each moving shot, it says whether the start frame and the end frame went with the request. Then it prints the total against what is left under the job's cap. The full record is `rehearsal.json` in the job's work folder. Every fal request is checked against its model's live schema as part of the rehearsal, which is free and needs no key. A field fal would refuse, or a required one that is missing, stops the rehearsal and is named. The same check can be run again on a saved report:
 
 ```bash
 uv run python scripts/check_fal_schemas.py --rehearsal <work>/<job>/rehearsal.json
@@ -23,6 +23,8 @@ What it cannot tell you:
 - How a model will read the request. Stand-ins are test patterns.
 - What a vendor charges beyond its listed price. The estimate is the price table's.
 - Anything about a provider that cannot rehearse. Only `fal` can today. Any other paid provider stops the rehearsal before it is called, and the report says where.
+  That holds even when its key is missing. The real run calls the first listed provider once its key is set, so a rehearsal never steps past it to show a different route.
+  To rehearse past it, pin the job to a provider that can, for example `"providers": {"music": ["fal"]}` in `job.json`.
 
 The animatic gate is passed in the copy only, so the rehearsal can reach the moving shots. The real run still makes no video until you accept the animatic (see [How to watch a rough cut](watch-a-rough-cut.md)).
 

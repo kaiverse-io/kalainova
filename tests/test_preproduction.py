@@ -9,7 +9,7 @@ from fakes import Studio, make_job, needs_ffmpeg
 from kit_fixtures import Stub, make_character
 from PIL import Image
 
-from kalainova import assets, kits, lookdev, preproduction, publish, verdicts
+from kalainova import assets, kits, lookdev, preproduction, publish, shotmake, verdicts
 from kalainova.blobstore import sha256_file
 from kalainova.jobfs import ContractError
 from kalainova.providers import base
@@ -455,3 +455,36 @@ def test_the_gate_holds_for_a_paid_video_provider_with_no_key_loaded(tmp_path, m
     monkeypatch.delenv("FAL_KEY", raising=False)
     job = _job(tmp_path, cost_cap=5.0, providers={"video": ["fal"], "image": ["fake"]})
     assert preproduction.gate_active(job), "a missing key does not make the video free"
+
+
+@needs_ffmpeg
+def test_a_reused_still_keeps_the_model_that_made_it(tmp_path, studio):
+    # The paid run reuses the accepted still; its record must still name who made it, or QA reads
+    # a still made with the kit's references as one made with none
+    job = _job(tmp_path, brief={"subject": "a test", "max_video_beats": 9, "animatic_gate": True})
+    _make(job)
+    verdicts.record(job, "accept", reviewer="a person", animatic=True)
+    manifest = assets.run(job)
+    still = next(a for a in manifest["assets"] if a["id"] == "b1.still")
+    assert still["provider"] == "fake"
+    assert still["model"] != "accepted animatic still"
+    assert still["provenance"]["accepted_in"] == "animatic"
+    assert still["provenance"]["sha256"] == sha256_file(job.work / "beats" / "b1.still.png")
+
+
+def test_kit_references_count_only_for_the_model_that_made_the_file(tmp_path):
+    job = make_job(tmp_path, beats=[_beat(1)])
+    made = job.work / "s.png"
+    made.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8), color="red").save(made)
+    entry = {"key": "k", "provider": "p", "model": "m1", "file": "s.png",
+             "sha256": sha256_file(made), "cost": 0.1, "words": [], "meta": {}}  # fmt: skip
+    (job.folder / "generations.jsonl").write_text(json.dumps(entry) + "\n")
+    shot = {"model": "m1", "references": [{"sha256": "face"}]}
+    found = shotmake.reused_origin(job, made, shot)
+    assert (found["provider"], found["model"]) == ("p", "m1")
+    assert found["provenance"]["kit_refs"] == ["face"]
+    other = shotmake.reused_origin(job, made, {**shot, "model": "m2"})
+    assert "kit_refs" not in other["provenance"]
+    Image.new("RGB", (8, 8), color="blue").save(made)  # bytes the router never made
+    assert shotmake.reused_origin(job, made, shot)["model"] == "accepted animatic still"

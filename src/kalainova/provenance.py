@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import config, takes, verdicts
+from . import config, takes, trace, verdicts
 from .blobstore import sha256_file
 from .jobfs import Job
 
@@ -92,13 +92,32 @@ def _files(job: Job) -> dict[str, str]:
     return out
 
 
+CALL_FIELDS = (
+    "started_at", "run_id", "stage", "shot", "attempt", "capability", "provider", "model",
+    "outcome", "estimated_cost", "settled_cost", "units", "request_id", "error_class",
+    "error_detail", "engine",
+)  # fmt: skip
+
+
 def _ledger(job: Job) -> dict[str, Any]:
+    """Money by provider, model, stage and shot, and every attempt from the trace, joined to the
+    ledger by attempt id. A charge with no trace row is listed, since an audit cannot explain it."""
     entries = json.loads(job.ledger_path.read_text()) if job.ledger_path.exists() else []
-    by_provider: dict[str, float] = {}
+    sums: dict[str, dict[str, float]] = {"provider": {}, "model": {}, "stage": {}, "shot": {}}
     for entry in entries:
-        name = str(entry.get("provider"))
-        by_provider[name] = round(by_provider.get(name, 0.0) + float(entry.get("cost", 0.0)), 6)
-    return {"total_estimated": round(job.spent(), 6), "by_provider": by_provider}
+        for by, totals in sums.items():
+            name = str(entry.get(by) or "")
+            totals[name] = round(totals.get(name, 0.0) + float(entry.get("cost", 0.0)), 6)
+    rows = trace.load(job)
+    traced = {r.get("attempt") for r in rows if r.get("attempt")}
+    return {
+        "total_estimated": round(job.spent(), 6),
+        **{f"by_{by}": totals for by, totals in sums.items()},
+        "calls": [{k: r.get(k) for k in CALL_FIELDS} for r in rows],
+        "charged_without_a_trace": [
+            e for e in entries if e.get("cost") and e.get("attempt") not in traced
+        ],
+    }
 
 
 def report(job: Job) -> dict[str, Any]:

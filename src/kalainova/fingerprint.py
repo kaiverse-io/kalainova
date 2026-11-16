@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,26 @@ def git_sha() -> str:
         return out if out else "untracked"
     except Exception:
         return "untracked"
+
+
+@cache
+def code_stamp() -> str:
+    """The commit the running engine came from, marked `+dirty` when tracked files have changed
+    since it, so a paid call made on uncommitted code says so. Read once per process."""
+    sha = git_sha()
+    git_bin = shutil.which("git")
+    if sha == "untracked" or not git_bin:
+        return sha
+    try:
+        changed = subprocess.check_output(  # noqa: S603 - fixed git argument list
+            [git_bin, "status", "--porcelain", "--untracked-files=no"],
+            cwd=ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return sha[:12]
+    return sha[:12] + ("+dirty" if changed else "")
 
 
 def prompts_hash() -> str:

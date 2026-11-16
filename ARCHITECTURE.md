@@ -113,11 +113,11 @@ What happens on one model call. The engine depends on the contract, never on a v
  Same paid file already saved? ──yes──▶ reuse it with no charge
    │ no
    ▼
+ Rehearsal open, and the first listed provider, key or not, costs money and cannot rehearse? ──yes──▶ stop
+   │ no
+   ▼
  Priced, or the job has no cap? ──no──▶ next listed provider
    │ yes
-   ▼
- Rehearsal open, and the provider costs money and cannot rehearse? ──yes──▶ stop before calling it
-   │ no
    ▼
  Reserve the estimate on the ledger ──over the cap──▶ stop the job
    │ within the cap
@@ -137,6 +137,45 @@ What happens on one model call. The engine depends on the contract, never on a v
 ```
 
 A bug in an adapter is raised and does not count as a provider failure. Only listed providers are tried. `local` is listed in `config/studio.yaml`, so a run with no keys still works, and `approve` refuses what it makes.
+
+### Where a call and its cost are written down
+
+Every model call leaves three records in the job folder, joined by one attempt id (`providers/records.py` writes them; the router hands it each call). Each carries the
+labels of where it came from, so a fault or a cost maps to one part of the line:
+
+```
+ labels, set once where the work is run
+   run_id  one engine command (trace.RUN_ID)
+   stage   the command, or each stage of `make` (__main__)
+   shot    each beat of the assets stage, and a retake (assets, shotmake: trace.relabel)
+       │
+       ▼
+ router.generate ── attempt id ──┬──▶ trace.jsonl       every attempt, ok or not: model asked or used,
+                                 │                      outcome, estimate, settled, billed units,
+                                 │                      vendor request id, vendor error text, engine
+                                 ├──▶ ledger.json       every charge: cost, when, model, request id
+                                 └──▶ generations.jsonl every kept file: its sha256, model, request id
+       │
+       ▼
+ kalainova ledger <job>   money by provider, model, stage and shot; every attempt; any charge with
+                          no trace row; --invoice records the vendor's figure against the estimate
+ kalainova scorecards     latency, spend and failures per model, across jobs, from the same rows
+```
+
+The vendor's request id is what its bill and dashboard list, so a charge can be checked against the
+vendor's own record. `engine` is the commit that ran the call, marked `+dirty` when tracked files had
+changed, since a job's fingerprint is taken when it is opened and later stages can run newer code.
+A failed call that nothing billed leaves no ledger entry; its trace row says so.
+
+**What a call costs is checked, not trusted** (`providers/prices.py`).
+
+- **The estimate.** An estimate, and so the reservation against the cap, is the price table's figure times a correction: the highest of 1, the vendor's list price over the table's rate, and the most a recent bill exceeded its table figure.
+  - The list price comes from fal's pricing API, read at most once a day. It counts only when units match and the row gives no reviewed reason (`checked:`).
+  - The bills come from `prices.learned.jsonl` beside the studio.
+  - A correction never lowers an estimate.
+- **The charge.** After the call, fal's `X-Fal-Billable-Units` times the account's unit price is the vendor's figure. The ledger settles at the higher of it and the table's (`records.settle_at_vendor`), keeps both, and learns the ratio; a drift past 10% is printed.
+- **The labels.** fal gets our labels on each request (`X-Fal-Tags`: job, attempt, run, stage, shot), so its own usage report breaks down the same way.
+- **The checks.** `scripts/check_fal_prices.py` compares every configured model's row with fal's list price and fails on an unexplained drift. `kalainova rehearse` checks every request against the model's live schema without being asked.
 
 `providers/check.py` is not on that path. `kalainova providers --check --spend` calls it by hand: it sends one smallest call per capability through `router.generate` under a job's cost cap, so the ledger records it, and reports reached, schema matched, and charge against estimate. It refuses under automation and never runs in CI or the tests.
 
@@ -288,6 +327,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     │                                       │  │          │
     │                                       │  └─▶ kitrules ◀── scripts/check.py
     │                                       └─▶ providers
+    ├─▶ trace: labels each command's stage (and each stage of make)
     ├─▶ production_cli ──▶ dub, nle, provenance, qa, research, shotmake, shots,
     │                      songs, takes, timeline, verdicts, editor, config, bench,
     │                      assets, preproduction
@@ -296,10 +336,10 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ writers ───▶ consistency, plan, prompts, providers
     ├─▶ songs ─────▶ bar, captions, config, editor, media, providers, render, takes, writers
     ├─▶ assets ────▶ consistency, media, preproduction, shotmake, shots, soundbed, takes,
-    │                config, providers
+    │                trace, config, providers
     ├─▶ preproduction ▶ media, motion, shotmake, takes, timeline, providers
     ├─▶ soundbed ──▶ blobstore, kits, media, shotmake
-    ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, config, providers
+    ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, trace, config, providers
     ├─▶ takes ─────▶ bar, blobstore, media, config
     ├─▶ bench ─────▶ consistency, shotmake, shots, takes, timeline, config, providers
     ├─▶ rehearse ──▶ assets, preproduction, takes, providers
@@ -322,7 +362,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ nle ───────▶ nle_otio, config
     ├─▶ nle_otio ──▶ opentools, config
     ├─▶ opentools ─▶ jobfs: runs an open tool as a command, imported by each adapter
-    ├─▶ provenance ▶ blobstore, takes, verdicts, config
+    ├─▶ provenance ▶ blobstore, takes, trace, verdicts, config
     ├─▶ verdicts ──▶ bar, media, jobfs
     ├─▶ publish ───▶ blobstore, consistency, preproduction, streams, stock
     ├─▶ editor ────▶ edit, media, plan, prompts, stock, config, providers
@@ -331,7 +371,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ variants ──▶ jobfs
     ├─▶ templates ─▶ jobfs
     ├─▶ stock
-    ├─▶ router ─────▶ trace
+    ├─▶ router ─────▶ trace ─▶ fingerprint: every call's labels, attempt and engine commit
     ├─▶ fingerprint ─▶ jobfs
     ├─▶ host ────────▶ config
     ├─▶ scorecard ───▶ jobfs
@@ -374,7 +414,10 @@ and `script_packet.json` with each claim's source carried through.
 ## Trace
 Best-effort per-provider-call telemetry in each job's `trace.jsonl`, including timing, outcome,
 provider/model identity, and estimated and settled cost. The provider router writes rows without
-letting telemetry failures interrupt generation.
+letting telemetry failures interrupt generation. Each row carries the attempt id that its ledger
+entry and generation record also carry, the vendor's request id and error text, the billed units,
+the engine commit, and the labels of where it ran: run, stage and shot (`labelled`, `relabel`,
+`scoped`). See "Where a call and its cost are written down" above.
 
 ### streams
 Stream records, canon, the schedule packet, and `request`, which turns a stream and a brief into a locked job.
@@ -411,7 +454,7 @@ A camera test: one shot made on several models from the same start frame, prompt
 ```
 
 ### rehearse
-A dry run of a job's paid stage. The job is copied to a throwaway folder that sees the same kits and streams through links, and its stills and moving shots run there with a rehearsal open (`providers/rehearsal.py`). Each request a rented model would be sent is written down with its fields, the files it would upload named by hash, the router's estimate and the adapter's price; stand-in files of the asked-for shape let the line go on. A paid provider that cannot rehearse stops it. The animatic gate is passed in the copy only, and the report says the real run still waits there. Nothing is sent, nothing is spent, and no key is needed; the real job gets only `rehearsal.json` in its work folder, which `scripts/check_fal_schemas.py --rehearsal` checks against each model's live schema. Depends on `assets`, `preproduction`, `takes`, and `providers`.
+A dry run of a job's paid stage. The job is copied to a throwaway folder that sees the same kits and streams through links, and its stills and moving shots run there with a rehearsal open (`providers/rehearsal.py`). Each request a rented model would be sent is written down with its fields, the files it would upload named by hash, the router's estimate and the adapter's price; stand-in files of the asked-for shape let the line go on. The first listed provider for each request must be able to rehearse, key or not: a paid one that cannot stops it, because the real run would call it once its key is set. An adapter that downloads under another suffix and converts (fal's audio) is still paired with the router's call. The animatic gate is passed in the copy only, and the report says the real run still waits there. Nothing is sent, nothing is spent, and no key is needed; the real job gets only `rehearsal.json` in its work folder, which `scripts/check_fal_schemas.py --rehearsal` checks against each model's live schema. Depends on `assets`, `preproduction`, `takes`, and `providers`.
 
 ```
  job ──copy──▶ throwaway job (kits, streams linked read only)
@@ -549,13 +592,13 @@ What QA asks of a stream job: did the record keep what the lock promised, and do
 What a person said about a piece or one shot, or about the animatic as a rough cut, and which readings predict it. A verdict on the animatic sets the job's `animatic_reviewed` and is left out of the review set. `review-set` lists each verdict beside its readings, including a shot's own source clip, and says "not enough yet" below three of each side. It reads the bar's `generated_shot_motion` and cannot approve or publish anything.
 
 ### provenance
-How a piece was made, for whoever answers for it: each asset's model, weights, seed, terms, and hash.
+How a piece was made, for whoever answers for it: each asset's model, weights, seed, terms, and hash. Its ledger part, which `kalainova ledger` prints, sums the money by provider, model, stage and shot, lists every attempt from the trace, and names any charge with no trace row. A still reused from an accepted animatic keeps the model and kit references that made it (`shotmake.reused_origin`).
 
 ### publish
 Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account. `labels` sets each platform's AI-content label from the assets' synthetic flag, using the fields the aggregator documents, and refuses a platform with none; it also holds a publish time only where the platform's own API takes one. `aggregator` is the one-upload route to several platforms.
 
 ### providers
-The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. While a rehearsal is open (`rehearsal.py`), an adapter that can rehearse (`fal`) writes its requests down instead of sending them, and the router refuses any other provider that costs money. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
+The router and vendor adapters. Every model call goes through the router, which reserves the estimate before the call, settles at the real cost after it, and refuses a file that is not what was asked for or has no picture in it. What a call leaves behind (its trace row, its ledger detail, its generation record, and the saved-file lookup a restart uses) is `records.py`. Price corrections from the vendor's list price and this studio's own bills are `prices.py`. While a rehearsal is open (`rehearsal.py`), an adapter that can rehearse (`fal`) writes its requests down instead of sending them, and the router refuses any other provider that costs money. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
 
 ### editor
 The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording (starting on a sentence start, with opening fillers dropped, and optionally opening and closing on a drawn title card from the graphics provider), chooses the crop through one seam with two adapters (the in-house motion centre, and a face detector the operator names as a command in `config/studio.yaml`), refusing a job whose `brief.source` does not say where the file came from and which file in the job folder covers its use. `patch` updates one cut in an existing `edit_manifest` (source, in point, title), voids any approval, and records the change in `direction.json` when that file is present. `musiccuts` turns a beat grid into bars, phrases, sections and the biggest rise in energy, and says so when there is no steady pulse; `musicvideo` builds the job that cuts a video to a track, with an excerpt, character cutaways under the shot ceiling, and the cost said first. `beats` is a seam: `adapters.beats` in `config/studio.yaml` picks its own onset-and-comb grid (default) or `beat_this`, which `beat_this.py` runs as a command and which adds downbeats. `speech_cuts` is a second seam: `speech.keep_spans` (called by `direct` for each take with sound) follows `adapters.speech_cuts`, which picks the in-house cuts at gaps between words (a silence detector when there is no transcript, the default) or `auto_editor`, which runs the `auto-editor` command, keeps the loud spans it reports, and lays any words over them. `auto_editor.py` follows the adapter contract in `opentools`, and keeps its result by the file's bytes and options. A seam is built only with its second adapter, and a missing command stops the step with its name.
@@ -573,13 +616,13 @@ ffmpeg and ffprobe helpers. Commands are argument lists, never shell strings.
 Reading a whole file: where its picture sits, its frames one at a time, and how it bands.
 
 ### jobfs
-The job folder, schema validation, the ledger, and the private home.
+The job folder, schema validation, the ledger, and the private home. A ledger entry carries when it was charged and what the router hands it to join on: the attempt, its labels, the model, the vendor's request id and the billed units.
 
 ### config
 The model and price table.
 
 ### fingerprint
-Engine version, git commit, prompts hash, and studio config fingerprinting. Pins jobs to exact engine releases and verifies stream compatibility during approval.
+Engine version, git commit, prompts hash, and studio config fingerprinting. Pins jobs to exact engine releases and verifies stream compatibility during approval. `code_stamp` is the commit a running command came from, with `+dirty` for uncommitted code; every trace row carries it.
 
 ### host
 Operator hardware capability and prerequisite detection. Validates Python version, ffmpeg/ffprobe binaries, GPU accelerators, and adapter presence.

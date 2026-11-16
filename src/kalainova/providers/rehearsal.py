@@ -92,11 +92,19 @@ class Rehearsal:
             media.run(["-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000",
                        "-t", f"{seconds:g}", "-f", "wav", str(dst)])  # fmt: skip
         with _guard:
-            call = self.calls.get(dst.name)
+            call = self._call_for(dst)
             if call is not None:
                 call["requests"].append(entry)
             else:
                 self.loose.append(entry)
+
+    def _call_for(self, dst: Path) -> dict[str, Any] | None:
+        """The router's call for this file. An adapter may bring a file down under another suffix
+        and convert it (fal's audio arrives as .src); the router's names are unique by stem."""
+        found = self.calls.get(dst.name)
+        if found is None:
+            found = next((c for n, c in self.calls.items() if Path(n).stem == dst.stem), None)
+        return found
 
     def _size(self, payload: dict[str, Any]) -> tuple[int, int]:
         """The shape asked for, else the first uploaded picture's, else a vertical frame."""

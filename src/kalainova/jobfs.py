@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import fcntl
 import json
 import os
@@ -232,8 +233,10 @@ class Job:
         cost: float,
         note: str = "",
         reservation: str | None = None,
+        detail: dict | None = None,
     ) -> None:
-        """Record what a call cost, settling its reservation if it had one."""
+        """Record what a call cost, settling its reservation if it had one. `detail` is what an
+        audit joins on: when, the attempt and its trace labels, the model, the vendor's request."""
         with self.locked():
             entries = [
                 e for e in self._ledger() if e.get("reservation") != reservation or not reservation
@@ -244,6 +247,8 @@ class Job:
                     "capability": capability,
                     "cost": round(cost, 6),
                     "note": note,
+                    "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+                    **(detail or {}),
                 }
             )
             self._write_ledger(entries)
