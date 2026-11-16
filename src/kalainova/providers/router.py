@@ -346,7 +346,7 @@ def _attempt(
         one.reservation = hold()
     if dry is not None and not p.free:
         dry.begin(one.aid, request, p.name, estimate, note, key=key, model=one.model,
-                  routed=one.routed)  # fmt: skip
+                  routed=one.routed, shot=one.ctx.labels.get("shot", ""))  # fmt: skip
     try:
         res = _call(getattr(p, request.method), (one.sent, one.ctx), one.limit)
     except BaseException as exc:  # noqa: BLE001 - each kind is sorted in _Try.failed

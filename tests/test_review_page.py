@@ -53,6 +53,18 @@ def test_a_shot_without_a_character_is_not_asked_about_a_face(tmp_path):
     assert "Hands have five fingers" in page
 
 
+def test_each_shot_says_what_a_kept_take_must_show(tmp_path):
+    shot = {"size": "medium", "must_show": "the DJ, both hands on the <mixer>"}
+    beats = [{"id": "b1", "role": "hook", "text": "x", "cast": [], "shot": shot},
+             {"id": "b2", "role": "body", "text": "y", "cast": []}]  # fmt: skip
+    job = make_job(tmp_path, beats=beats)
+    takes.record(job, "b1", _take(0))
+    takes.record(job, "b2", _take(0))
+    page = reviewpage.write(job).read_text()
+    assert "A take is kept when it shows:</b> the DJ, both hands on the &lt;mixer&gt;" in page
+    assert "Nothing says what a take must show" in page
+
+
 def test_no_takes_means_nothing_to_review(tmp_path):
     with pytest.raises(ContractError, match="no takes"):
         reviewpage.write(make_job(tmp_path))

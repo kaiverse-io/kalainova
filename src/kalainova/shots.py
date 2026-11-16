@@ -145,8 +145,10 @@ def motion_prompt(
     return _fit(text.strip(), limit)
 
 
-def _problem(check: str, severity: str, detail: str) -> Problem:
-    return {"id": f"plan.{check}", "status": severity, "detail": detail}
+def _problem(check: str, severity: str, detail: str, beat: str = "") -> Problem:
+    """A plan problem; `beat` names the shot it is about, so a package can put it on that call."""
+    found = {"id": f"plan.{check}", "status": severity, "detail": detail}
+    return {**found, "beat": beat} if beat else found
 
 
 def _token_set(text: str) -> set[str]:
@@ -172,7 +174,7 @@ def _names_known(packet: Packet) -> list[Problem]:
             for name in _names(beat, field):
                 if name not in table:
                     detail = f"{beat['id']} names {name}, which {group} does not describe"
-                    out.append(_problem("continuity", "fail", detail))
+                    out.append(_problem("continuity", "fail", detail, beat["id"]))
     return out
 
 
@@ -190,10 +192,14 @@ def _moving_shot_problems(beat: Beat) -> list[Problem]:
     cue = str(beat.get("visual_cue") or "")
     out = []
     if STILL_WORDS.search(cue):
-        out.append(_problem("still_words", "warn", f"{bid} moves, but its cue asks for a still"))
+        out.append(
+            _problem("still_words", "warn", f"{bid} moves, but its cue asks for a still", bid)
+        )
     stated = shot.get("camera") or shot.get("action") or shot.get("environment")
     if not stated and not _MOTION_WORDS.search(cue):
-        out.append(_problem("motion_stated", "warn", f"{bid} moves, but nothing says what moves"))
+        out.append(
+            _problem("motion_stated", "warn", f"{bid} moves, but nothing says what moves", bid)
+        )
     return out
 
 
@@ -209,18 +215,19 @@ def _sequence_problems(beats: list[Beat]) -> list[Problem]:
     for first, second in zip(beats, beats[1:], strict=False):
         if _alike(first, second):
             detail = f"{first['id']} and {second['id']} describe nearly the same picture"
-            out.append(_problem("repetition", "warn", detail))
+            out.append(_problem("repetition", "warn", detail, second["id"]))
     return out
 
 
 def _structure_problems(beats: list[Beat]) -> list[Problem]:
     out = []
     if beats and beats[0].get("continues"):
-        out.append(_problem("continues", "fail", f"{beats[0]['id']} has nothing to continue from"))
+        bid = beats[0]["id"]
+        out.append(_problem("continues", "fail", f"{bid} has nothing to continue from", bid))
     for beat in beats:
         if beat.get("on_camera") and not (beat.get("speaker") or beat.get("cast")):
             detail = f"{beat['id']} is said on camera, and names nobody saying it"
-            out.append(_problem("on_camera", "fail", detail))
+            out.append(_problem("on_camera", "fail", detail, beat["id"]))
     return out
 
 
@@ -244,7 +251,7 @@ def _prompt_lengths(packet: Packet, style: str, limit: int | None) -> list[Probl
         words = len(motion_prompt(packet, beat, style, has_start_image=True).split())
         if words > limit:
             detail = f"{beat['id']} has {words} words of motion; a model reads about {limit}"
-            out.append(_problem("prompt_length", "warn", detail))
+            out.append(_problem("prompt_length", "warn", detail, beat["id"]))
     return out
 
 
@@ -259,7 +266,7 @@ def _character_lengths(beats: list[Beat], ceiling: float | None) -> list[Problem
                 f"{beat['id']} holds a character for about {length:.1f}s; past {ceiling:g}s a face "
                 "tends to drift, so cut between angles instead"
             )
-            out.append(_problem("character_shot_length", "warn", detail))
+            out.append(_problem("character_shot_length", "warn", detail, beat["id"]))
     return out
 
 

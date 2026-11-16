@@ -19,6 +19,7 @@ Shots:
 - Each shot has a clear purpose: place us, show a relationship, or catch a reaction. Vary the size: wide for context, close for feeling.
 - first_frame and last_frame are still pictures. Nothing is "about to" happen in them. Say where each thing sits in the frame, and which way a person faces.
 - camera, action, and environment say what moves. A model that starts from the first frame already has the picture, so spend these words on motion, in the order it happens. Say what the camera reveals when it stops.
+- must_show says what a take must show to be kept, in a few words: who, doing what, where ("the DJ, both hands on the mixer, behind the decks"). Be concrete enough that two different takes could be told apart by it. A take is judged against it, so a vague one means a retake.
 - Name what else moves. Water, smoke, cloud, and crowds freeze unless asked to move.
 - Geometry has to work: a person stands on the floor they walk across, and the place fits the story from every angle. Decide the layout first.
 - Show states, not feelings: tears and a slumped back, not "sad". Never ask for readable words in the picture.

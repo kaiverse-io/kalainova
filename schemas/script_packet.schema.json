@@ -130,6 +130,10 @@
               "sound": {
                 "type": "string",
                 "description": "What the shot sounds like, for a model that makes sound with the picture."
+              },
+              "must_show": {
+                "type": "string",
+                "description": "What a take must show to be kept, in a few words: who, doing what, where. A take is judged against it, and a retake names which part it missed."
               }
             }
           },

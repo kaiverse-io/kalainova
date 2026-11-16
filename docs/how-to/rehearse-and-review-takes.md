@@ -26,7 +26,7 @@ What it cannot tell you:
   That holds even when its key is missing. The real run calls the first listed provider once its key is set, so a rehearsal never steps past it to show a different route.
   To rehearse past it, pin the job to a provider that can, for example `"providers": {"music": ["fal"]}` in `job.json`.
 
-To run what the rehearsal showed, a person signs for it: `uv run kalainova package <job> stills` (or `motion`) writes the same calls as a package, and nothing paid runs until it is signed. See [How to sign off paid work](sign-off-paid-work.md).
+To run what the rehearsal showed, a person signs it off: `uv run kalainova package <job> stills` (or `motion`) writes the same calls as a package with a readiness verdict, and nothing paid runs until it is signed off. See [How to sign off paid work](sign-off-paid-work.md).
 
 The animatic gate is passed in the copy only, so the rehearsal can reach the moving shots. The real run still makes no video until you accept the animatic (see [How to watch a rough cut](watch-a-rough-cut.md)).
 

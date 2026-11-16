@@ -6,19 +6,20 @@ they spend nothing. In order:
 
 - **The kill switch.** While `<studio>/STOP` exists, every paid call refuses. `kalainova stop` and
   `kalainova resume` write and remove it, and both are logged in `<studio>/gates.log.jsonl`.
-- **The studio's limits.** `<studio>/limits.json`, signed by a person (signatures.LIMITS), sets
-  what the whole studio may spend in a UTC day and a UTC month. Every job's dated ledger lines
-  count, open reservations included. With no signed limits, nothing paid runs.
-- **A signed package.** A paid call goes out only when a package a person signed covers it
-  (packages.py): a request by its content key, provider, model and payload digests, or an
-  allowance by capability, provider and model. Its estimate must be at or under the signed
-  ceiling, and each request is spent once: `<studio>/packages/spent.jsonl` records it. A call
-  that fails with nothing billed gives its entry back; one that may have been billed does not.
+- **The studio's limits.** `<studio>/limits.json`, set by a named person at a terminal
+  (`kalainova limits`), says what the whole studio may spend in a UTC day and a UTC month. Every
+  job's dated ledger lines count, open reservations included. With no limits, nothing paid runs.
+- **A signed-off package.** A paid call goes out only when a package a person signed off covers
+  it (packages.py): a request by its content key, provider, model and payload digests, or an
+  allowance by capability, provider and model. Its estimate must be at or under the ceiling, and
+  each request is spent once: `<studio>/packages/spent.jsonl` records it. A call that fails with
+  nothing billed gives its entry back; one that may have been billed does not.
 
 `admit` takes all of it and the job's reservation as one step under a studio-wide lock, so parallel
 jobs cannot pass the limits together. None of it can be turned off by a brief, a flag or the
-environment. What this does not stop, an agent that edits the engine or calls the vendor with the
-key itself, is the spend broker's to stop (ADR 0022).
+environment. It is there to stop mistakes: a call nobody looked at, a vague or wrong input, a
+second run of the same request, a loop. It is not a lock against an agent that sets out to get
+round it (ADR 0022).
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import packages, signatures
+from . import packages
 from .jobfs import ContractError, Job
 
 STOP = "STOP"
@@ -94,7 +95,7 @@ def refuse_paid(job: Job, provider: str, capability: str) -> None:
 
 # ------------------------------------------------------------------ the studio's limits
 def write_limits(root: Path, daily: float, monthly: float, by: str) -> Path:
-    """The studio's limits, unsigned. Nothing paid runs on them until a person signs the file."""
+    """The studio's daily and monthly limits, set by a named person."""
     if not by.strip():
         raise ContractError("say who is setting the limits (--by)")
     if not 0 < daily <= monthly:
@@ -109,20 +110,18 @@ def write_limits(root: Path, daily: float, monthly: float, by: str) -> Path:
         "by": by,
     }
     path = root / LIMITS
-    signatures.sig_path(path).unlink(missing_ok=True)
     path.write_bytes(packages.canonical(data))
     _log(root, {"event": "limits", "by": by, "daily_usd": daily, "monthly_usd": monthly})
     return path
 
 
-def signed_limits(root: Path) -> tuple[dict[str, Any], str]:
-    """The studio's limits and who signed them; raises unless they are signed and are this
-    studio's."""
+def limits(root: Path) -> dict[str, Any]:
+    """The studio's limits; raises unless a person set them for this studio."""
     path = root / LIMITS
     if not path.is_file():
         raise ContractError(
-            f"{root} has no spend limits, so nothing paid runs; "
-            "`kalainova limits --daily N --monthly N --by NAME`, then a person signs the file"
+            f"{root} has no spend limits, so nothing paid runs; a person sets them: "
+            "`kalainova limits --daily N --monthly N --by NAME`"
         )
     raw = path.read_bytes()
     data = json.loads(raw)
@@ -130,7 +129,7 @@ def signed_limits(root: Path) -> tuple[dict[str, Any], str]:
         raise ContractError(f"{path} is not a limits file this engine wrote, or was edited by hand")
     if data.get("studio") != str(root.resolve()):
         raise ContractError(f"{path} names another studio ({data.get('studio')})")
-    return data, signatures.signer(path, signatures.LIMITS)
+    return dict(data)
 
 
 def spend(root: Path, now: dt.datetime | None = None) -> tuple[float, float]:
@@ -157,10 +156,10 @@ def spend(root: Path, now: dt.datetime | None = None) -> tuple[float, float]:
 
 
 def _within_limits(root: Path, job: Job, estimate: float) -> None:
-    limits, _ = signed_limits(root)
+    most_of = limits(root)
     day, month = spend(root)
-    for span, held, most in (("today", day, limits["daily_usd"]),
-                             ("this month", month, limits["monthly_usd"])):  # fmt: skip
+    for span, held, most in (("today", day, most_of["daily_usd"]),
+                             ("this month", month, most_of["monthly_usd"])):  # fmt: skip
         if held + estimate > float(most) + EPSILON:
             raise ContractError(
                 f"{job.id}: the studio has committed ${held:.2f} {span} of its ${float(most):.2f} "
@@ -168,7 +167,7 @@ def _within_limits(root: Path, job: Job, estimate: float) -> None:
             )
 
 
-# ------------------------------------------------------------------ signed packages
+# ------------------------------------------------------------------ signed-off packages
 @dataclass(frozen=True)
 class Call:
     """One paid call, as the router asks for it."""
@@ -188,8 +187,8 @@ class Allowed:
 
     package: str  # the package's file, from the studio
     entry: str  # "request N" or "allowance N"
-    signer: str
-    signed: tuple[str, ...] | None  # the payload digests signed; None for an allowance
+    signer: str  # who signed it off
+    signed: tuple[str, ...] | None  # the payload digests signed off; None for an allowance
 
 
 @contextmanager
@@ -232,7 +231,7 @@ def _append(root: Path, row: dict[str, Any]) -> None:
 def _candidates(root: Path, job: Job) -> Iterator[tuple[Path, dict[str, Any] | None, str]]:
     """Each package this job could spend under, loaded, or None with why it cannot be."""
     for where in (packages.folder(root, job.id), packages.folder(root, "*")):
-        for path in sorted(where.glob("*.json")) if where.is_dir() else []:
+        for path in _packages_in(where):
             try:
                 data = packages.load(path)
             except (ContractError, OSError) as exc:
@@ -280,7 +279,7 @@ def _entry(
 
 
 def _cover(root: Path, call: Call) -> Allowed:
-    """The signed entry that covers this call, or a refusal that says what is missing."""
+    """The signed-off entry that covers this call, or a refusal that says what is missing."""
     rows = _rows(root)
     reasons: list[str] = []
     found: list[tuple[str, str, tuple[str, ...] | None, Path]] = []
@@ -297,22 +296,22 @@ def _cover(root: Path, call: Call) -> Allowed:
     found.sort(key=lambda f: f[2] is None)  # an exact request before an allowance
     for name, entry, signed, path in found:
         try:
-            who = signatures.signer(path, signatures.PACKAGE)
+            who = packages.signed_off_by(path, packages.load(path))
         except ContractError as exc:
             reasons.append(str(exc))
             continue
         return Allowed(package=name, entry=entry, signer=who, signed=signed)
     model = f" {call.model}" if call.model else ""
     raise ContractError(
-        f"{call.job.id}: no signed package covers {call.capability} on {call.provider}{model} "
+        f"{call.job.id}: no signed-off package covers {call.capability} on {call.provider}{model} "
         f"at ${call.estimate:.3f}{'; ' + '; '.join(reasons) if reasons else ''}. Nothing was "
-        "called. Build a package (kalainova package), and a person signs it"
+        "called. Build a package (kalainova package), and a person signs it off"
     )
 
 
 def admit(call: Call, reserve: Callable[[], str | None]) -> tuple[Allowed, str | None]:
-    """Let one paid call out: within the studio's signed limits, covered by a signed package entry
-    not yet spent, and its estimate reserved on the job's ledger, all as one step."""
+    """Let one paid call out: within the studio's limits, covered by a signed-off package entry not
+    yet spent, and its estimate reserved on the job's ledger, all as one step."""
     root = studio(call.job)
     with _studio_locked(root):
         _within_limits(root, call.job, call.estimate)
@@ -337,9 +336,9 @@ def give_back(job: Job, attempt: str, why: str) -> None:
 
 
 def package_state(root: Path, path: Path, data: dict[str, Any]) -> str:
-    """Where one package stands: signed or not, expired, and how much of it is used."""
+    """Where one package stands: its verdict, signed off or not, expired, and how much is used."""
     try:
-        state = f"signed by {signatures.signer(path, signatures.PACKAGE)}"
+        state = f"{packages.verdict(data)}, signed off by {packages.signed_off_by(path, data)}"
     except ContractError as exc:
         state = f"NOT USABLE: {exc}"
     if packages.expired(data):
@@ -352,11 +351,18 @@ def package_state(root: Path, path: Path, data: dict[str, Any]) -> str:
     return f"{state}; {used} of {len(data['requests'])} requests spent, {allowed} allowance calls"
 
 
+def _packages_in(where: Path) -> list[Path]:
+    """The packages in a folder, without their sign-offs."""
+    if not where.is_dir():
+        return []
+    return sorted(p for p in where.glob("*.json") if not p.name.endswith(".signoff.json"))
+
+
 def listing(root: Path, job_id: str) -> list[str]:
     """Each package a job can spend under, and where it stands."""
     out = []
     for where in (packages.folder(root, job_id), packages.folder(root, "*")):
-        for path in sorted(where.glob("*.json")) if where.is_dir() else []:
+        for path in _packages_in(where):
             try:
                 data = packages.load(path)
             except ContractError as exc:

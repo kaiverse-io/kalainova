@@ -98,7 +98,7 @@ The modules in `src/kalainova/`, and the two paths that make a piece. Every mode
    providers/transport.py: send, upload, fetch, receipt, labels, errors, for every rented vendor ·
      rehearsal.py (requests written down under the router's attempt, none sent) ·
      payloads.py (a payload sealed by its uploads' bytes, and the digest a package signs)
-   router ─▶ gates.py (stop, signed limits, signed packages) ─▶ packages.py, signatures.py
+   router ─▶ gates.py (stop, studio limits, signed-off packages) ─▶ packages.py
 
  Foundation
    router, render, publish ─▶ jobfs.py (job folder and ledger) ─▶ schemas/
@@ -283,7 +283,8 @@ These change only with a version bump. A new interface waits for a second real u
 | Nothing added since ADR 0012 has run on a real model | Every line of `docs/studio-goal.md` is Built, none is Run or Accepted. Faked models prove the wiring, not the result |
 | Vendor slugs marked `VERIFY` in `config/studio.yaml` are unconfirmed | An adapter may need its model name or a field changed on its first real call |
 | No container runner for outside tools | The contract exists, and nothing uses it in production yet |
-| The sign-off runs in the engine's own process, as the operator's user (ADR 0022) | It stops accidents, loops and agents that use the engine. An agent that edits the engine, deletes `packages/spent.jsonl` to replay a request, or calls a vendor with the key itself is not stopped until the spend broker holds the key |
+| The sign-off guards against mistakes, not against an agent that sets out to get round it (ADR 0022) | A call nobody looked at, a vague input, a second run or a loop is refused. An agent that edits the engine, deletes `packages/spent.jsonl`, or calls a vendor with the key itself is not stopped here |
+| No check yet signs off a READY package on a person's behalf | Every paid stage waits for a person, until a readiness check is measured against verdicts and ADR 0017's `by-exception` level is built |
 | The ledger's lock holds on one machine | Parallel calls cannot overshoot here, but two machines could, until Postgres holds the ledger (ADR 0010) |
 | Files from outside tools carry no enforced references | A human compares them against the kit |
 | A kit cannot prove a face is not a real person's | A human attests at freeze and approves each piece; the vision judge is one more signal |
@@ -360,10 +361,10 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ bench ─────▶ consistency, shotmake, shots, takes, timeline, config, providers
     ├─▶ rehearse ──▶ assets, preproduction, takes, providers
     ├─▶ reviewpage ▶ consistency, kits, takes
-    ├─▶ gates ─────▶ packages, signatures, jobfs: what must be true before a paid call
-    ├─▶ packages ──▶ jobfs: the paid calls a person signs, from a rehearsal or an allowance
-    ├─▶ signatures ▶ jobfs: ssh-keygen -Y sign and verify, against a trust file root owns
-    ├─▶ signoff_cli ▶ gates, packages, signatures, rehearse: limits, package, packages, sign
+    ├─▶ gates ─────▶ packages, jobfs: what must be true before a paid call
+    ├─▶ packages ──▶ jobfs: the paid calls a person signs off, from a rehearsal or an allowance
+    ├─▶ readiness ─▶ config, preproduction, shotmake, shots, providers: is each call ready to buy
+    ├─▶ signoff_cli ▶ gates, packages, readiness, rehearse: limits, package, packages, sign-off
     ├─▶ shots ─────▶ config
     ├─▶ edit ──────▶ config
     ├─▶ render ────▶ bar, captions, look, motion, media, mediascan
@@ -411,7 +412,7 @@ The command line. Parses arguments and calls a stage. Holds no rules.
 Commands for kits, streams, canon, schedules, requests, and the look sheet. It registers `signoff_cli`'s commands first, so the sign-off sits with the studio's other commands.
 
 ### signoff_cli
-Commands for what must be true before money leaves (ADR 0022): `stop` and `resume` (the kill switch), `limits` (show the studio's, or write new ones unsigned), `package` (a stage package from a rehearsal, or an allowance), `packages` (each package a job can spend under, and its state), and `sign`. `sign` prints the file from its own bytes, refuses away from a terminal, asks for the start of the file's hash, and has `ssh-keygen` sign with the person's key. Agents run everything here except `sign`. Depends on `gates`, `packages`, `signatures`, and `rehearse`.
+Commands for what must be true before money leaves (ADR 0022): `stop` and `resume` (the kill switch), `limits` (show the studio's; setting them needs a terminal), `package` (a stage package from a rehearsal with its readiness, or an allowance), `packages` (each package a job can spend under, and its state), and `sign-off`. `sign-off` runs only at a terminal: it prints the package, asks a reason for each risk and the start of the package's hash, and writes the sign-off. Agents build packages and never sign them off or set limits. Depends on `gates`, `packages`, `readiness`, and `rehearse`.
 
 ### production_cli
 Commands for making and judging a piece shot by shot, songs, research, and everything after a cut: takes, retakes, the shot sheet, timeline export, clips, dubbing, verdicts, provenance, and the ledger.
@@ -493,16 +494,16 @@ A dry run of a job's paid stage. The job is copied to a throwaway folder that se
 What must be true before money leaves (ADR 0022). The router asks it before reserving any paid call, and a gate that fails or cannot be read refuses; it never lets the call through. Free providers and rehearsals pass. Nothing turns it off: no brief field, flag or environment variable.
 
 - **The kill switch.** While `<studio>/STOP` exists, every paid call refuses. `kalainova stop --by NAME` and `kalainova resume --by NAME` write and remove it, and log it in `<studio>/gates.log.jsonl`.
-- **The studio's limits.** `<studio>/limits.json`, signed under `kalainova-limits`, sets a UTC daily and monthly ceiling. Every job's dated ledger lines count, open reservations included; lines from before dated ledgers count in neither.
-- **A signed package** (`packages`). `admit` finds an unexpired package of this studio and this job, or a studio-wide one, whose request matches the call's content key, provider and routed model, or whose allowance matches its capability, provider and model. The estimate must be at or under the signed ceiling, the request unspent and the allowance not used up, and the signature valid (`signatures`). An exact request wins over an allowance.
+- **The studio's limits.** `<studio>/limits.json`, set by a named person at a terminal, sets a UTC daily and monthly ceiling. Every job's dated ledger lines count, open reservations included; lines from before dated ledgers count in neither.
+- **A signed-off package** (`packages`). `admit` finds an unexpired package of this studio and this job, or a studio-wide one, whose request matches the call's content key, provider and routed model, or whose allowance matches its capability, provider and model. The estimate must be at or under the ceiling, the request unspent and the allowance not used up, and the sign-off must match the package's bytes and answer every risk. An exact request wins over an allowance.
 
-`admit` does all of it, writes the use to `<studio>/packages/spent.jsonl` and reserves the estimate on the job's ledger as one step, under a studio-wide lock (`<studio>/.spend.lock`), so parallel jobs cannot pass the limits together. A call that fails with nothing billed gives its entry back (`give_back`). A timeout, or a call billed then failed, keeps it spent. These checks run as the operator's user, so they stop accidents, loops and agents that use the engine; an agent that edits the engine or holds the vendor key is the spend broker's to stop (ADR 0022). Depends on `packages`, `signatures`, and `jobfs`.
+`admit` does all of it, writes the use to `<studio>/packages/spent.jsonl` and reserves the estimate on the job's ledger as one step, under a studio-wide lock (`<studio>/.spend.lock`), so parallel jobs cannot pass the limits together. A call that fails with nothing billed gives its entry back (`give_back`). A timeout, or a call billed then failed, keeps it spent. It is a guard against mistakes (a call nobody looked at, a vague or wrong input, a second run, a loop), not a lock against an agent that sets out to get round it. Depends on `packages` and `jobfs`.
 
 ### packages
-The paid calls a person signs (ADR 0022). `build` turns a rehearsal's report into a stage package (`stills` or `motion`). A call that writes a file is a request: its content key, provider, routed model, ceiling, the engine's own request (`Request.described()`) and each vendor payload, sealed so an uploaded file is named by its bytes, with its digest (`providers/payloads.py`). A paid call that writes no file is an allowance, counted. A motion package is refused while any still is unmade, since its keys would name stand-ins. `allow` writes an allowance package for work no rehearsal covers, for one job or every job (`*`). A package is canonical JSON with its studio, job, nonce and expiry; `load` refuses any other byte form, and `lines` is how the person reads it. Depends on `jobfs`.
+The paid calls a person signs off (ADR 0022). `build` turns a rehearsal's report into a stage package (`stills` or `motion`), with the readiness findings `readiness.review` returns, passed in by the command so this module stays plain data. A call that writes a file is a request: its content key, provider, routed model, ceiling, the engine's own request (`Request.described()`) and each vendor payload, sealed so an uploaded file is named by its bytes, with its digest (`providers/payloads.py`). A paid call that writes no file is an allowance, counted. A motion package is refused while any still is unmade, since its keys would name stand-ins. `allow` writes an allowance package for work no rehearsal covers, for one job or every job (`*`). A package is canonical JSON with its studio, job, nonce and expiry; `load` refuses any other byte form, and `lines` is how the person reads it: the verdict and each finding first, then what each call makes. `sign_off` writes `<package>.signoff.json` (the bytes' hash, the person, a reason per risk) and refuses a blocked package; `signed_off_by` is what the gate checks. Depends on `jobfs`.
 
-### signatures
-A person's signature over a file, with OpenSSH: `ssh-keygen -Y sign` to make it and `-Y verify` to check it, under a namespace per use (`kalainova-package`, `kalainova-limits`), so a signature for one cannot pass as the other. Who may sign is the allowed-signers file at `/etc/kalainova/allowed_signers`. `anchor` refuses one that this user, or its folder, could change, so an agent running as the operator cannot add its own key. The engine holds no private key. Depends on `jobfs`.
+### readiness
+Whether each paid call in a package is ready to buy, checked before anyone is asked to sign it off, free and with no model. A **block** cannot be signed off: a face with no reference picture, longer than the model makes, a field the vendor would refuse, a plan problem `shots.review` fails, motion before the animatic is accepted, a start frame that is not the accepted still. A **risk** is likely to cost a retake and must be fixed or accepted with a reason: a prompt under 12 words, a moving shot with no `shot.must_show`, no start frame, and the plan's warnings (a face held too long, nothing saying what moves), each attached to its shot through the router's shot label. Depends on `config`, `preproduction`, `shotmake`, `shots`, and `providers`.
 
 ### reviewpage
 One local page to judge a piece's takes by eye: the kit's faces, each moving shot's start frame, and every take side by side with its model, seed, cost, size and what its readings flag (unread, under the source size, missed motion, no start frame). Under each shot it lists the faults only a person can see (hands, melting objects, morphing, warped text, face drift) and the `verdict` and `take` commands to record a decision. It writes `review.html` next to the takes and changes nothing else. Depends on `consistency`, `kits`, and `takes`.

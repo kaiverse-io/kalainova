@@ -1,21 +1,25 @@
-"""What a person signs before money leaves: the paid calls one stage will make (ADR 0022).
+"""What a person signs off before money leaves: the paid calls one stage will make (ADR 0022).
 
 A stage package comes from a rehearsal of the job as it is now (rehearse.py, whose report the
 command line hands to `build`): nothing is sent and nothing is spent. It keeps the paid calls of
 one stage, `stills` (what the animatic pays for) or `motion` (what the full run pays for once the
-stills exist). A call that writes a file is a
-*request*. It is named by the router's content key, the provider and the model it goes to, the most
-it may cost, and the digest of each vendor payload it sends (providers/payloads.py). A paid call
-that writes no file, such as a judge reading a still, is an *allowance*: so many calls of one
-capability on one provider and model, each at most so much.
+stills exist).
+
+- A call that writes a file is a *request*. It is named by the router's content key, the provider
+  and the model it goes to, the most it may cost, and the digest of each vendor payload it sends
+  (providers/payloads.py).
+- A paid call that writes no file, such as a judge reading a still, is an *allowance*: so many
+  calls of one capability on one provider and model, each at most so much.
+- Its *readiness* (readiness.py) says whether each call is ready to buy: a block stops the
+  sign-off, and each risk of a retake must be fixed or accepted by name with a reason.
 
 An allowance package is written from the command line for paid work no rehearsal covers (a look
 sheet's stills, research, a provider check). It names one job, or every job in the studio (`*`).
 
-A package is canonical JSON. Its bytes are what the person reads (`lines`) and what they sign
-(`kalainova sign`). It names its studio, its job, a nonce and when it expires. The router lets a
-paid call out only when a valid signature covers it, at or under the signed price, once
-(gates.py).
+A package is canonical JSON with its studio, its job, a nonce and when it expires. A person reads
+it (`lines`) and signs it off (`sign_off`), which writes `<package>.signoff.json` with the hash of
+the bytes they read, their name, and their reason for each risk they accepted. The router lets a
+paid call out only when a sign-off covers it, at or under its ceiling, once (gates.py).
 """
 
 from __future__ import annotations
@@ -24,10 +28,13 @@ import datetime as dt
 import hashlib
 import json
 import secrets
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from .jobfs import ContractError, Job
+
+Review = Callable[[Job, str, list[dict[str, Any]]], list[dict[str, Any]]]  # readiness.review
 
 KIND = "kalainova-package"
 VERSION = 1
@@ -69,6 +76,7 @@ def _request(call: dict[str, Any]) -> dict[str, Any]:
         "model": call.get("routed") or "",
         "max_usd": round(float(call.get("estimate") or 0.0), 6),
         "note": call.get("note", ""),
+        "shot": call.get("shot", ""),
         "asked": call.get("asked") or {},
         "sent": [
             {
@@ -118,9 +126,10 @@ def _head(root: Path, job_id: str, stage: str, lifetime: dt.timedelta) -> dict[s
     }
 
 
-def build(job: Job, stage: str, report: dict[str, Any]) -> Path:
-    """The package for one stage, from a rehearsal of the job as it is now. Refuses what cannot be
-    signed: a rehearsal that stopped, a call with no price, moving shots keyed by stand-ins."""
+def build(job: Job, stage: str, report: dict[str, Any], review: Review) -> Path:
+    """The package for one stage, from a rehearsal of the job as it is now, with its readiness.
+    Refuses what cannot be signed off: a rehearsal that stopped, a call with no price, moving
+    shots keyed by stand-ins."""
     if stage not in STAGES:
         raise ContractError(f"{job.id}: a stage package is for {' or '.join(STAGES)}, not {stage}")
     if report["stopped"]:
@@ -145,6 +154,7 @@ def build(job: Job, stage: str, report: dict[str, Any]) -> Path:
     data["requests"] = [_request(c) for c in calls if c.get("key")]
     data["allowances"] = _allowances([c for c in calls if not c.get("key")])
     data["total_max_usd"] = round(sum(float(c["estimate"]) for c in calls), 6)
+    data["readiness"] = review(job, stage, calls)
     data["cost_cap"] = job.job.get("cost_cap")
     data["already_committed"] = round(job.committed(), 6)
     if job.has("animatic"):
@@ -181,6 +191,7 @@ def allow(
          "max_usd_each": round(each, 6), "why": why},
     ]  # fmt: skip
     data["total_max_usd"] = round(calls * each, 6)
+    data["readiness"] = []
     return _write(data, folder(root, job_id))
 
 
@@ -202,13 +213,39 @@ def expired(data: dict[str, Any], now: dt.datetime | None = None) -> bool:
     return dt.datetime.fromisoformat(data["expires_at"]) <= (now or _now())
 
 
+def verdict(data: dict[str, Any]) -> str:
+    """ready, risks or blocked, from the package's own findings."""
+    found = data.get("readiness") or []
+    if any(f["level"] == "block" for f in found):
+        return "blocked"
+    return "risks" if found else "ready"
+
+
+def _made(r: dict[str, Any]) -> str:
+    """What one request makes, in a line: the shot, its length, its prompt, its inputs."""
+    asked = r.get("asked") or {}
+    dst = asked.get("dst")
+    name = dst.get("file", "") if isinstance(dst, dict) else str(dst or "")  # hashed when it exists
+    parts = [f"shot {r['shot']}" if r.get("shot") else "", name]
+    if asked.get("duration"):
+        parts.append(f"{float(asked['duration']):g}s")
+    if asked.get("start"):
+        parts.append("from its start still")
+    if asked.get("references"):
+        parts.append(f"{len(asked['references'])} reference picture(s)")
+    prompt = str(asked.get("prompt") or asked.get("text") or asked.get("lyrics") or "")
+    said = f': "{prompt[:110]}{"..." if len(prompt) > 110 else ""}"' if prompt else ""
+    return ", ".join(p for p in parts if p) + said
+
+
 def lines(path: Path) -> list[str]:
-    """The package as the person signing it reads it: every call, its ceiling, the total."""
+    """The package as the person signing it off reads it: the verdict and each finding first, then
+    what each call makes, its ceiling, and the total."""
     data = load(path)
     who = "every job in the studio" if data["job_id"] == "*" else data["job_id"]
+    found = data.get("readiness") or []
     out = [
-        f"{data['stage']} package for {who}",
-        f"  studio {data['studio']}",
+        f"{data['stage']} package for {who}: {verdict(data).upper()}",
         f"  sha256 {digest(path)}",
         f"  built {data['built_at']}, expires {data['expires_at']}",
     ]
@@ -217,15 +254,13 @@ def lines(path: Path) -> list[str]:
             f"  job cap ${float(data['cost_cap']):.2f}, already committed "
             f"${float(data.get('already_committed') or 0):.2f}"
         )
+    for f in found:
+        out.append(f"  {f['level'].upper():<5} {f['id']}: {f['detail']}; fix: {f['fix']}")
     for i, r in enumerate(data["requests"], 1):
-        said = {s["schema"] if isinstance(s["schema"], str) else "REFUSED" for s in r["sent"]}
         out.append(
             f"{i:>3} {r['capability']:<6} {r['provider']} {r['model'] or '(default)'}  up to "
-            f"${r['max_usd']:.3f}  {r['note']}  schema {', '.join(sorted(said)) or 'not sent'}"
+            f"${r['max_usd']:.3f}  {_made(r)}"
         )
-        for s in r["sent"]:
-            fields = ", ".join(sorted(s["payload"]))
-            out.append(f"      to {s['model']}: {fields}")
     for a in data["allowances"]:
         model = a["model"] or "(default)"
         out.append(
@@ -234,3 +269,52 @@ def lines(path: Path) -> list[str]:
         )
     out.append(f"total at most ${data['total_max_usd']:.2f}")
     return out
+
+
+def signoff_path(path: Path) -> Path:
+    return path.with_name(path.stem + ".signoff.json")
+
+
+def sign_off(path: Path, by: str, accepted: dict[str, str]) -> Path:
+    """Record that `by` read this package's bytes and accepts it, with a reason for each risk.
+    A blocked package, an unnamed person, or a risk with no reason is refused."""
+    data = load(path)
+    if not by.strip():
+        raise ContractError("say who is signing off (--by)")
+    found = data.get("readiness") or []
+    blocks = [f["id"] for f in found if f["level"] == "block"]
+    if blocks:
+        raise ContractError(f"{path.name} is blocked ({', '.join(blocks)}); fix it and build again")
+    risks = [f["id"] for f in found if f["level"] == "risk"]
+    missing = [r for r in risks if not str(accepted.get(r) or "").strip()]
+    if missing:
+        raise ContractError(f"{path.name}: give a reason to accept {', '.join(missing)}")
+    record = {
+        "package": path.name,
+        "package_sha256": digest(path),
+        "by": by,
+        "at": _stamp(_now()),
+        "accepted": {r: accepted[r].strip() for r in risks},
+    }
+    out = signoff_path(path)
+    out.write_bytes(canonical(record))
+    return out
+
+
+def signed_off_by(path: Path, data: dict[str, Any]) -> str:
+    """Who signed off this package as it is now; raises unless a sign-off covers its exact bytes,
+    names a person, and gives a reason for every risk it holds."""
+    record_path = signoff_path(path)
+    if not record_path.is_file():
+        raise ContractError(f"{path.name} is not signed off; a person signs it off: "
+                            f"kalainova sign-off {path} --by NAME")  # fmt: skip
+    record = json.loads(record_path.read_text())
+    if record.get("package_sha256") != digest(path):
+        raise ContractError(f"{path.name} changed after it was signed off")
+    risks = [f["id"] for f in data.get("readiness") or [] if f["level"] == "risk"]
+    accepted = record.get("accepted") or {}
+    if verdict(data) == "blocked" or any(not accepted.get(r) for r in risks):
+        raise ContractError(f"{path.name}: the sign-off does not answer every finding")
+    if not str(record.get("by") or "").strip():
+        raise ContractError(f"{path.name}: the sign-off names nobody")
+    return str(record["by"])

@@ -64,6 +64,7 @@ class Rehearsal:
         key: str = "",
         model: str | None = None,
         routed: str = "",
+        shot: str = "",
     ) -> None:
         with _guard:
             self._asked[attempt] = request
@@ -74,6 +75,7 @@ class Rehearsal:
                 "model": model,
                 "routed": routed or model or "",  # the model it is sent to, as a package binds it
                 "note": note,
+                "shot": shot,  # the beat it is for, from the router's labels
                 "estimate": round(float(estimate or 0.0), 6),
                 "key": key,
                 "phase": self.phase,

@@ -44,6 +44,10 @@
           },
           "detail": {
             "type": "string"
+          },
+          "beat": {
+            "type": "string",
+            "description": "The shot the check is about, when it is about one."
           }
         }
       }

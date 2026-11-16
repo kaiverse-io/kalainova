@@ -2,28 +2,26 @@
 
 kalainova stop --by NAME [--why TEXT]           stop every paid call in this studio
 kalainova resume --by NAME                      lift the stop
-kalainova limits [--daily N --monthly N --by NAME]   the studio's spend limits, or set them unsigned
-kalainova package <job> stills|motion           rehearse, and write what that stage pays for
+kalainova limits [--daily N --monthly N --by NAME]   the studio's spend limits; a person sets them
+kalainova package <job> stills|motion           rehearse, check readiness, write what it pays for
 kalainova package <job|*> allowance --capability C --provider P [--model M] --calls N --each USD
                   --why TEXT [--days N]          calls no rehearsal covers, counted and capped
 kalainova packages <job>                        each package a job can spend under, and its state
-kalainova sign <file> --key PATH                a person reads the file and signs it, at a terminal
+kalainova sign-off <package> --by NAME          a person reads it, answers each risk, signs off
 
-An agent prepares limits and packages and never signs them: `sign` needs a terminal and the typed
-start of the file's hash, and the key it signs with is the person's, behind their passphrase,
-touch or Touch ID.
+An agent builds packages and never signs them off, and never sets the limits: both need a person at
+a terminal. A sign-off asks for a reason for each risk the package holds and for the start of the
+package's hash, so it is made by someone who read those exact bytes.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
-from . import gates, packages, signatures
+from . import gates, packages
 from .jobfs import ContractError, home, open_job
 
 CONFIRM_CHARS = 8
@@ -49,11 +47,9 @@ def add_parsers(sub: Any) -> None:
     pk.add_argument("--why", default="", help="allowance: what it is for")
     pk.add_argument("--days", type=float, default=1.0, help="allowance: how long it lasts")
     sub.add_parser("packages", help="each package a job can spend under").add_argument("job")
-    sg = sub.add_parser("sign", help="a person signs a package or the limits, at a terminal")
-    sg.add_argument("file")
-    sg.add_argument("--key", default=os.environ.get("KALAINOVA_SIGNING_KEY", ""),
-                    help="the signing key (a public key, when an agent such as Secretive holds "
-                         "it); default $KALAINOVA_SIGNING_KEY")  # fmt: skip
+    so = sub.add_parser("sign-off", help="a person reads a package and signs it off")
+    so.add_argument("package")
+    so.add_argument("--by", required=True, help="the person signing off")
 
 
 def _spend(a: argparse.Namespace, root: Path) -> int:
@@ -66,19 +62,23 @@ def _spend(a: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _at_a_terminal(what: str) -> None:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ContractError(f"{what} is a person's decision: run it at a terminal")
+
+
 def _limits(a: argparse.Namespace, root: Path) -> int:
     if a.daily is not None or a.monthly is not None:
         if a.daily is None or a.monthly is None:
             raise ContractError("set both --daily and --monthly")
-        path = gates.write_limits(root, a.daily, a.monthly, a.by)
-        print(f"limits written, unsigned: {path}")
-        print(f"nothing paid runs on them until a person signs: kalainova sign {path}")
+        _at_a_terminal("setting the studio's limits")
+        print(f"limits set: {gates.write_limits(root, a.daily, a.monthly, a.by)}")
         return 0
     day, month = gates.spend(root)
     print(f"committed today ${day:.2f}, this month ${month:.2f} (UTC)")
-    limits, who = gates.signed_limits(root)
-    print(f"limits ${limits['daily_usd']:.2f} a day, ${limits['monthly_usd']:.2f} a month, "
-          f"signed by {who}")  # fmt: skip
+    most = gates.limits(root)
+    print(f"limits ${most['daily_usd']:.2f} a day, ${most['monthly_usd']:.2f} a month, "
+          f"set by {most['by']} at {most['set_at']}")  # fmt: skip
     return 0
 
 
@@ -92,62 +92,50 @@ def _package(a: argparse.Namespace, root: Path) -> int:
             calls=a.calls, each=a.each, why=a.why, days=a.days,
         )  # fmt: skip
     else:
-        from . import rehearse  # the rehearsal reaches every stage; only this command needs it
+        from . import readiness, rehearse  # they reach every stage; only this command needs them
 
         job = open_job(a.job)
-        path = packages.build(job, a.stage, rehearse.run(job))
+        path = packages.build(job, a.stage, rehearse.run(job), readiness.review)
     for line in packages.lines(path):
         print(line)
     print(path)
-    print(f"a person reads it and signs it: kalainova sign {path}")
+    if packages.verdict(packages.load(path)) == "blocked":
+        print("blocked: fix each BLOCK, then build the package again")
+        return 1
+    print(f"a person reads it and signs it off: kalainova sign-off {path} --by NAME")
     return 0
 
 
-def _namespace(path: Path) -> str:
-    kind = json.loads(path.read_text()).get("kind")
-    if kind == packages.KIND:
-        return signatures.PACKAGE
-    if kind == gates.LIMITS_KIND:
-        return signatures.LIMITS
-    raise ContractError(f"{path.name} is neither a package nor the studio's limits")
-
-
-def _shown(path: Path, namespace: str) -> list[str]:
-    if namespace == signatures.PACKAGE:
-        return packages.lines(path)
-    data = json.loads(path.read_text())
-    return [
-        f"spend limits for {data['studio']}",
-        f"  sha256 {packages.digest(path)}",
-        f"  ${data['daily_usd']:.2f} a day, ${data['monthly_usd']:.2f} a month (UTC), "
-        f"set by {data['by']} at {data['set_at']}",
-    ]
-
-
-def _sign(a: argparse.Namespace, root: Path) -> int:
-    """Show the person exactly what they sign, and have them confirm it at a terminal."""
-    path = Path(a.file).resolve()
-    if not a.key:
-        raise ContractError("name the signing key: --key PATH, or $KALAINOVA_SIGNING_KEY")
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        raise ContractError("signing is a person's act: run kalainova sign at a terminal")
-    namespace = _namespace(path)
-    for line in _shown(path, namespace):
+def _sign_off(a: argparse.Namespace, root: Path) -> int:
+    """Show the person the package, have them answer each risk, and confirm its hash."""
+    path = Path(a.package).resolve()
+    _at_a_terminal("signing off a package")
+    data = packages.load(path)
+    for line in packages.lines(path):
         print(line)
-    want = packages.digest(path)[:CONFIRM_CHARS]
-    typed = input(f"to sign this, type the first {CONFIRM_CHARS} characters of its sha256: ")
-    if typed.strip().lower() != want:
-        print("not signed")
+    if packages.verdict(data) == "blocked":
+        print("blocked: it cannot be signed off; fix each BLOCK and build it again")
         return 1
-    sig = signatures.sign(path, Path(a.key).expanduser(), namespace)
-    print(f"signed: {sig}, by {signatures.signer(path, namespace)}")
+    accepted: dict[str, str] = {}
+    for f in data.get("readiness") or []:
+        reason = input(f"accept {f['id']}? say why, or press enter to stop: ").strip()
+        if not reason:
+            print("not signed off")
+            return 1
+        accepted[f["id"]] = reason
+    want = packages.digest(path)[:CONFIRM_CHARS]
+    typed = input(f"to sign it off, type the first {CONFIRM_CHARS} characters of its sha256: ")
+    if typed.strip().lower() != want:
+        print("not signed off")
+        return 1
+    print(f"signed off: {packages.sign_off(path, a.by, accepted)}")
     return 0
 
 
 def dispatch(a: argparse.Namespace) -> int | None:
     """Run a command from this module, or None if it belongs to another."""
     handler = {"stop": _spend, "resume": _spend, "limits": _limits, "package": _package,
-               "sign": _sign}.get(a.cmd)  # fmt: skip
+               "sign-off": _sign_off}.get(a.cmd)  # fmt: skip
     if handler is not None:
         return handler(a, home())
     if a.cmd == "packages":
