@@ -67,7 +67,7 @@ models:
     song: minimax/music-3          # a style prompt plus lyrics with section tags. VERIFY
     lipsync: fal-ai/sync-lipsync/v2                 # VERIFY the length limit for long lines
     motion: fal-ai/live-portrait
-    separate: fal-ai/demucs                         # VERIFY the slug and fields before the first paid run
+    separate: fal-ai/demucs                         # checked on fal's schema 2026-11-17
   mac:                             # docs/how-to/run-models-on-a-mac.md; check each licence first
     voice: mlx-community/Kokoro-82M-bf16
     image: mflux-generate-z-image-turbo
@@ -127,7 +127,7 @@ prices:
     mureka/v9.5/generate/song: {per_track: 0.15, checked: "fal's model page: $0.15 a song with lyrics; $0.50 from a prompt alone"}
     fal-ai/lyria3/pro: {per_track: 0.08, checked: "fal's model page: $0.08 a track"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
-    separate: {per_sec: 0.0007}    # ESTIMATE: per second of the mix. VERIFY on fal's page before a paid run
+    separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
     lipsync: {per_min: 3.00}       # ESTIMATE
     motion: {cost_usd: 0.02}
     transcribe: {per_min: 0.01}

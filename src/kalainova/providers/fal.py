@@ -443,16 +443,17 @@ class Fal(Provider):
     def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Vocals, and everything else mixed back together from the model's other stems."""
         model = ctx.model or model_for("fal", "separate")
+        stems = ("drums", "bass", "other")
         payload: Fields = {
             "audio_url": self.transport.upload(req.src),
             "model": "htdemucs",  # four stems; the six-stem model splits the rest further
+            "stems": ["vocals", *stems],  # named, since fal's default asks for all six
             "output_format": "wav",
         }
         reply = self._send(model, payload, ctx, wait=1800)
         cost = media.duration(req.src) * float(
             price_for("fal", "separate", model).get("per_sec", 0)
         )
-        stems = ("drums", "bass", "other")
         names = list(stems) if reply.rehearsed else [n for n in stems if reply.get(f"{n}.url")]
         if not (reply.rehearsed or reply.get("vocals.url")) or not names:
             raise BilledError(cost, "fal finished but returned no stems")
