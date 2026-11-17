@@ -282,7 +282,11 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--dry-run", action="store_true")
     rh = sub.add_parser("rehearse", help="what a job's paid stage would send and cost, unsent")
     rh.add_argument("job")
-    sub.add_parser("review", help="a page of every take side by side").add_argument("job")
+    rv = sub.add_parser("review", help="a page of every take; --blind hears song jobs blind")
+    rv.add_argument("jobs", nargs="+")
+    rv.add_argument("--blind", action="store_true")
+    rv.add_argument("--rank", help="a blind set's letters, best first, such as C,A,B")
+    rv.add_argument("--reviewer", default="")
     sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
         "job"
     )
@@ -343,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "review":
             from . import reviewpage
 
-            print(reviewpage.write(open_job(a.job)))
+            print(reviewpage.cli(a.jobs, a.blind, a.rank, a.reviewer))
             return 0
         if a.cmd in ("comic", "story"):
             return _document(a)

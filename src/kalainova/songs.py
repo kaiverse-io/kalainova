@@ -22,7 +22,7 @@ from .bar import song as musicbar
 from .bar.readings import summarise
 from .jobfs import ContractError, Job
 from .providers import router
-from .providers.contract import SeparateRequest, SongRequest, TranscribeRequest
+from .providers.contract import Pin, SeparateRequest, SongRequest, TranscribeRequest
 from .render import release
 from .song_repair import repair_take as repair_take
 
@@ -89,10 +89,22 @@ def _heard(job: Job, path: Path) -> list[dict[str, Any]] | None:
     return [dict(w) for w in res.words]
 
 
+def _song_pin(brief: dict[str, Any]) -> Pin | None:
+    """The one song model a job asks for, so jobs that differ only in it can be heard side by side.
+    brief.song_model is {"provider": ..., "model": ...}; it goes there and nowhere else."""
+    asked = brief.get("song_model")
+    if not asked:
+        return None
+    if not isinstance(asked, dict) or not asked.get("provider") or not asked.get("model"):
+        raise ContractError('brief.song_model is {"provider": "...", "model": "..."}')
+    return Pin(provider=str(asked["provider"]), model=str(asked["model"]))
+
+
 def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
     lyrics = lyrics_text(song)
     style = style_text(song)
     seconds = float(song.get("duration_sec") or brief.get("duration_sec") or 120)
+    pin = _song_pin(brief)  # the pinned provider only: a take never comes from another vendor
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
         take = SongRequest(
@@ -107,8 +119,9 @@ def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
             musical_key=song.get("key"),
             language=song.get("language"),
             instrumental=bool(song.get("instrumental")),
+            pin=pin,
         )
-        return router.generate(job, take, note="song")
+        return router.generate(job, take, note="song", only=[pin.provider] if pin else None)
 
     def assess(path: Path) -> tuple[dict[str, Any], bool]:
         report = musicbar.measure(path, song, _heard(job, path))

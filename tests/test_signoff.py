@@ -311,6 +311,7 @@ def _at_a_terminal(monkeypatch, answers):
 def test_a_person_answers_each_risk_and_types_the_hash(
     tmp_path, vendor, limits, monkeypatch, capsys
 ):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))  # `kalainova limits` writes the studio's
     job = _job(tmp_path)
     path = _stills_package(tmp_path, job, signed=False)
     (risk,) = packages.load(path)["readiness"]
@@ -351,3 +352,53 @@ def test_a_blocked_package_or_an_unanswered_risk_is_not_signed_off(tmp_path, ven
     with pytest.raises(ContractError, match="is blocked"):
         packages.sign_off(path, "the operator", {"vague_prompt:call-1": "fine"})
     assert Wired.transport.sent == []
+
+
+def test_a_lip_sync_made_on_a_clip_this_stage_buys_is_signed_as_a_counted_allowance(
+    tmp_path, vendor
+):
+    """Its input is the clip just bought, so its bytes cannot be known when the package is signed.
+    An exact entry would refuse it in the real run, after the clip was already paid for."""
+    job = _job(tmp_path)
+    clip = {"n": 1, "provider": "wired", "capability": "video", "phase": "motion", "key": "v",
+            "estimate": 0.42, "requests": []}  # fmt: skip
+    syncs = [{**clip, "n": n, "capability": "lipsync", "key": f"l{n}", "estimate": 0.15}
+             for n in (2, 3)]  # fmt: skip
+    data = json.loads(
+        packages.build(job, "motion", {"stopped": "", "calls": [clip, *syncs]}, NONE).read_text()
+    )
+    assert [r["capability"] for r in data["requests"]] == ["video"]
+    (sync,) = data["allowances"]
+    assert sync["capability"] == "lipsync" and sync["calls"] == 2
+    assert sync["max_usd_each"] == pytest.approx(0.165), "a frame or two longer still fits"
+    assert data["total_max_usd"] == pytest.approx(0.42 + 2 * 0.165)
+
+
+def test_a_balance_that_cannot_cover_the_spend_stops_it_before_any_call(tmp_path, vendor, limits):
+    """A stage that runs out of money part way leaves half a piece; so the balance is read when a
+    package is built, when it is signed off, and before each call. An unreadable one never
+    blocks."""
+    from kalainova.providers import balances
+
+    left = {"wired": 0.5}
+    balances.READERS["wired"] = lambda: left["wired"]
+    job = _job(tmp_path)
+    path = _stills_package(tmp_path, job, signed=False)  # it may spend $1.00
+    assert "vendor_balance:wired" in [f["id"] for f in packages.load(path)["readiness"]]
+    left["wired"] = 5.0
+    balances._seen.clear()
+    path = _stills_package(tmp_path / "again", job, signed=False)
+    left["wired"] = 0.5  # money went between the build and the sign-off
+    with pytest.raises(ContractError, match="balance is \\$0.50"):
+        sign(path)
+    left["wired"] = 5.0
+    sign(path)
+    left["wired"] = 0.5
+    balances._seen.clear()
+    with pytest.raises(ContractError, match="nothing was called"):
+        router.generate(job, _ask(job))
+    assert not Wired.transport.sent
+    left["wired"] = None  # unreadable: the vendor's own refusal is the backstop
+    balances._seen.clear()
+    router.generate(job, _ask(job))
+    assert len(Wired.transport.sent) == 1

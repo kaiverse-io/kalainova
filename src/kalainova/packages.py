@@ -33,12 +33,18 @@ from pathlib import Path
 from typing import Any
 
 from .jobfs import ContractError, Job
+from .providers import balances
 
 Review = Callable[[Job, str, list[dict[str, Any]]], list[dict[str, Any]]]  # readiness.review
 
 KIND = "kalainova-package"
 VERSION = 1
 STAGES = ("stills", "motion")
+# Calls made on a file this same stage pays for: a lip sync is made on the clip just bought, so its
+# bytes, and so its content key, cannot be known when the package is signed. They are signed as a
+# counted allowance, with a margin for the clip coming back a frame or two longer than asked.
+MADE_ON_A_NEW_CLIP = frozenset({"lipsync"})
+CLIP_MARGIN = 0.10
 FOLDER = "packages"
 STAGE_LIFETIME = dt.timedelta(hours=24)
 MOST_DAYS = 30
@@ -91,7 +97,8 @@ def _request(call: dict[str, Any]) -> dict[str, Any]:
 
 
 def _allowances(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Paid calls that write no file, counted by capability, provider and model."""
+    """Paid calls that write no file, or are made on a clip this stage buys, counted by
+    capability, provider and model."""
     found: dict[tuple[str, str, str], dict[str, Any]] = {}
     for call in calls:
         at = (call["capability"], call["provider"], call.get("routed") or "")
@@ -101,7 +108,8 @@ def _allowances(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
              "max_usd_each": 0.0, "why": call.get("note", "")},
         )  # fmt: skip
         entry["calls"] += 1
-        entry["max_usd_each"] = max(entry["max_usd_each"], round(float(call["estimate"]), 6))
+        each = float(call["estimate"]) * (1 + CLIP_MARGIN if at[0] in MADE_ON_A_NEW_CLIP else 1)
+        entry["max_usd_each"] = max(entry["max_usd_each"], round(each, 6))
     return list(found.values())
 
 
@@ -151,10 +159,16 @@ def build(job: Job, stage: str, report: dict[str, Any], review: Review) -> Path:
             f"{job.id}: {len(unpriced)} paid call(s) have no price, so no ceiling can be signed"
         )
     data = _head(job.studio, job.id, stage, STAGE_LIFETIME)
-    data["requests"] = [_request(c) for c in calls if c.get("key")]
-    data["allowances"] = _allowances([c for c in calls if not c.get("key")])
-    data["total_max_usd"] = round(sum(float(c["estimate"]) for c in calls), 6)
-    data["readiness"] = review(job, stage, calls)
+    exact = [c for c in calls if c.get("key") and c["capability"] not in MADE_ON_A_NEW_CLIP]
+    counted = [c for c in calls if c not in exact]
+    data["requests"] = [_request(c) for c in exact]
+    data["allowances"] = _allowances(counted)
+    data["total_max_usd"] = round(
+        sum(float(c["estimate"]) for c in exact)
+        + sum(a["calls"] * a["max_usd_each"] for a in data["allowances"]),
+        6,
+    )
+    data["readiness"] = review(job, stage, calls) + _balance_findings(data)
     data["cost_cap"] = job.job.get("cost_cap")
     data["already_committed"] = round(job.committed(), 6)
     if job.has("animatic"):
@@ -191,8 +205,30 @@ def allow(
          "max_usd_each": round(each, 6), "why": why},
     ]  # fmt: skip
     data["total_max_usd"] = round(calls * each, 6)
-    data["readiness"] = []
+    data["readiness"] = _balance_findings(data)
     return _write(data, folder(root, job_id))
+
+
+def needs(data: dict[str, Any]) -> dict[str, float]:
+    """The most a package may spend at each provider."""
+    out: dict[str, float] = {}
+    for r in data.get("requests") or []:
+        out[r["provider"]] = out.get(r["provider"], 0.0) + float(r["max_usd"])
+    for a in data.get("allowances") or []:
+        out[a["provider"]] = out.get(a["provider"], 0.0) + a["calls"] * float(a["max_usd_each"])
+    return {k: round(v, 6) for k, v in out.items()}
+
+
+def _balance_findings(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """A block for each provider whose balance, where it can be read, cannot cover the package."""
+    found = []
+    for provider, most in needs(data).items():
+        low = balances.short(provider, most)
+        if low:
+            found.append({"id": f"vendor_balance:{provider}", "level": "block",
+                          "check": "vendor_balance", "shot": "", "call": 0, "detail": low,
+                          "fix": "top up the account, or build a smaller package"})  # fmt: skip
+    return found
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -285,6 +321,10 @@ def sign_off(path: Path, by: str, accepted: dict[str, str]) -> Path:
     blocks = [f["id"] for f in found if f["level"] == "block"]
     if blocks:
         raise ContractError(f"{path.name} is blocked ({', '.join(blocks)}); fix it and build again")
+    for provider, most in needs(data).items():  # read now: money can go between build and sign-off
+        low = balances.short(provider, most, fresh=True)
+        if low:
+            raise ContractError(f"{path.name}: {low}, or build a smaller package")
     risks = [f["id"] for f in found if f["level"] == "risk"]
     missing = [r for r in risks if not str(accepted.get(r) or "").strip()]
     if missing:

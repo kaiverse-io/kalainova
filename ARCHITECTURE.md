@@ -97,8 +97,9 @@ The modules in `src/kalainova/`, and the two paths that make a piece. Every mode
      mac.py (open models on this machine) · local.py (placeholders)
    providers/transport.py: send, upload, fetch, receipt, labels, errors, for every rented vendor ·
      rehearsal.py (requests written down under the router's attempt, none sent) ·
-     payloads.py (a payload sealed by its uploads' bytes, and the digest a package signs)
-   router ─▶ gates.py (stop, studio limits, signed-off packages) ─▶ packages.py
+     payloads.py (a payload sealed by its uploads' bytes, and the digest a package signs) ·
+     balances.py (what a vendor's account has left, where it says; unknown never blocks)
+   router ─▶ gates.py (stop, studio limits, vendor balance, signed-off packages) ─▶ packages.py
 
  Foundation
    router, render, publish ─▶ jobfs.py (job folder and ledger) ─▶ schemas/
@@ -128,6 +129,7 @@ a typed request (`providers/contract.py`), and only `providers/` imports an adap
    ▼
  Paid, outside a rehearsal: the gates, as one studio-wide step (gates.admit)
    │   spend stopped (STOP)? past the studio's signed day or month limit?
+   │   a readable vendor balance below this call's estimate?
    │   no signed, unexpired package of this studio and job covers it at or under its ceiling,
    │   or its request is spent already? ──any──▶ refuse, nothing reserved
    │ covered: the entry is spent once (packages/spent.jsonl)

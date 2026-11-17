@@ -23,6 +23,7 @@ from typing import Any
 
 from . import gates, packages
 from .jobfs import ContractError, home, open_job
+from .providers import balances
 
 CONFIRM_CHARS = 8
 
@@ -113,6 +114,10 @@ def _sign_off(a: argparse.Namespace, root: Path) -> int:
     data = packages.load(path)
     for line in packages.lines(path):
         print(line)
+    for provider, most in packages.needs(data).items():
+        left = balances.of(provider, fresh=True)
+        known = f"${left:.2f}" if left is not None else "not readable"
+        print(f"  {provider} balance now: {known}; this package may spend up to ${most:.2f}")
     if packages.verdict(data) == "blocked":
         print("blocked: it cannot be signed off; fix each BLOCK and build it again")
         return 1

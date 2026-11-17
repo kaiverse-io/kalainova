@@ -103,6 +103,11 @@ class Provider:
         """The row in config/studio.yaml that prices this call."""
         return billable.capability
 
+    def billed_seconds(self, billable: Billable, model: str | None = None) -> float:
+        """How long the file this call returns will be. A vendor that only makes set lengths
+        returns the next one up, and a call made on that file (a lip sync) is billed on it."""
+        return float(billable.duration or 0.0)
+
     def estimate(self, billable: Billable, model: str | None = None) -> float | None:
         """Pre-call cost in dollars. None means this provider has no price for the call."""
         if self.free:

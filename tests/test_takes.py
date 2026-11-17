@@ -385,3 +385,14 @@ def test_a_composition_outside_the_job_is_refused(tmp_path, studio):
     job = make_job(tmp_path, beats=[_moving_beat(graphics="../../elsewhere")])
     with pytest.raises(ContractError, match="no composition"):
         assets.run(job)
+
+
+def test_a_retake_of_a_shot_said_on_camera_is_lip_synced_again(tmp_path, studio):
+    """A take is placed as the model made it; without a new sync the mouth would not match."""
+    job = make_job(tmp_path, beats=[_moving_beat(on_camera=True, speaker="her")])
+    assets.run(job)
+    before = len([c for c in studio.calls if c["capability"] == "lipsync"])
+    shotmake.retake(job, "b1", "Another try.")
+    assert len([c for c in studio.calls if c["capability"] == "lipsync"]) == before + 1
+    asset = next(a for a in job.read("asset_manifest")["assets"] if a["id"] == "b1.video")
+    assert asset["provenance"]["lipsync_model"] == "fake-lipsync"

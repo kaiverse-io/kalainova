@@ -35,6 +35,9 @@
           "text"
         ],
         "additionalProperties": false,
+        "dependentSchemas": {
+          "sings": {"required": ["on_camera"], "properties": {"on_camera": {"const": true}}}
+        },
         "properties": {
           "id": {
             "type": "string"
@@ -148,6 +151,16 @@
           "on_camera": {
             "type": "boolean",
             "description": "The speaker is seen saying the line, so the clip is lip-synced to it."
+          },
+          "sings": {
+            "type": "object",
+            "required": ["start_sec", "end_sec"],
+            "additionalProperties": false,
+            "properties": {
+              "start_sec": {"type": "number", "minimum": 0},
+              "end_sec": {"type": "number", "exclusiveMinimum": 0}
+            },
+            "description": "The character sings over this span of the piece, so the clip is lip-synced to the song's vocal stem (work/vocals.wav) there. Set with on_camera."
           },
           "duration_sec": {
             "type": "number",
