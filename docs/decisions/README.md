@@ -27,3 +27,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0021](0021-cuts-scenes-and-generations-are-counted-apart.md) | Cuts, scenes and generations are counted apart, and code packs the paid ones |
 | [0022](0022-no-paid-call-until-a-ready-package-is-signed-off.md) | No paid call until a person signs off a package that is ready to buy |
 | [0023](0023-the-engine-speaks-to-models-in-its-own-terms.md) | The engine speaks to models in its own terms: typed requests, transports, and a contract every adapter passes |
+| [0024](0024-learned-judges-rank-takes-and-never-block.md) | Learned judges rank takes, and never block |

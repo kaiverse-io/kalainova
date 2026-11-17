@@ -287,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     rv.add_argument("--blind", action="store_true")
     rv.add_argument("--rank", help="a blind set's letters, best first, such as C,A,B")
     rv.add_argument("--reviewer", default="")
+    rv.add_argument("--judge", action="store_true", help="score song takes with config's judges")
     sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
         "job"
     )
@@ -347,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "review":
             from . import reviewpage
 
-            print(reviewpage.cli(a.jobs, a.blind, a.rank, a.reviewer))
+            print(reviewpage.cli(a.jobs, a.blind, a.rank, a.reviewer, judge=a.judge))
             return 0
         if a.cmd in ("comic", "story"):
             return _document(a)

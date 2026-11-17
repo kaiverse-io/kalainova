@@ -283,6 +283,22 @@ identity:
   clip_median_min: 0.363   # a video holds the character when its sampled frames' median closest face reaches this
   lost_below: 0.25         # a sampled frame whose closest face is below this has lost the character
 
+# Learned judges (bar/judges.py): models trained to agree with people about quality, keyed by what
+# they read. The engine ships none. Each is a command in its own environment that takes `--out FILE`
+# and file paths, and writes {path: {score: number}}; providers/runners/ has one script per tool.
+# The first judge's rank_by score ranks takes that pass their readings. A score never blocks, and
+# none is calibrated against this studio's choices yet. `kalainova review <job>... --judge` scores
+# takes already made. For example, in the private config:
+#   song:
+#     - name: muqeval        # MIT; musical impression 1-5, clip Spearman 0.838 (arXiv 2603.22677)
+#       command: [~/tools/muq-eval-env/bin/python, src/kalainova/providers/runners/muqeval_run.py,
+#                 --repo, ~/tools/muq-eval-src, --checkpoint, ~/models/muq-eval-a1]
+#       rank_by: mi
+#     - name: aesthetics     # CC-BY-4.0; Meta's four axes 1-10, mostly production
+#       command: [~/tools/audiobox-env/bin/python, src/kalainova/providers/runners/aesthetics_run.py]
+judges:
+  song: []
+
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:
   stutter_max: 0.08

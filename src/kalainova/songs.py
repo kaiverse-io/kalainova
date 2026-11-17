@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from . import captions, config, media, render, takes, writers
+from .bar import judges
 from .bar import song as musicbar
 from .bar.readings import summarise
 from .jobfs import ContractError, Job
@@ -130,6 +131,7 @@ def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
             "score": musicbar.score(report),
             "misses": misses,
             "readings": report["readings"],
+            **judges.of_take("song", path),  # ranks takes that pass; never blocks
         }, not misses
 
     counts = {**SAFE_TAKES, **{k: brief[k] for k in SAFE_TAKES if k in brief}}

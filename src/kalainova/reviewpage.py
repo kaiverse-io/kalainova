@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config, consistency, kits, media, takes
+from .bar import judges
 from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 
@@ -264,10 +265,48 @@ def rank(folder: Path, order: str, reviewer: str) -> str:
     )
 
 
-def cli(names: list[str], blind_set: bool, order: str | None, reviewer: str) -> str:
-    """`kalainova review`: one job's takes, several song jobs heard blind, or a blind ranking."""
+def judged(jobs: list[Job]) -> str:
+    """Every song take of these jobs scored by the configured judges, one run each, kept on each
+    take (`judged`, `rank`), and listed best first with what its readings missed. A judge's
+    score ranks; the misses say where a take it likes still fails the brief."""
+    if not judges.configured("song"):
+        raise ContractError("no judges.song in config/studio.yaml; see docs/how-to/make-a-song.md")
+    found = []
+    for job in jobs:
+        shot = takes.load(job)["shots"].get("song") or {}
+        found += [(job, t) for t in shot.get("takes", []) if not t.get("bench")]
+    if not found:
+        raise ContractError("no song takes in these jobs, so there is nothing to judge")
+    scores, notes = judges.score("song", [job.work / t["file"] for job, t in found])
+    for job in jobs:
+        data = takes.load(job)
+        for take in (data["shots"].get("song") or {}).get("takes", []):
+            mine = scores.get(job.work / take["file"])
+            if mine is not None and not take.get("bench"):
+                rank = judges.rank_value("song", mine)
+                take["readings"] = {**(take.get("readings") or {}), "judged": mine, "rank": rank}
+        job.write("takes", data)
+    lines = [*notes]
+    order = sorted(
+        found, key=lambda f: -(judges.rank_value("song", scores[f[0].work / f[1]["file"]]) or 0)
+    )
+    for job, take in order:
+        mine = scores[job.work / take["file"]]
+        said = ", ".join(f"{k} {v:g}" for k, v in mine.items()) or "not judged"
+        missed = ", ".join((take.get("readings") or {}).get("misses") or []) or "none"
+        lines.append(f"{job.id} take {take['n']} ({take.get('model')}): {said}; misses {missed}")
+    return "\n".join(lines)
+
+
+def cli(
+    names: list[str], blind_set: bool, order: str | None, reviewer: str, *, judge: bool = False
+) -> str:
+    """`kalainova review`: one job's takes, several song jobs heard blind or judged, or a blind
+    ranking."""
     from .jobfs import open_job
 
+    if judge:
+        return judged([open_job(n) for n in names])
     if order is not None:
         if len(names) != 1:
             raise ContractError("--rank takes the one blind listening folder it ranks")

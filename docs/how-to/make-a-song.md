@@ -51,13 +51,16 @@ To compare takes, or models, without knowing which is which:
 
 ```bash
 uv run kalainova review <job> <job> ... --blind           # every take, shuffled, at one loudness
-uv run kalainova review <folder> --rank C,A,B --reviewer NAME   # best first; once per set
+uv run kalainova review <folder> --rank <letters, best first> --reviewer NAME   # once per set
+uv run kalainova review <job> <job> ... --judge           # every take scored by the judges
 ```
 
 The page names takes by letter only, and the copies carry no tags from their source. Which job,
 take and model each letter was is kept out of the folder, in `listen-keys/`, and is printed when
 the ranking is recorded. A set is ranked once, because a
 second ranking would be made knowing the answers.
+
+A judge is a model trained to agree with people about quality (ADR 0024). The engine ships none. Name each one under `judges.song` in your private config: a command that takes `--out FILE` and audio paths, and writes `{path: {score: number}}`. `providers/runners/muqeval_run.py` runs MuQ-Eval (MIT), which scores musical impression from 1 to 5. Set it up with a checkout of its repo, its A1 weights, and an environment with torch, librosa, omegaconf, muq and `transformers==4.46.3`, since newer releases break the muq package. `providers/runners/aesthetics_run.py` runs Audiobox Aesthetics (CC-BY-4.0), which mostly reads production and tells similar takes apart poorly. The first judge's `rank_by` score ranks the takes that pass their readings. With `--judge`, every take of the named jobs is scored at once and listed best first, beside what its readings missed. A judge never hears the brief, so a take it likes may not sing the words: read the misses before choosing.
 
 Several takes are made, and readings pick one. Tempo against what was asked, steadiness, how many words can be picked out, and shape all warn and never reject. Only a wrong level on the finished file blocks, because a reading cannot judge a song. Listen to it.
 
