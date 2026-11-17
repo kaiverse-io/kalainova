@@ -22,6 +22,8 @@ What stays the same (see `kalainova kit --help`, `stream --help`):
   kalainova schedule <stream> <date> "<brief>"
   kalainova request <stream> "<brief>" [--cast a,b]   a locked job for that stream
 
+Before money leaves (signoff_cli.py, ADR 0022): kalainova limits|package|packages|sign|stop|resume
+
 Shot by shot, songs, research, and what comes after a cut (see production_cli.py):
   kalainova shotplan|takes|take|retake|bench|sheet|filmstrip|cutcheck|export <job> ...
   kalainova song|song-video|research|clips|dub|verdict|signals|provenance|ledger <job> ...

@@ -49,6 +49,7 @@ docs/feature-map.md feature to entry point to code to tests; start here to find 
 - **Guardrails.** `just ci`: contract, lint, types, secrets, semantic rules, tests, docs, architecture coverage.
 - **One strategy per stream, one identity per stream.** A funded-clip post never goes out on an identity used for owned or generated work.
 - **Humans gate publish.** A human approves every piece (`kalainova approve`). Agents never write `approval.json`, and they never submit a campaign URL. `kalainova publish` posts only the approved, QA-checked bytes (ADR 0007).
+- **Humans sign off spend.** No paid call runs without a package a person signed off (ADR 0022). Agents build packages (`kalainova package`), fix what their readiness findings say, and never sign them off: never run `kalainova sign-off` or set `kalainova limits`, never write a `.signoff.json`, never edit `limits.json` or `packages/spent.jsonl`. A refusal names what a person must sign off; report it and stop.
 - **Humans attest kits.** Agents never run `kit freeze`, never set `origin.attested_by`, and never add canon on their own. Each of those names a human.
 - **Rent the models, own the line.** Models are swapped in `config/studio.yaml`. Procedural formats and SKUs still wait for a proof.
 

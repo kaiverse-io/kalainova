@@ -15,6 +15,9 @@ using a transport rather than by rewriting it:
   `UnauthorizedError`, `RateLimitedError` or `UnavailableError` (providers/contract.py), keeping
   what the vendor said.
 - **A billed failure.** A file that does not arrive after the vendor finished is `BilledError`.
+- **The signed payload.** A paid call a person signed for carries the payload digests they signed
+  (`Context.signed`, ADR 0022). `send` refuses any other payload before it leaves, so a change to
+  the mapping or the config between the sign-off and the run spends nothing.
 """
 
 from __future__ import annotations
@@ -26,7 +29,8 @@ from typing import Any
 
 import requests
 
-from . import rehearsal
+from ..jobfs import ContractError
+from . import payloads, rehearsal
 from .contract import (
     BilledError,
     Context,
@@ -123,13 +127,19 @@ class Transport:
         dry = rehearsal.active()
         if dry is not None:
             return Reply(rehearsed=dry.request(model or endpoint, payload, attempt=ctx.attempt))
+        if ctx.signed is not None and payloads.digest(model or endpoint, payload) not in ctx.signed:
+            raise ContractError(
+                f"{ctx.job}: the {self.platform} request is not the one that was signed, so it was "
+                "not sent; the mapping, the config or an input changed since the package was "
+                "built. Build the package again, and sign that"
+            )
         return self._send(endpoint, payload, ctx, wait=wait, params=params or {})
 
     def upload(self, path: Path) -> str:
         dry = rehearsal.active()
-        if dry is not None:
-            return dry.upload(path)
-        return self._upload(path)
+        address = dry.upload(path) if dry is not None else self._upload(path)
+        payloads.remember(address, path)
+        return address
 
     def fetch(
         self,

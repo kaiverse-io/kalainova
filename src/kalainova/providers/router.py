@@ -5,7 +5,8 @@ each attempt applies the same rules:
 
   price     a job with a cost cap refuses a provider it cannot estimate; a price that cannot be
             checked refuses (providers/prices.py)
-  gates     a paid call passes the studio's gates first (gates.py): none goes while spend is stopped
+  gates     a paid call passes the studio's gates first (gates.py): none goes while spend is
+            stopped, past the studio's signed limits, or without a signed package covering it once
   deadline  a call that outlives its deadline is abandoned, and its estimate is charged
   failure   a provider failure moves to the next listed provider and says so on stderr; a request
             the vendor refuses as malformed stops the walk, since the engine's mapping is at fault;
@@ -29,6 +30,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -332,12 +334,19 @@ def _attempt(
         raise ContractError(
             f"{job.id}: {p.name} cannot rehearse {capability}, so the rehearsal stops before it"
         )
+    one = _Try(job, p, request, key, note, errors, estimate)
+    hold = partial(job.reserve, p.name, capability, estimate or 0.0)
     if not p.free and dry is None:
         gates.refuse_paid(job, p.name, capability)
-    reservation = job.reserve(p.name, capability, estimate or 0.0)
-    one = _Try(job, p, request, key, note, errors, estimate, reservation)
+        asked = gates.Call(job=job, provider=p.name, capability=capability, key=key,
+                           model=one.routed, estimate=estimate or 0.0, attempt=one.aid)  # fmt: skip
+        one.allowed, one.reservation = gates.admit(asked, hold)
+        one.ctx = replace(one.ctx, signed=one.allowed.signed if one.allowed else None)
+    else:
+        one.reservation = hold()
     if dry is not None and not p.free:
-        dry.begin(one.aid, request, p.name, estimate, note, key=key, model=one.model)
+        dry.begin(one.aid, request, p.name, estimate, note, key=key, model=one.model,
+                  routed=one.routed, shot=one.ctx.labels.get("shot", ""))  # fmt: skip
     try:
         res = _call(getattr(p, request.method), (one.sent, one.ctx), one.limit)
     except BaseException as exc:  # noqa: BLE001 - each kind is sorted in _Try.failed
@@ -358,11 +367,16 @@ class _Try:
         note: str,
         errors: list[str],
         estimate: float | None,
-        reservation: Any,
     ) -> None:
         self.job, self.p, self.request, self.key, self.note = job, p, request, key, note
-        self.errors, self.estimate, self.reservation = errors, estimate, reservation
+        self.errors, self.estimate = errors, estimate
+        self.reservation: str | None = None
+        self.allowed: gates.Allowed | None = None  # the signed entry a paid call is spent against
         self.aid, self.model = uuid.uuid4().hex[:12], request.model_for(p.name)
+        # the model it goes to, as a package names it: the pin, else the provider's default
+        self.routed = self.model or p.default_model(
+            request.capability, references=request.billable().references
+        )
         self.dst = request.output()
         self.attempt = self.dst.with_name(f".{self.aid}.{self.dst.name}") if self.dst else None
         self.sent = request.writing_to(self.attempt) if self.attempt else request
@@ -384,6 +398,9 @@ class _Try:
         self, amount: float, why: str, made: str | None, meta: dict[str, Any] | None = None
     ) -> None:
         audit = records.audit(self.aid, made, meta, self.ctx.receipt)
+        if self.allowed is not None:
+            audit.update(package=self.allowed.package, package_entry=self.allowed.entry,
+                         signed_by=self.allowed.signer)  # fmt: skip
         note = f"{self.note}: {why}" if why else self.note
         self.job.charge(self.p.name, self.request.capability, amount, note, self.reservation, audit)
 
@@ -404,6 +421,8 @@ class _Try:
             self.charge(exc.billed, "billed, then failed", self.model)
             return self._moved_on(said[:300])
         self.job.release(self.reservation)
+        if self.allowed is not None:  # nothing was billed, so the signed entry is not used up
+            gates.give_back(self.job, self.aid, kind)
         if isinstance(exc, ContractError) or not isinstance(exc, PROVIDER_FAILURES):
             raise exc  # a rule the engine set, a bug in an adapter, or the cap: nothing left held
         refused = isinstance(exc, RefusalError)

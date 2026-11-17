@@ -103,6 +103,11 @@ class Job:
         return self.folder.name
 
     @property
+    def studio(self) -> Path:
+        """The studio this job belongs to: jobs/<id> sits under it, beside kits and streams."""
+        return self.folder.parents[1]
+
+    @property
     def work(self) -> Path:
         """Where media bytes go. Outside git by default."""
         root = Path(os.environ.get("KALAINOVA_OUT", home() / "out"))
@@ -207,6 +212,7 @@ class Job:
                         "note": "reserved before the call",
                         "status": RESERVED,
                         "reservation": reservation,
+                        "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
                     },
                 ]
             )

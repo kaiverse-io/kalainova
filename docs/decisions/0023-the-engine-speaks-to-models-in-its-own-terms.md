@@ -1,6 +1,6 @@
 # 0023. The engine speaks to models in its own terms
 
-Status: accepted · 2026-11-16. Builds on 0019 (self-hosted models) and 0022 (the gated pipeline, proposed).
+Status: accepted · 2026-11-16. Builds on 0019 (self-hosted models). 0022 (signed packages) is built on it.
 
 ## Context
 

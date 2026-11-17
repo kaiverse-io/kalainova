@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fakes import make_job, needs_ffmpeg
 
-from kalainova import assets, plan, shots
+from kalainova import assets, plan, preproduction, shots, takes
 from kalainova.jobfs import ContractError
 from kalainova.providers import base
 
@@ -77,6 +77,34 @@ def test_moving_shots_over_the_cap_are_refused_before_any_call(tmp_path, studio,
         assets.run(job)
     assert studio.calls == []
     assert job.committed() == 0.0
+
+
+@needs_ffmpeg
+def test_a_shot_whose_take_is_made_is_not_priced_again(tmp_path, studio, monkeypatch):
+    """A re-run of a nearly spent job reuses its paid takes, so the cap is held against what is
+    still to make, not against the whole piece again."""
+    monkeypatch.setitem(base._REGISTRY, "priced-video", Priced)
+    job = make_job(
+        tmp_path,
+        beats=[_beat(1), _beat(2), _beat(3)],
+        cost_cap=10.0,
+        brief={"subject": "a test"},
+        providers={"video": ["priced-video"], "image": ["fake"], "voice": ["fake"]},
+    )
+    for shot in ("b1", "b2"):
+        takes.record(job, shot, {"n": 1, "seed": 1, "file": f"takes/{shot}.mp4", "sha256": "x",
+                                 "provider": "priced-video", "model": "m", "readings": {},
+                                 "ok": True, "cost": 4.0})  # fmt: skip
+    piece = assets._open_piece(job, False)
+    assert preproduction.moving_quotes(piece) == [("b1", 0.0), ("b2", 0.0), ("b3", 4.0)]
+    job.charge("priced-video", "video", 4.0)  # what the made takes cost, against a cap of 10
+    job.charge("priced-video", "video", 4.0)
+    with pytest.raises(ContractError, match="estimated at \\$4.00"):  # b3 to make, $2 left
+        assets._refuse_over_the_cap(piece)
+    takes.record(job, "b3", {"n": 1, "seed": 1, "file": "takes/b3.mp4", "sha256": "x",
+                             "provider": "priced-video", "model": "m", "readings": {},
+                             "ok": True, "cost": 4.0})  # fmt: skip
+    assets._refuse_over_the_cap(piece)  # every take is made, so a re-run costs nothing
 
 
 @needs_ffmpeg

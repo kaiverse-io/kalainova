@@ -127,8 +127,14 @@ def _shot(job: Job, shot: str, entry: dict[str, Any], beat: dict[str, Any]) -> s
     asked = (
         f"<details><summary>what it asked for</summary>{escape(prompt)}</details>" if prompt else ""
     )
+    must = str((beat.get("shot") or {}).get("must_show") or "")
+    keep = (
+        f"<p><b>A take is kept when it shows:</b> {escape(must)}</p>"
+        if must
+        else "<p class=muted>Nothing says what a take must show (shot.must_show).</p>"
+    )
     return (
-        f"<h2>{escape(shot)} <span class=muted>· {who}</span></h2>{asked}"
+        f"<h2>{escape(shot)} <span class=muted>· {who}</span></h2>{keep}{asked}"
         f"<ul>{items}</ul><div class=row>{first}{cards}</div>"
     )
 

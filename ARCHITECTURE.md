@@ -96,7 +96,9 @@ The modules in `src/kalainova/`, and the two paths that make a piece. Every mode
      remote.py, fal.py, search.py, spaces.py, compat.py (rented, each through a transport) ·
      mac.py (open models on this machine) · local.py (placeholders)
    providers/transport.py: send, upload, fetch, receipt, labels, errors, for every rented vendor ·
-     rehearsal.py (requests written down under the router's attempt, none sent)
+     rehearsal.py (requests written down under the router's attempt, none sent) ·
+     payloads.py (a payload sealed by its uploads' bytes, and the digest a package signs)
+   router ─▶ gates.py (stop, studio limits, signed-off packages) ─▶ packages.py
 
  Foundation
    router, render, publish ─▶ jobfs.py (job folder and ledger) ─▶ schemas/
@@ -121,16 +123,20 @@ a typed request (`providers/contract.py`), and only `providers/` imports an adap
  Rehearsal open, and the first listed provider, key or not, costs money and cannot rehearse? ──yes──▶ stop
    │ no
    ▼
- Paid, and spend is stopped in this studio (gates)? ──yes──▶ refuse, nothing reserved
-   │ no
-   ▼
  Priced, or the job has no cap? ──no──▶ next listed provider
    │ yes
+   ▼
+ Paid, outside a rehearsal: the gates, as one studio-wide step (gates.admit)
+   │   spend stopped (STOP)? past the studio's signed day or month limit?
+   │   no signed, unexpired package of this studio and job covers it at or under its ceiling,
+   │   or its request is spent already? ──any──▶ refuse, nothing reserved
+   │ covered: the entry is spent once (packages/spent.jsonl)
    ▼
  Reserve the estimate on the ledger ──over the cap──▶ stop the job
    │ within the cap
    ▼
  Call with a deadline, to a temporary path, with this attempt's Context and Receipt
+   │   (a signed call carries its payload digests; the transport sends no other payload)
    │   (in a rehearsal the transport writes the request down and fetches a stand-in file)
    ├── malformed request (422) ───────────▶ release the reservation, stop: the mapping is at fault
    ├── failed, nothing billed ────────────▶ release the reservation ─────────────▶ next listed provider
@@ -277,6 +283,8 @@ These change only with a version bump. A new interface waits for a second real u
 | Nothing added since ADR 0012 has run on a real model | Every line of `docs/studio-goal.md` is Built, none is Run or Accepted. Faked models prove the wiring, not the result |
 | Vendor slugs marked `VERIFY` in `config/studio.yaml` are unconfirmed | An adapter may need its model name or a field changed on its first real call |
 | No container runner for outside tools | The contract exists, and nothing uses it in production yet |
+| The sign-off guards against mistakes, not against an agent that sets out to get round it (ADR 0022) | A call nobody looked at, a vague input, a second run or a loop is refused. An agent that edits the engine, deletes `packages/spent.jsonl`, or calls a vendor with the key itself is not stopped here |
+| No check yet signs off a READY package on a person's behalf | Every paid stage waits for a person, until a readiness check is measured against verdicts and ADR 0017's `by-exception` level is built |
 | The ledger's lock holds on one machine | Parallel calls cannot overshoot here, but two machines could, until Postgres holds the ledger (ADR 0010) |
 | Files from outside tools carry no enforced references | A human compares them against the kit |
 | A kit cannot prove a face is not a real person's | A human attests at freeze and approves each piece; the vision judge is one more signal |
@@ -353,7 +361,10 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ bench ─────▶ consistency, shotmake, shots, takes, timeline, config, providers
     ├─▶ rehearse ──▶ assets, preproduction, takes, providers
     ├─▶ reviewpage ▶ consistency, kits, takes
-    ├─▶ gates ─────▶ jobfs: what must be true before a paid call (router asks it first)
+    ├─▶ gates ─────▶ packages, jobfs: what must be true before a paid call
+    ├─▶ packages ──▶ jobfs: the paid calls a person signs off, from a rehearsal or an allowance
+    ├─▶ readiness ─▶ config, preproduction, shotmake, shots, providers: is each call ready to buy
+    ├─▶ signoff_cli ▶ gates, packages, readiness, rehearse: limits, package, packages, sign-off
     ├─▶ shots ─────▶ config
     ├─▶ edit ──────▶ config
     ├─▶ render ────▶ bar, captions, look, motion, media, mediascan
@@ -398,7 +409,10 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
 The command line. Parses arguments and calls a stage. Holds no rules.
 
 ### studio_cli
-Commands for kits, streams, canon, schedules, requests, and the look sheet.
+Commands for kits, streams, canon, schedules, requests, and the look sheet. It registers `signoff_cli`'s commands first, so the sign-off sits with the studio's other commands.
+
+### signoff_cli
+Commands for what must be true before money leaves (ADR 0022): `stop` and `resume` (the kill switch), `limits` (show the studio's; setting them needs a terminal), `package` (a stage package from a rehearsal with its readiness, or an allowance), `packages` (each package a job can spend under, and its state), and `sign-off`. `sign-off` runs only at a terminal: it prints the package, asks a reason for each risk and the start of the package's hash, and writes the sign-off. Agents build packages and never sign them off or set limits. Depends on `gates`, `packages`, `readiness`, and `rehearse`.
 
 ### production_cli
 Commands for making and judging a piece shot by shot, songs, research, and everything after a cut: takes, retakes, the shot sheet, timeline export, clips, dubbing, verdicts, provenance, and the ledger.
@@ -464,7 +478,7 @@ A camera test: one shot made on several models from the same start frame, prompt
 ```
 
 ### rehearse
-A dry run of a job's paid stage. The job is copied to a throwaway folder that sees the same kits and streams through links, and its stills and moving shots run there with a rehearsal open (`providers/rehearsal.py`). Each request a rented model would be sent is written down with its fields, the files it would upload named by hash, the engine's own request, its content key, its stage (`stills` or `motion`), the router's estimate and the adapter's price; stand-in files of the shape the engine asked for let the line go on. Each request is checked against its vendor's published schema through its own adapter (`Provider.problems`). The first listed provider for each request must be able to rehearse, key or not: a paid one that cannot stops it, because the real run would call it once its key is set. A request is paired with the router's call by the attempt id, so a download under another suffix (fal's audio) and a call that returns only text are both accounted for. The animatic gate is passed in the copy only, and the report says the real run still waits there. Nothing is sent, nothing is spent, and no key is needed; the real job gets only `rehearsal.json` in its work folder, which `scripts/check_fal_schemas.py --rehearsal` checks against each model's live schema. Depends on `assets`, `preproduction`, `takes`, and `providers`.
+A dry run of a job's paid stage. The job is copied to a throwaway folder that sees the same kits and streams through links, and its stills and moving shots run there with a rehearsal open (`providers/rehearsal.py`). Each request a rented model would be sent is written down with its fields, the files it would upload named by hash, the engine's own request, its content key, its stage (`stills` or `motion`), the router's estimate and the adapter's price; stand-in files of the shape the engine asked for let the line go on. Each request is checked against its vendor's published schema through its own adapter (`Provider.problems`). The first listed provider for each request must be able to rehearse, key or not: a paid one that cannot stops it, because the real run would call it once its key is set. A request is paired with the router's call by the attempt id, so a download under another suffix (fal's audio) and a call that returns only text are both accounted for. The animatic gate is passed in the copy only, and the report says the real run still waits there. Nothing is sent, nothing is spent, and no key is needed; the real job gets only `rehearsal.json` in its work folder, which `scripts/check_fal_schemas.py --rehearsal` checks against each model's live schema. `kalainova package` turns the same report into what a person signs (`packages`): each request also carries its routed model, its payload sealed so an upload is named by its bytes, and that payload's digest. Depends on `assets`, `preproduction`, `takes`, and `providers`.
 
 ```
  job ──copy──▶ throwaway job (kits, streams linked read only)
@@ -477,7 +491,19 @@ A dry run of a job's paid stage. The job is copied to a throwaway folder that se
 ```
 
 ### gates
-What must be true before money leaves (ADR 0022, proposed). The router asks it before reserving any paid call, and a gate that fails or cannot be read refuses; it never lets the call through. Free providers and rehearsals pass. Built so far: the kill switch. While `<studio>/STOP` exists, every paid call refuses; `kalainova stop --by NAME` and `kalainova resume --by NAME` write and remove it, and log it in `<studio>/gates.log.jsonl`. To come: studio-wide limits, signed packages, and a spend broker that alone holds the vendor key. Depends on `jobfs`.
+What must be true before money leaves (ADR 0022). The router asks it before reserving any paid call, and a gate that fails or cannot be read refuses; it never lets the call through. Free providers and rehearsals pass. Nothing turns it off: no brief field, flag or environment variable.
+
+- **The kill switch.** While `<studio>/STOP` exists, every paid call refuses. `kalainova stop --by NAME` and `kalainova resume --by NAME` write and remove it, and log it in `<studio>/gates.log.jsonl`.
+- **The studio's limits.** `<studio>/limits.json`, set by a named person at a terminal, sets a UTC daily and monthly ceiling. Every job's dated ledger lines count, open reservations included; lines from before dated ledgers count in neither.
+- **A signed-off package** (`packages`). `admit` finds an unexpired package of this studio and this job, or a studio-wide one, whose request matches the call's content key, provider and routed model, or whose allowance matches its capability, provider and model. The estimate must be at or under the ceiling, the request unspent and the allowance not used up, and the sign-off must match the package's bytes and answer every risk. An exact request wins over an allowance.
+
+`admit` does all of it, writes the use to `<studio>/packages/spent.jsonl` and reserves the estimate on the job's ledger as one step, under a studio-wide lock (`<studio>/.spend.lock`), so parallel jobs cannot pass the limits together. A call that fails with nothing billed gives its entry back (`give_back`). A timeout, or a call billed then failed, keeps it spent. It is a guard against mistakes (a call nobody looked at, a vague or wrong input, a second run, a loop), not a lock against an agent that sets out to get round it. Depends on `packages` and `jobfs`.
+
+### packages
+The paid calls a person signs off (ADR 0022). `build` turns a rehearsal's report into a stage package (`stills` or `motion`), with the readiness findings `readiness.review` returns, passed in by the command so this module stays plain data. A call that writes a file is a request: its content key, provider, routed model, ceiling, the engine's own request (`Request.described()`) and each vendor payload, sealed so an uploaded file is named by its bytes, with its digest (`providers/payloads.py`). A paid call that writes no file is an allowance, counted. A motion package is refused while any still is unmade, since its keys would name stand-ins. `allow` writes an allowance package for work no rehearsal covers, for one job or every job (`*`). A package is canonical JSON with its studio, job, nonce and expiry; `load` refuses any other byte form, and `lines` is how the person reads it: the verdict and each finding first, then what each call makes. `sign_off` writes `<package>.signoff.json` (the bytes' hash, the person, a reason per risk) and refuses a blocked package; `signed_off_by` is what the gate checks. Depends on `jobfs`.
+
+### readiness
+Whether each paid call in a package is ready to buy, checked before anyone is asked to sign it off, free and with no model. A **block** cannot be signed off: a face with no reference picture, longer than the model makes, a field the vendor would refuse, a plan problem `shots.review` fails, motion before the animatic is accepted, a start frame that is not the accepted still. A **risk** is likely to cost a retake and must be fixed or accepted with a reason: a prompt under 12 words, a moving shot with no `shot.must_show`, no start frame, and the plan's warnings (a face held too long, nothing saying what moves), each attached to its shot through the router's shot label. Depends on `config`, `preproduction`, `shotmake`, `shots`, and `providers`.
 
 ### reviewpage
 One local page to judge a piece's takes by eye: the kit's faces, each moving shot's start frame, and every take side by side with its model, seed, cost, size and what its readings flag (unread, under the source size, missed motion, no start frame). Under each shot it lists the faults only a person can see (hands, melting objects, morphing, warped text, face drift) and the `verdict` and `take` commands to record a decision. It writes `review.html` next to the takes and changes nothing else. Depends on `consistency`, `kits`, and `takes`.
@@ -611,7 +637,7 @@ How a piece was made, for whoever answers for it: each asset's model, weights, s
 Approve, publish, and measure. Binds approval to the bytes and a stream piece to its own account. `labels` sets each platform's AI-content label from the assets' synthetic flag, using the fields the aggregator documents, and refuses a platform with none; it also holds a publish time only where the platform's own API takes one. `aggregator` is the one-upload route to several platforms.
 
 ### providers
-The router and vendor adapters, as ports and adapters (ADR 0023). The engine asks with one typed request per capability (`contract.py`), and gets back a `Result` whose facts are fields; the router writes them into a file's record under the engine's own names, and an adapter cannot. Every model call goes through the router, which reserves the estimate before the call, hands the adapter a `Context` (attempt, labels, the pinned model for that provider only, deadline, and a `Receipt` the adapter fills), settles at the real cost after it, stops on a request the vendor refuses as malformed, and refuses a file that is not what was asked for or has no picture in it. What a model takes is `Provider.inputs`, in the engine's terms; only this package reads the config's vendor field names. Every rented adapter reaches its vendor through a transport (`transport.py`: `FalQueue` in `fal.py`, `Https` for the rest), which rehearses, fills the receipt, sends the labels, says an HTTP failure in the engine's terms, and bills a file that never arrived. What a call leaves behind (its trace row, its ledger detail, its generation record, and the saved-file lookup a restart uses) is `records.py`. Price corrections from the vendor's list price and this studio's own bills are `prices.py`. While a rehearsal is open (`rehearsal.py`), each transport writes its requests down under the router's attempt instead of sending them, and the router refuses any provider that costs money and cannot. `tests/boundary/test_provider_contract.py` is the suite every registered adapter passes. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it.
+The router and vendor adapters, as ports and adapters (ADR 0023). The engine asks with one typed request per capability (`contract.py`), and gets back a `Result` whose facts are fields; the router writes them into a file's record under the engine's own names, and an adapter cannot. Every model call goes through the router, which reserves the estimate before the call, hands the adapter a `Context` (attempt, labels, the pinned model for that provider only, deadline, and a `Receipt` the adapter fills), settles at the real cost after it, stops on a request the vendor refuses as malformed, and refuses a file that is not what was asked for or has no picture in it. What a model takes is `Provider.inputs`, in the engine's terms; only this package reads the config's vendor field names. Every rented adapter reaches its vendor through a transport (`transport.py`: `FalQueue` in `fal.py`, `Https` for the rest), which rehearses, fills the receipt, sends the labels, says an HTTP failure in the engine's terms, and bills a file that never arrived. What a call leaves behind (its trace row, its ledger detail, its generation record, and the saved-file lookup a restart uses) is `records.py`. Price corrections from the vendor's list price and this studio's own bills are `prices.py`. While a rehearsal is open (`rehearsal.py`), each transport writes its requests down under the router's attempt instead of sending them, and the router refuses any provider that costs money and cannot. `tests/boundary/test_provider_contract.py` is the suite every registered adapter passes. `fal` and `remote` rent models over HTTPS, `spaces` rents free hosted ones, `search` finds sources, and `hyperframes` renders a composition as a shot. `whispercpp` is a second `transcribe` provider that runs the `whisper-cli` command and returns real word times, where `mac` only estimates them; it needs a model file named by `KALAINOVA_WHISPER_CPP_MODEL`. `mac` runs open models on a Mac's GPU (`docs/how-to/run-models-on-a-mac.md`); `runners/` holds what runs in the models' own environment, and the engine never imports it. A paid call outside a rehearsal first passes `gates.admit` (ADR 0022); the attempt's `Context.signed` then carries the payload digests a person signed, and the transport refuses to send any other payload. `payloads.py` seals a payload by naming each uploaded file by its bytes, so a rehearsed payload and the paid one have the same digest.
 
 ### editor
 The footage path: shots, scores, direction, and notes. `choose` holds the pure decisions: which take, in what order, at what length. `speech` cuts on words when a transcript exists, and `clips` finds short pieces in a long recording (starting on a sentence start, with opening fillers dropped, and optionally opening and closing on a drawn title card from the graphics provider), chooses the crop through one seam with two adapters (the in-house motion centre, and a face detector the operator names as a command in `config/studio.yaml`), refusing a job whose `brief.source` does not say where the file came from and which file in the job folder covers its use. `patch` updates one cut in an existing `edit_manifest` (source, in point, title), voids any approval, and records the change in `direction.json` when that file is present. `musiccuts` turns a beat grid into bars, phrases, sections and the biggest rise in energy, and says so when there is no steady pulse; `musicvideo` builds the job that cuts a video to a track, with an excerpt, character cutaways under the shot ceiling, and the cost said first. `beats` is a seam: `adapters.beats` in `config/studio.yaml` picks its own onset-and-comb grid (default) or `beat_this`, which `beat_this.py` runs as a command and which adds downbeats. `speech_cuts` is a second seam: `speech.keep_spans` (called by `direct` for each take with sound) follows `adapters.speech_cuts`, which picks the in-house cuts at gaps between words (a silence detector when there is no transcript, the default) or `auto_editor`, which runs the `auto-editor` command, keeps the loud spans it reports, and lays any words over them. `auto_editor.py` follows the adapter contract in `opentools`, and keeps its result by the file's bytes and options. A seam is built only with its second adapter, and a missing command stops the step with its name.
