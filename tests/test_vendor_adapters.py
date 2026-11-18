@@ -210,6 +210,18 @@ def test_a_fal_song_sends_style_and_words_apart(falapi):
     assert sent["payload"] == {"prompt": "pop", "lyrics": "[verse]\nWords", "duration": 90}
 
 
+def test_each_fal_song_model_gets_its_own_fields(falapi):
+    provider, sent, tmp = falapi
+    words = SongRequest(lyrics="[verse]\nWords", dst=tmp / "s.wav", style="house", duration=180)
+    provider.song(words, context(model="mureka/v9.5/generate/song"))
+    assert sent["payload"] == {"prompt": "house", "lyrics": "[verse]\nWords", "duration": 180}
+    provider.song(words, context(model="fal-ai/lyria3/pro"))  # one prompt, and no length field
+    assert sent["payload"] == {"prompt": "house\n\nLyrics:\n[verse]\nWords"}
+    too_long = SongRequest(lyrics="w", dst=tmp / "t.wav", style="x" * 1025, duration=180)
+    with pytest.raises(ValueError, match="at most 1024 style characters"):
+        provider.song(too_long, context(model="mureka/v9.5/generate/song"))
+
+
 # ---- on this machine --------------------------------------------------------------------
 @pytest.fixture
 def machine(monkeypatch, tmp_path):

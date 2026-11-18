@@ -98,8 +98,10 @@ def expected(cfg: dict) -> dict[str, set[str]]:
         for model, spec in models.items():
             want.setdefault(model, set()).update(_reference_names(cap, spec))
     for model, spec in cfg.get("audio_models", {}).get("fal", {}).items():
-        names = {"lyrics", spec.get("style_field", "prompt")}
-        if spec.get("max_sec"):
+        names = {spec.get("style_field", "prompt")}
+        if not spec.get("lyrics_in_prompt"):  # otherwise the words travel inside the style field
+            names.add("lyrics")
+        if spec.get("max_sec") and spec.get("takes_duration", True):
             names.add("duration")
         want.setdefault(model, set()).update(names)
     return want

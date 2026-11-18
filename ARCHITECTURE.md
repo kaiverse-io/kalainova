@@ -97,8 +97,9 @@ The modules in `src/kalainova/`, and the two paths that make a piece. Every mode
      mac.py (open models on this machine) · local.py (placeholders)
    providers/transport.py: send, upload, fetch, receipt, labels, errors, for every rented vendor ·
      rehearsal.py (requests written down under the router's attempt, none sent) ·
-     payloads.py (a payload sealed by its uploads' bytes, and the digest a package signs)
-   router ─▶ gates.py (stop, studio limits, signed-off packages) ─▶ packages.py
+     payloads.py (a payload sealed by its uploads' bytes, and the digest a package signs) ·
+     balances.py (what a vendor's account has left, where it says; unknown never blocks)
+   router ─▶ gates.py (stop, studio limits, vendor balance, signed-off packages) ─▶ packages.py
 
  Foundation
    router, render, publish ─▶ jobfs.py (job folder and ledger) ─▶ schemas/
@@ -128,6 +129,7 @@ a typed request (`providers/contract.py`), and only `providers/` imports an adap
    ▼
  Paid, outside a rehearsal: the gates, as one studio-wide step (gates.admit)
    │   spend stopped (STOP)? past the studio's signed day or month limit?
+   │   a readable vendor balance below this call's estimate?
    │   no signed, unexpired package of this studio and job covers it at or under its ceiling,
    │   or its request is spent already? ──any──▶ refuse, nothing reserved
    │ covered: the entry is spent once (packages/spent.jsonl)
@@ -616,7 +618,7 @@ A story to a typeset book and a real EPUB with live text. Pages are laid out onc
 A book's pages as a PDF with live text in embedded fonts, at the same places as its page images. The same input gives the same bytes, because approval binds to them.
 
 ### bar
-The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks. `identity` reads whether a picture or a video shows a kit's character: a configured command (`identity.face_command`; `providers/runners/face_run.py` runs OpenCV's YuNet, embedding with SFace or ArcFace) describes every face as an embedding, and each face is compared with the kit's reference faces, so a crowd is read face by face. A video is read from one sampled frame a second, by its median closest face and the stretches where the character is lost (`clip_report`). The animatic checks each still against the characters its shot names (`check_cast`, printed by `kalainova animatic`). With no command set, identity is reported as not measured, never as a pass; it warns and does not block.
+The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks. `identity` reads whether a picture or a video shows a kit's character: a configured command (`identity.face_command`; `providers/runners/face_run.py` runs OpenCV's YuNet, embedding with SFace or ArcFace) describes every face as an embedding, and each face is compared with the kit's reference faces, so a crowd is read face by face. A video is read from one sampled frame a second, by its median closest face and the stretches where the character is lost (`clip_report`). The animatic checks each still against the characters its shot names (`check_cast`, printed by `kalainova animatic`). With no command set, identity is reported as not measured, never as a pass; it warns and does not block. `judges` runs learned judges the same way (ADR 0024). Each is a command named under `judges.<kind>` (`providers/runners/muqeval_run.py`, `aesthetics_run.py`) that scores files as numbers. Its scores are kept on each take, and the first judge's `rank_by` score ranks the takes that pass their readings (`takes._best`). A judge never blocks, and none ships with the engine.
 
 ### qa
 Runs the automated checks before the human gate, for a rendered piece, a document, a song, or a file from an outside tool.

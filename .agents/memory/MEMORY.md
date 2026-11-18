@@ -18,3 +18,5 @@
 - [One working tree, one writer](one-working-tree-one-writer.md) — a delegated agent's notes were swept into an unrelated commit and pushed; give it its own folder or worktree, stage named paths
 - [Rehearse before the first paid run](rehearse-before-the-first-paid-run.md) — fake-vendor tests passed; a dry run of one real job found ten quote, gate and payload defects
 - [A falling test count is a failure](a-falling-test-count-is-a-failure.md) — a new file overwrote 26 tests and CI stayed green; compare the collected count, not only pass/fail
+- [A call on a clip just bought cannot be keyed by its bytes](a-call-on-a-clip-just-bought-cannot-be-keyed-by-its-bytes.md) — packages match inputs by bytes; a lip sync on a fresh clip would be refused after the video was paid; sign it as a counted allowance on the billed length
+- [A test that runs a studio command needs its own home](a-test-that-runs-a-studio-command-needs-its-own-home.md) — `kalainova limits` in a test with no KALAINOVA_HOME wrote limits.json into the public repo on every CI run

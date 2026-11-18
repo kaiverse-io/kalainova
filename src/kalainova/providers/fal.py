@@ -51,7 +51,11 @@ PRICING = (
 INLINE_MOST_BYTES = 64 * 1024  # fal advises against data URIs past a few KB; larger files upload
 FAL_UPLOAD = "https://rest.alpha.fal.ai/storage/upload/initiate"  # VERIFY against fal's docs
 ASPECTS = ("9:16", "4:5", "1:1", "16:9", "3:4", "4:3")
-AUDIO_AT = ("audio.url", "audio_file.url")  # where a music model puts its file; models differ
+AUDIO_AT = (
+    "audio.url",
+    "audio_file.url",
+    "audio",
+)  # where a music model puts its file; models differ
 Fields = dict[str, Any]
 
 
@@ -243,21 +247,26 @@ class Fal(Provider):
             else billable.capability
         )
 
-    def estimate(self, billable: Billable, model: str | None = None) -> float | None:
-        """A clip is billed at the length the model allows, which is never shorter than the ask."""
+    def billed_seconds(self, billable: Billable, model: str | None = None) -> float:
+        """A clip comes back at the next length the model allows, never shorter than the ask."""
         if billable.capability == "video" and billable.duration:
             name = model or model_for("fal", self.price_key(billable))
             spec = (
                 reference_spec("fal", "video", name) if billable.references else {}
             ) or video_spec("fal", name)
             if spec:
-                billed = float(_billed_length(spec, billable.duration)[0])
-                billable = Billable(
-                    capability="video",
-                    duration=billed,
-                    image=billable.image,
-                    references=billable.references,
-                )
+                return float(_billed_length(spec, billable.duration)[0])
+        return super().billed_seconds(billable, model)
+
+    def estimate(self, billable: Billable, model: str | None = None) -> float | None:
+        """A clip is billed at the length the model allows, which is never shorter than the ask."""
+        if billable.capability == "video" and billable.duration:
+            billable = Billable(
+                capability="video",
+                duration=self.billed_seconds(billable, model),
+                image=billable.image,
+                references=billable.references,
+            )
         if billable.capability in ("song", "separate") and not model:
             model = model_for("fal", billable.capability)
         return super().estimate(billable, model)
@@ -412,10 +421,18 @@ class Fal(Provider):
             raise ValueError("fal's song models cannot repaint a span of a take")
         model = ctx.model or model_for("fal", "song")
         spec = audio_spec("fal", model)
-        payload: Fields = {spec.get("style_field", "prompt"): req.style, "lyrics": req.lyrics}
+        style_field = spec.get("style_field", "prompt")
+        lyrics = req.lyrics
         if req.instrumental and spec.get("instrumental_lyrics"):
-            payload["lyrics"] = spec["instrumental_lyrics"]
-        if req.duration:
+            lyrics = spec["instrumental_lyrics"]
+        if spec.get("lyrics_in_prompt"):  # one text field carries the sound and the words to sing
+            payload: Fields = {style_field: f"{req.style}\n\nLyrics:\n{lyrics}".strip()}
+        else:
+            payload = {style_field: req.style, "lyrics": lyrics}
+        most = spec.get("style_max_chars")
+        if most and len(req.style) > int(most):
+            raise ValueError(f"{model} takes at most {most} style characters, not {len(req.style)}")
+        if req.duration and spec.get("takes_duration", True):
             payload["duration"] = int(req.duration)
         reply = self._send(model, payload, ctx)
         row = price_for("fal", "song", model)
@@ -426,16 +443,17 @@ class Fal(Provider):
     def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Vocals, and everything else mixed back together from the model's other stems."""
         model = ctx.model or model_for("fal", "separate")
+        stems = ("drums", "bass", "other")
         payload: Fields = {
             "audio_url": self.transport.upload(req.src),
             "model": "htdemucs",  # four stems; the six-stem model splits the rest further
+            "stems": ["vocals", *stems],  # named, since fal's default asks for all six
             "output_format": "wav",
         }
         reply = self._send(model, payload, ctx, wait=1800)
         cost = media.duration(req.src) * float(
             price_for("fal", "separate", model).get("per_sec", 0)
         )
-        stems = ("drums", "bass", "other")
         names = list(stems) if reply.rehearsed else [n for n in stems if reply.get(f"{n}.url")]
         if not (reply.rehearsed or reply.get("vocals.url")) or not names:
             raise BilledError(cost, "fal finished but returned no stems")

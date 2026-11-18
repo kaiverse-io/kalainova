@@ -104,8 +104,9 @@ def _shot_cost(piece: _Scene, beat: Fields, length: float, always: int) -> float
     if quote is None or quote[1] is None:
         return None
     total = quote[1] * new
-    if beat.get("on_camera") and not synced:
-        sync = router.price(piece.job, Billable(capability="lipsync", duration=length))
+    if beat.get("on_camera") and not synced:  # billed on the clip the model returns
+        made = router.billed_seconds(piece.job, asked, pin=kw.pin)
+        sync = router.price(piece.job, Billable(capability="lipsync", duration=made))
         if sync is not None and sync[1] is None:
             return None
         total += sync[1] if sync and sync[1] else 0.0

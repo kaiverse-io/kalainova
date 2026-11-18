@@ -67,7 +67,7 @@ models:
     song: minimax/music-3          # a style prompt plus lyrics with section tags. VERIFY
     lipsync: fal-ai/sync-lipsync/v2                 # VERIFY the length limit for long lines
     motion: fal-ai/live-portrait
-    separate: fal-ai/demucs                         # VERIFY the slug and fields before the first paid run
+    separate: fal-ai/demucs                         # checked on fal's schema 2026-11-17
   mac:                             # docs/how-to/run-models-on-a-mac.md; check each licence first
     voice: mlx-community/Kokoro-82M-bf16
     image: mflux-generate-z-image-turbo
@@ -124,8 +124,10 @@ prices:
     music: {per_track: 0.04}
     song: {per_track: 0.15}        # ESTIMATE
     minimax/music-3: {per_track: 0.36, checked: "fal lists $0.002/s; 0.36 is three minutes at that rate, per track until billed units confirm"}
+    mureka/v9.5/generate/song: {per_track: 0.15, checked: "fal's model page: $0.15 a song with lyrics; $0.50 from a prompt alone"}
+    fal-ai/lyria3/pro: {per_track: 0.08, checked: "fal's model page: $0.08 a track"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
-    separate: {per_sec: 0.0007}    # ESTIMATE: per second of the mix. VERIFY on fal's page before a paid run
+    separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
     lipsync: {per_min: 3.00}       # ESTIMATE
     motion: {cost_usd: 0.02}
     transcribe: {per_min: 0.01}
@@ -192,6 +194,8 @@ audio_models:
   fal:
     fal-ai/ace-step: {max_sec: 240, style_field: tags, instrumental_lyrics: "[inst]"}   # fal's page: 5 to 240 s
     minimax/music-3: {max_sec: 300, style_field: prompt}   # fal's schema: duration up to 300 s
+    mureka/v9.5/generate/song: {max_sec: 300, style_field: prompt, style_max_chars: 1024}   # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+    fal-ai/lyria3/pro: {max_sec: 184, style_field: prompt, lyrics_in_prompt: true, takes_duration: false}   # one prompt carries style and lyrics; no length field. VERIFY the longest track
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
 takes:
@@ -278,6 +282,22 @@ identity:
   same_face_min: 0.363     # a face in a picture is the character at or above this (SFace's published limit)
   clip_median_min: 0.363   # a video holds the character when its sampled frames' median closest face reaches this
   lost_below: 0.25         # a sampled frame whose closest face is below this has lost the character
+
+# Learned judges (bar/judges.py): models trained to agree with people about quality, keyed by what
+# they read. The engine ships none. Each is a command in its own environment that takes `--out FILE`
+# and file paths, and writes {path: {score: number}}; providers/runners/ has one script per tool.
+# The first judge's rank_by score ranks takes that pass their readings. A score never blocks, and
+# none is calibrated against this studio's choices yet. `kalainova review <job>... --judge` scores
+# takes already made. For example, in the private config:
+#   song:
+#     - name: muqeval        # MIT; musical impression 1-5, clip Spearman 0.838 (arXiv 2603.22677)
+#       command: [~/tools/muq-eval-env/bin/python, src/kalainova/providers/runners/muqeval_run.py,
+#                 --repo, ~/tools/muq-eval-src, --checkpoint, ~/models/muq-eval-a1]
+#       rank_by: mi
+#     - name: aesthetics     # CC-BY-4.0; Meta's four axes 1-10, mostly production
+#       command: [~/tools/audiobox-env/bin/python, src/kalainova/providers/runners/aesthetics_run.py]
+judges:
+  song: []
 
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:

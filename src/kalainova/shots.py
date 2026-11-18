@@ -29,7 +29,7 @@ _MOTION_WORDS = re.compile(
     r"\b(?:\w+ing|moves?|drifts?|rolls?|sweeps?|turns?|walks?|climbs?|rises?|falls?|flows?|pans?|"
     r"tilts?|pushes?|pulls?|tracks?|dolly|sways?|runs?|crashes?|breaks?|lifts?|leans?|nods?|"
     r"raises?|waves?|jumps?|spins?|shakes?|bounces?|dances?|claps?|reaches?|flashes?|pulses?|"
-    r"flickers?|flares?)\b",
+    r"flickers?|flares?|sings?)\b",
     re.I,
 )
 ALIKE = 0.7  # cues sharing this much of their words read as the same shot twice
@@ -228,6 +228,10 @@ def _structure_problems(beats: list[Beat]) -> list[Problem]:
         if beat.get("on_camera") and not (beat.get("speaker") or beat.get("cast")):
             detail = f"{beat['id']} is said on camera, and names nobody saying it"
             out.append(_problem("on_camera", "fail", detail, beat["id"]))
+        sung = beat.get("sings") or {}
+        if sung and not float(sung.get("end_sec", 0)) > float(sung.get("start_sec", 0)):
+            detail = f"{beat['id']} sings over a span that ends before it starts"
+            out.append(_problem("sings", "fail", detail, beat["id"]))
     return out
 
 

@@ -73,3 +73,12 @@ def _signed_off(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
     if request.node.get_closest_marker("gated"):
         return
     monkeypatch.setattr(gates, "admit", lambda call, reserve: (None, reserve()))
+
+
+@pytest.fixture(autouse=True)
+def _no_balance_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test asks a vendor for its balance; a test of the balance check sets its own reader."""
+    from kalainova.providers import balances
+
+    monkeypatch.setattr(balances, "READERS", {})
+    monkeypatch.setattr(balances, "_seen", {})

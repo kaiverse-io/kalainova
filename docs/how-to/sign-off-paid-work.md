@@ -2,6 +2,21 @@
 
 Nothing paid runs until a person has read what it will buy and signed it off (ADR 0022). The point is to stop a call nobody meant to make, and inputs vague enough that the take is made again. A rehearsal, a free provider and the drawn route need none of this.
 
+## The vendor's balance
+
+A stage that runs out of money part way stops with half a piece made. So where a vendor says what
+its account has left (fal does), the engine reads it three times:
+
+- when a package is built, a balance below what it may spend is a BLOCK;
+- at sign-off, it is read again and shown beside what the package may spend, and sign-off is
+  refused if it cannot cover it;
+- before each paid call, read at most once a minute; a call it cannot cover is refused, and nothing
+  is sent.
+
+A balance that cannot be read (no key loaded, or no such read from the vendor) never blocks. The
+vendor's own refusal stays the backstop: a refused call is not billed, its package entry comes back,
+and takes already made are kept, so running the stage again does not pay for them twice.
+
 ## Once: the studio's limits
 
 ```bash

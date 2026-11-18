@@ -161,6 +161,16 @@ def first_usable(job: Job, capability: str) -> base.Provider | None:
     return usable[0] if usable else None
 
 
+def billed_seconds(
+    job: Job, billable: Billable, *, only: list[str] | None = None, pin: Pin | None = None
+) -> float:
+    """How long the first listed provider's file will be, for pricing a call made on it."""
+    p = first_listed(job, billable.capability, only)
+    if p is None:
+        return float(billable.duration or 0.0)
+    return p.billed_seconds(billable, _pinned(pin, p.name))
+
+
 def _pinned(pin: Pin | None, provider: str) -> str | None:
     return pin.model if pin and pin.provider == provider else None
 

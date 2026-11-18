@@ -15,6 +15,7 @@ reads a vendor's fields: a stand-in's shape comes from the engine's request.
 from __future__ import annotations
 
 import math
+import re
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -126,10 +127,10 @@ class Rehearsal:
     def stand_in(self, url: str, dst: Path) -> None:
         """A file of the shape the engine asked for, made locally, so the line can go on."""
         with _guard:
-            _, attempt = self._requests.get(url) or ({}, "")
+            entry, attempt = self._requests.get(url) or ({}, "")
             asked = self._asked.get(attempt)
         width, height = _size(asked)
-        seconds = _length(asked)
+        seconds = _sent_length(entry.get("payload") or {}) or _length(asked)
         if dst.suffix.lower() in PICTURES:
             media.run(["-f", "lavfi", "-i", f"testsrc2=size={width}x{height}", "-frames:v", "1",
                        str(dst)])  # fmt: skip
@@ -174,6 +175,14 @@ def _size(asked: Request | None) -> tuple[int, int]:
     if isinstance(asked, MotionRequest):
         return _picture_size(asked.character) or SIZES["9:16"]
     return SIZES["9:16"]
+
+
+def _sent_length(payload: dict[str, Any]) -> float | None:
+    """The length the adapter asked the vendor for, which is the length its file comes back at.
+    A vendor that only makes set lengths is asked for the next one up, so this is the length a
+    call made on the file (a lip sync) is billed on."""
+    found = re.match(r"\s*(\d+(?:\.\d+)?)", str(payload.get("duration", "")))
+    return float(found.group(1)) if found and float(found.group(1)) > 0 else None
 
 
 def _length(asked: Request | None) -> float:

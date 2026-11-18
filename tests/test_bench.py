@@ -166,3 +166,6 @@ def test_a_fal_clip_is_estimated_at_the_length_it_is_billed(monkeypatch):
     clip = Billable(capability="video", duration=3.0, image=True)
     assert fal.estimate(clip, "m/x") == 5.0
     assert fal.estimate(Billable(capability="video", duration=6.0, image=True), "m/x") == 10.0
+    # a lip sync made on that clip is billed on the clip as it comes back, not as it was asked
+    assert fal.billed_seconds(clip, "m/x") == 5.0
+    assert fal.billed_seconds(Billable(capability="lipsync", duration=2.4)) == 2.4

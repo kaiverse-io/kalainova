@@ -266,8 +266,11 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
 
     The vendor cuts to the shorter input, and a line is shorter than its shot by the pause after it.
     So the line is padded with silence to the clip's length first, and the clip as it was before the
-    sync is kept beside the synced one."""
+    sync is kept beside the synced one. A shot that sings takes its line from the song's vocal stem,
+    over the span the shot is on screen."""
     line = job.work / "beats" / f"{beat['id']}.voice.wav"
+    if beat.get("sings"):
+        sung_line(job, beat, line)
     length = media.duration(clip)
     padded = line.with_suffix(".padded.wav")
     media.run(["-i", str(line), "-af", "apad", "-t", f"{length:.3f}", str(padded)])
@@ -277,6 +280,16 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
     shutil.copyfile(clip, before)
     synced.replace(clip)
     return {"lipsync_model": res.model, "presync_path": f"beats/{before.name}"}
+
+
+def sung_line(job: Job, beat: Fields, dst: Path) -> None:
+    """A singing shot's line: the vocal stem from where the shot starts on the piece's clock, so
+    the mouth moves with what is heard over it."""
+    stem = job.work / "vocals.wav"
+    if not stem.is_file():
+        raise ContractError(f"{job.id}: {beat['id']} sings, and the job has no vocal stem")
+    start, end = float(beat["sings"]["start_sec"]), float(beat["sings"]["end_sec"])
+    media.run(["-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(stem), str(dst)])
 
 
 def clip_ambience(
@@ -361,7 +374,7 @@ def retake(job: Job, bid: str, note: str = "") -> Fields:
     take = take_clip(
         job, packet, beat, still, span, prof, clip_kw, gen, data, prompt, clip, note=extra
     )
-    apply_chosen(job, bid)
+    apply_chosen(job, bid, gen)
     return take
 
 
@@ -390,10 +403,13 @@ def motion_break(job: Job, bid: str, take: Fields, allow_stills: bool) -> Fields
     return {"beat_id": bid, "reason": f"{MOTION_REASON} ({why})"}
 
 
-def apply_chosen(job: Job, bid: str) -> Fields:
-    """Make the chosen take the one the piece uses, and say so in its record."""
+def apply_chosen(job: Job, bid: str, gen: Gen | None = None) -> Fields:
+    """Make the chosen take the one the piece uses, and say so in its record. A take is placed as
+    the model made it, so a shot said or sung on camera is lip-synced again, through the same gate
+    as any paid call: a sync no package covers stops here rather than leave the mouth unsynced."""
     clip = job.work / "beats" / f"{bid}.video.mp4"
     take = takes.place(job, bid, clip)
+    synced = _resync(job, bid, clip, gen)
     manifest = job.read("asset_manifest")
     allowed = bool((job.job.get("brief") or {}).get("allow_stills"))
     breaks = [
@@ -413,7 +429,7 @@ def apply_chosen(job: Job, bid: str) -> Fields:
             asset.update(
                 provider=take["provider"],
                 model=take["model"],
-                provenance={**kit, **takes.provider_meta(take)},
+                provenance={**kit, **takes.provider_meta(take), **(synced or {})},
                 sha256=sha256_file(clip),
                 duration_sec=media.duration(clip),
                 probe=media.summarize(clip),
@@ -422,3 +438,18 @@ def apply_chosen(job: Job, bid: str) -> Fields:
                 asset["prompt"] = take["prompt"]
     job.write("asset_manifest", manifest)
     return take
+
+
+def _resync(job: Job, bid: str, clip: Path, gen: Gen | None) -> Fields | None:
+    """The lip sync of a shot said or sung on camera, made again on the take just placed."""
+    beats = job.read("script_packet").get("beats", []) if job.has("script_packet") else []
+    beat = next((b for b in beats if b["id"] == bid), None)
+    if not beat or not beat.get("on_camera"):
+        return None
+    timeline = job.read("asset_manifest").get("timeline") or []
+    span = next(s["end_sec"] - s["start_sec"] for s in timeline if s["beat_id"] == bid)
+
+    def routed(request: Request, **kw: Any) -> tuple[base.Provider, Result]:
+        return router.generate(job, request, **kw)
+
+    return lip_sync(job, beat, clip, span, gen or routed)

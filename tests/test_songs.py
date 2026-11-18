@@ -456,3 +456,22 @@ def test_hearing_the_lyrics_says_how_long_the_audio_is(tmp_path, studio, monkeyp
     studio.heard = _heard()
     songs.run(_job(tmp_path))
     assert seen and all(e.duration > 0 for e in seen)
+
+
+def test_a_job_can_ask_for_one_song_model_and_gets_only_that(tmp_path, studio, monkeypatch):
+    """Jobs that differ only in their song model can be heard side by side."""
+    pins = []
+    real = router.generate
+
+    def watch(job, request, **kw):
+        if request.capability == "song":
+            pins.append(request.pin)
+            assert kw.get("only") == ["fake"], "a pinned song is routed to its provider only"
+        return real(job, request, **kw)
+
+    monkeypatch.setattr(router, "generate", watch)
+    brief = {"subject": "a test", "song_model": {"provider": "fake", "model": "m2"}}
+    songs.run(_job(tmp_path, brief=brief))
+    assert pins and all(p is not None and (p.provider, p.model) == ("fake", "m2") for p in pins)
+    with pytest.raises(ContractError, match="song_model"):
+        songs._song_pin({"song_model": "m2"})

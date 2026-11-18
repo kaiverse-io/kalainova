@@ -9,11 +9,17 @@ next to the takes; it changes nothing and spends nothing.
 
 from __future__ import annotations
 
+import datetime as dt
+import json
+import secrets
+import string
 from html import escape
 from pathlib import Path
 from typing import Any
 
-from . import consistency, kits, takes
+from . import config, consistency, kits, media, takes
+from .bar import judges
+from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 
 PAGE = "review.html"
@@ -165,3 +171,148 @@ def write(job: Job) -> Path:
     out = job.work / PAGE
     out.write_text(page)
     return out
+
+
+# ------------------------------------------------------------------ hearing songs blind
+BLIND, RANKING = "listen.html", "ranking.json"
+
+
+def blind(jobs: list[Job]) -> Path:
+    """Every song take of these jobs, shuffled, at one loudness, named by letter only.
+
+    Louder sounds better to a listener, so each take is copied at the song profile's level, with
+    the source's tags stripped. Which job, take and model made each letter is kept away from the
+    page, in a key folder beside it, and is told only once the ranking is recorded (rank), so the
+    ranking cannot lean on a model's name or on a score."""
+    found = []
+    for job in jobs:
+        shot = takes.load(job)["shots"].get("song")
+        if not shot or not shot.get("takes"):
+            raise ContractError(f"{job.id}: no song takes yet, so there is nothing to hear")
+        found += [(job, t) for t in shot["takes"] if not t.get("bench")]
+    if not 2 <= len(found) <= len(string.ascii_uppercase):
+        raise ContractError(f"a blind comparison takes 2 to 26 takes, not {len(found)}")
+    secrets.SystemRandom().shuffle(found)
+    level = config.profile("song")
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    out = jobs[0].work.parent / f"listen-{stamp}"
+    out.mkdir(parents=True)
+    key = []
+    for letter, (job, take) in zip(string.ascii_uppercase, found, strict=False):
+        src, levelled = job.work / take["file"], out / f".{letter}.levelled.wav"
+        media.master_loudness(
+            src, levelled, float(level.get("target_lufs", -14)),
+            float(level.get("true_peak_dbtp_max", -1)),
+        )  # fmt: skip
+        media.run(["-i", str(levelled), "-map_metadata", "-1", "-fflags", "+bitexact",
+                   str(out / f"{letter}.wav")])  # fmt: skip
+        levelled.unlink()
+        key.append({"letter": letter, "job": job.id, "take": take["n"], "file": take["file"],
+                    "provider": take.get("provider", ""), "model": take.get("model", ""),
+                    "sha256": sha256_file(src)})  # fmt: skip
+    _key_path(out).parent.mkdir(exist_ok=True)
+    _key_path(out).write_text(json.dumps({"made_at": stamp, "takes": key}, indent=2) + "\n")
+    rows = "".join(
+        f"<div class=card><b>{k['letter']}</b><br>"
+        f'<audio controls preload=none src="{k["letter"]}.wav"></audio></div>'
+        for k in key
+    )
+    letters = ",".join(k["letter"] for k in key)
+    (out / BLIND).write_text(
+        "<!doctype html><html lang=en><meta charset=utf-8>"
+        '<meta name=viewport content="width=device-width,initial-scale=1">'
+        f"<title>Blind listening</title><style>{STYLE}</style><main><h1>Blind listening</h1>"
+        f"<p class=muted>{len(key)} takes, shuffled and set to one loudness. Listen to each in"
+        " full. Which take is which is told when your ranking is recorded.</p>"
+        f"<div class=row>{rows}</div><h2>Record your ranking, best first</h2>"
+        f"<pre>kalainova review {escape(str(out))} --rank {letters} --reviewer NAME</pre></main>"
+        "</html>\n"
+    )
+    return out / BLIND
+
+
+def _key_path(folder: Path) -> Path:
+    """Where a blind set's answers are kept: beside its folder, never in it."""
+    return folder.parent / "listen-keys" / f"{folder.name}.json"
+
+
+def rank(folder: Path, order: str, reviewer: str) -> str:
+    """Record one ranking of a blind set, best first, then say what each letter was. A set is
+    ranked once: a second ranking would be made knowing the answers."""
+    if not reviewer.strip():
+        raise ContractError("say who ranked it (--reviewer)")
+    key_path, out = _key_path(folder), folder / RANKING
+    if not key_path.is_file():
+        raise ContractError(f"{folder} is not a blind listening set")
+    key = {k["letter"]: k for k in json.loads(key_path.read_text())["takes"]}
+    asked = [x.strip().upper() for x in order.split(",") if x.strip()]
+    if sorted(asked) != sorted(key):
+        raise ContractError(f"rank every letter once: {','.join(sorted(key))}")
+    ranked = [{"place": i, **key[x]} for i, x in enumerate(asked, 1)]
+    at = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    try:  # made only if absent, so two rankings at once cannot both be kept
+        with out.open("x") as fh:
+            fh.write(
+                json.dumps({"reviewer": reviewer, "at": at, "ranked": ranked}, indent=2) + "\n"
+            )
+    except FileExistsError as exc:
+        raise ContractError(
+            f"{folder} was ranked already; a second would know the answers"
+        ) from exc
+    return "\n".join(
+        f"{r['place']}. {r['letter']}: {r['job']} take {r['take']} ({r['model'] or r['provider']})"
+        for r in ranked
+    )
+
+
+def judged(jobs: list[Job]) -> str:
+    """Every song take of these jobs scored by the configured judges, one run each, kept on each
+    take (`judged`, `rank`), and listed best first with what its readings missed. A judge's
+    score ranks; the misses say where a take it likes still fails the brief."""
+    if not judges.configured("song"):
+        raise ContractError("no judges.song in config/studio.yaml; see docs/how-to/make-a-song.md")
+    found = []
+    for job in jobs:
+        shot = takes.load(job)["shots"].get("song") or {}
+        found += [(job, t) for t in shot.get("takes", []) if not t.get("bench")]
+    if not found:
+        raise ContractError("no song takes in these jobs, so there is nothing to judge")
+    scores, notes = judges.score("song", [job.work / t["file"] for job, t in found])
+    for job in jobs:
+        data = takes.load(job)
+        for take in (data["shots"].get("song") or {}).get("takes", []):
+            mine = scores.get(job.work / take["file"])
+            if mine is not None and not take.get("bench"):
+                rank = judges.rank_value("song", mine)
+                take["readings"] = {**(take.get("readings") or {}), "judged": mine, "rank": rank}
+        job.write("takes", data)
+    lines = [*notes]
+    order = sorted(
+        found, key=lambda f: -(judges.rank_value("song", scores[f[0].work / f[1]["file"]]) or 0)
+    )
+    for job, take in order:
+        mine = scores[job.work / take["file"]]
+        said = ", ".join(f"{k} {v:g}" for k, v in mine.items()) or "not judged"
+        missed = ", ".join((take.get("readings") or {}).get("misses") or []) or "none"
+        lines.append(f"{job.id} take {take['n']} ({take.get('model')}): {said}; misses {missed}")
+    return "\n".join(lines)
+
+
+def cli(
+    names: list[str], blind_set: bool, order: str | None, reviewer: str, *, judge: bool = False
+) -> str:
+    """`kalainova review`: one job's takes, several song jobs heard blind or judged, or a blind
+    ranking."""
+    from .jobfs import open_job
+
+    if judge:
+        return judged([open_job(n) for n in names])
+    if order is not None:
+        if len(names) != 1:
+            raise ContractError("--rank takes the one blind listening folder it ranks")
+        return rank(Path(names[0]), order, reviewer)
+    if blind_set:
+        return str(blind([open_job(n) for n in names]))
+    if len(names) != 1:
+        raise ContractError("several jobs are heard side by side with --blind")
+    return str(write(open_job(names[0])))

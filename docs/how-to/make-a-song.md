@@ -31,6 +31,13 @@ Pin one in the job's `providers`, for example `{"song": ["mac"], "transcribe": [
 | A hosted app | `spaces` | Free, rate limited | Needs the `spaces` extra. The lyrics leave this machine, and the app's terms need reading |
 | Eleven Music | `elevenlabs` | Rented | Takes a section-by-section plan |
 | MiniMax Music | `fal` | Rented | A style prompt plus tagged lyrics |
+| Mureka | `fal` | Rented | Lyrics plus a style prompt of up to 1,024 characters; 120 to 300 s |
+| Lyria 3 Pro | `fal` | Rented | One prompt carries the style and the lyrics; the model sets the length |
+
+To use one model of a provider rather than its default, name it in the brief:
+`"song_model": {"provider": "fal", "model": "mureka/v9.5/generate/song"}`. The router sends the
+song there and nowhere else. Choose by listening, not by a model's reputation: open one job per
+model with the same `song.json`, then hear them blind (below).
 
 ## Make it
 
@@ -39,6 +46,21 @@ uv run kalainova song <job>
 uv run kalainova takes <job>           # every take, and how each read
 uv run kalainova take <job> song <n>   # your choice stands
 ```
+
+To compare takes, or models, without knowing which is which:
+
+```bash
+uv run kalainova review <job> <job> ... --blind           # every take, shuffled, at one loudness
+uv run kalainova review <folder> --rank <letters, best first> --reviewer NAME   # once per set
+uv run kalainova review <job> <job> ... --judge           # every take scored by the judges
+```
+
+The page names takes by letter only, and the copies carry no tags from their source. Which job,
+take and model each letter was is kept out of the folder, in `listen-keys/`, and is printed when
+the ranking is recorded. A set is ranked once, because a
+second ranking would be made knowing the answers.
+
+A judge is a model trained to agree with people about quality (ADR 0024). The engine ships none. Name each one under `judges.song` in your private config: a command that takes `--out FILE` and audio paths, and writes `{path: {score: number}}`. `providers/runners/muqeval_run.py` runs MuQ-Eval (MIT), which scores musical impression from 1 to 5. Set it up with a checkout of its repo, its A1 weights, and an environment with torch, librosa, omegaconf, muq and `transformers==4.46.3`, since newer releases break the muq package. `providers/runners/aesthetics_run.py` runs Audiobox Aesthetics (CC-BY-4.0), which mostly reads production and tells similar takes apart poorly. The first judge's `rank_by` score ranks the takes that pass their readings. With `--judge`, every take of the named jobs is scored at once and listed best first, beside what its readings missed. A judge never hears the brief, so a take it likes may not sing the words: read the misses before choosing.
 
 Several takes are made, and readings pick one. Tempo against what was asked, steadiness, how many words can be picked out, and shape all warn and never reject. Only a wrong level on the finished file blocks, because a reading cannot judge a song. Listen to it.
 
@@ -61,12 +83,13 @@ Without a shot list, each shot's picture comes from the `visual` of its section 
 
 - one shot per line, in order, repeated when the cut has more shots than lines;
 - `#` starts a comment;
-- a line that starts with `B-roll:` is a shot with no character in it, so it is made from its still alone, with no face references.
+- a line that starts with `B-roll:` is a shot with no character in it, so it is made from its still alone, with no face references;
+- a line that starts with `Sings:` is a shot where the character sings. The clip is lip-synced to the song's vocal stem over the span the shot is on screen, so the song needs stems: list a `separate` provider in its job before `kalainova song`. Without them the command refuses before it opens the video job. Name a framing that shows the mouth, such as front or three-quarter, and keep hands and the mic away from it. A shot made as a still is not synced, and the estimate adds a lip sync for each singing take.
 
 ```text
 over the shoulder: her hands on the mixer, the crowd lit behind her
 B-roll: close on the faders and the jog wheel, lights pulsing
-front, waist up: she lifts one hand as the drop lands
+Sings: front, waist up: she sings the hook to the crowd, one hand raised
 ```
 
 A listed shot names its own framing, so the split adds no angle to it.

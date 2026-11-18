@@ -53,6 +53,7 @@ def test_stems_are_asked_of_demucs_and_billed_by_the_second(api, tmp_path):
     assert wire.sent[-1]["endpoint"] == "fal-ai/demucs"
     assert wire.payloads[-1]["audio_url"].startswith("data:audio/")
     assert wire.payloads[-1]["output_format"] == "wav"
+    assert wire.payloads[-1]["stems"] == ["vocals", "drums", "bass", "other"]
     assert result.cost == pytest.approx(2.0 * 0.0007)
     assert any("amix=inputs=3:normalize=0" in a for a in ran[-1])
     assert (tmp_path / "v.wav").exists()

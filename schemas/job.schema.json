@@ -158,6 +158,13 @@
           "type": "integer",
           "minimum": 0
         },
+        "song_model": {
+          "type": "object",
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "properties": {"provider": {"type": "string"}, "model": {"type": "string"}},
+          "description": "The one song model this job uses, so jobs that differ only in it can be heard side by side."
+        },
         "cover_at_sec": {
           "type": "number",
           "minimum": 0,

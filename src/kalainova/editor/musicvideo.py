@@ -66,11 +66,14 @@ def _visual(song: dict[str, Any], span: mc.Span) -> str:
 
 
 BROLL = "b-roll:"
+SINGS = "sings:"
+VOCALS = "vocals.wav"  # the song's vocal stem, which songs.finish writes when it can split one
 
 
 def read_shots(path: Path) -> list[str]:
     """A shot list: one shot per line, in order, repeated when the cut has more shots than lines.
-    A line that starts with "B-roll:" is a shot with no character in it. # starts a comment."""
+    A line that starts with "B-roll:" is a shot with no character in it, and one that starts with
+    "Sings:" is lip-synced to the song's vocal. # starts a comment."""
     lines = [ln.strip() for ln in path.read_text().splitlines()]
     found = [ln for ln in lines if ln and not ln.startswith("#")]
     if not found:
@@ -78,10 +81,21 @@ def read_shots(path: Path) -> list[str]:
     return found
 
 
-def _listed(line: str, cast: list[str] | None) -> tuple[str, list[str] | None]:
-    if line.lower().startswith(BROLL):
-        return line[len(BROLL) :].strip(), []
-    return line, cast
+def _listed(line: str, cast: list[str] | None) -> tuple[str, list[str] | None, bool]:
+    """A listed shot's cue, who is in it, and whether they sing."""
+    low = line.lower()
+    if low.startswith(BROLL):
+        return line[len(BROLL) :].strip(), [], False
+    if low.startswith(SINGS):
+        return line[len(SINGS) :].strip(), cast, True
+    return line, cast, False
+
+
+def _sings(shot_list: list[str] | None, n: int, kinds: list[str]) -> bool:
+    """A moving shot the list says sings. A still has no mouth to sync, so it is not one."""
+    if not shot_list or kinds[n] != "video":
+        return False
+    return _listed(shot_list[n % len(shot_list)], None)[2]
 
 
 def beats_for(
@@ -93,21 +107,30 @@ def beats_for(
     shot_list: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     out = []
+    at = 0.0  # where each shot starts on the piece's clock, which sums the shots' lengths
     for n, span in enumerate(spans):
         text = "" if (silent or song.get("instrumental")) else (span["text"] or song["title"])
         cue, people = _visual(song, span), cast
         if shot_list:  # the operator's own shots, which name their framing
-            cue, people = _listed(shot_list[n % len(shot_list)], cast)
+            cue, people, _ = _listed(shot_list[n % len(shot_list)], cast)
+        length = round(span["end"] - span["start"], 3)
         beat: dict[str, Any] = {
             "id": f"s{n:02d}",
             "role": "hook" if n == 0 else ("payoff" if n == len(spans) - 1 else "body"),
             "text": text,
             "visual_cue": cue,
             "visual_kind": kinds[n],
-            "duration_sec": round(span["end"] - span["start"], 3),
+            "duration_sec": length,
         }
         if people is not None and (people or cast):
             beat["cast"] = list(people)
+        if _sings(shot_list, n, kinds):
+            if not people:
+                raise ContractError(
+                    f"s{n:02d}: a singing shot needs a character; open the video on a stream"
+                )
+            beat["on_camera"] = True  # lip-synced, as a spoken line on camera is
+            beat["sings"] = {"start_sec": round(at, 3), "end_sec": round(at + length, 3)}
         shot: dict[str, str] = {}
         if span.get("angle") and not shot_list:
             shot["size"] = span["angle"]
@@ -116,6 +139,7 @@ def beats_for(
         if shot:
             beat["shot"] = shot
         out.append(beat)
+        at += length
     return out
 
 
@@ -141,29 +165,40 @@ def estimate(
     takes_each: int | None = None,
     refs: list[bool] | None = None,
     image_only: list[str] | None = None,
+    sings: list[bool] | None = None,
 ) -> float:
     """Shots, seconds, and the price of the moving ones, said before any call. Refuses past the cap.
     Each clip is priced at its generated length: the slot plus a beat to trim from, times the takes
-    every moving shot is planned to get (a paid model makes exactly those)."""
+    every moving shot is planned to get (a paid model makes exactly those). A shot that sings is
+    lip-synced once for each of those takes, at the same length."""
     each = takes_each if takes_each is not None else takes.counts({})[0]
     held = refs if refs is not None else [True] * len(spans)  # a character in frame, by default
-    moving = [(s, r) for s, k, r in zip(spans, kinds, held, strict=True) if k == "video"]
+    sung = sings if sings is not None else [False] * len(spans)
+    moving = [
+        (s, r, g) for s, k, r, g in zip(spans, kinds, held, sung, strict=True) if k == "video"
+    ]
     seconds = sum(s["end"] - s["start"] for s in spans)
-    total, unpriced, needs = 0.0, False, set()
+    total, unpriced, needs, synced = 0.0, False, set(), 0.0
     pin = Pin(provider=only[0], model=model) if model and only else None  # the stream's own pin
-    for span, with_refs in moving:  # B-roll goes to the plain model, at its own price
-        asked = Billable(
-            capability="video",
-            duration=span["end"] - span["start"] + pad,
-            image=True,
-            references=with_refs,
-        )
+    for span, with_refs, singing in moving:  # B-roll goes to the plain model, at its own price
+        length = span["end"] - span["start"] + pad
+        asked = Billable(capability="video", duration=length, image=True, references=with_refs)
         quote = router.price(job, asked, only=only, pin=pin if with_refs else None)
         if quote is None or quote[1] is None:
             unpriced = True
         else:
             total += quote[1] * each
             needs |= {f"{quote[0]} needs {key}" for key in quote[2]}
+        sync = None
+        if singing:  # the sync is billed on the clip the model returns, at its own length
+            made = router.billed_seconds(job, asked, only=only, pin=pin if with_refs else None)
+            sync = router.price(job, Billable(capability="lipsync", duration=made))
+        if singing and (sync is None or sync[1] is None):
+            unpriced = True
+        elif sync is not None and sync[1] is not None:
+            synced += sync[1] * each
+            needs |= {f"{sync[0]} needs {key}" for key in sync[2]}
+    total += synced
     stills = 0.0
     for _ in spans if image_only else []:  # every shot starts from a rented still
         still = router.price(job, Billable(capability="image"), only=image_only)
@@ -176,6 +211,7 @@ def estimate(
         f"{len(spans)} shots, {seconds:.1f}s, {len(moving)} moving, {each} take(s) each: "
         f"about ${total:.2f}"
         + (f", ${stills:.2f} of it for a still a shot" if stills else "")
+        + (f", ${synced:.2f} to lip-sync {sum(g for *_, g in moving)} singing" if synced else "")
         + (" (some shots have no priced provider, so the total is low)" if unpriced else "")
         + (f"; before the paid run, {', '.join(sorted(needs))}" if needs else "")
     )
@@ -292,6 +328,13 @@ def build(
         bool(_listed(shot_list[n % len(shot_list)], chosen)[1] if shot_list else chosen)
         for n in range(len(spans))
     ]
+    sings = [_sings(shot_list, n, kinds) for n in range(len(spans))]
+    stem = job.work / VOCALS
+    if any(sings) and not stem.is_file():
+        raise ContractError(
+            f"{job.id}: a singing shot is lip-synced to the song's vocal, and the song has no vocal"
+            f" stem ({VOCALS}); list a separate provider in its job and make the song"
+        )
     cost = estimate(
         job,
         spans,
@@ -303,6 +346,7 @@ def build(
         model=stream_video_model,
         refs=cast_in,
         image_only=stream_providers.get("image") if stream_providers else None,
+        sings=sings,
     )
     for note in notes:
         say(f"note: {note}")
@@ -346,6 +390,10 @@ def build(
         heard = _excerpt_audio(final, child.work / "track.wav", a, b, profile)
     else:
         shutil.copyfile(final, child.work / "track.wav")
+    if any(sings):  # unfaded and unlevelled: it only drives a mouth, and is never heard
+        media.run(
+            ["-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", str(stem), str(child.work / VOCALS)]
+        )
     cuts = [s["start"] for s in spans[1:]]
     (child.work / "music_cuts.json").write_text(
         json.dumps(

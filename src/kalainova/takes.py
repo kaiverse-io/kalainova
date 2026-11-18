@@ -90,17 +90,24 @@ def _score(take: Take) -> float:
 
 
 def _best(takes: list[Take]) -> int:
-    """The first take that passes; when none passes, the one closest to passing.
+    """Of the takes that pass, the one a judge ranks highest, else the first; when none passes,
+    the one closest to passing.
 
     Passing is a floor, not a ranking: more motion is not a better shot, so the readings never
-    pick between takes that both pass. A person does that. A bench take is a camera test, so it
-    only stands for the shot when nothing else was made.
+    pick between takes that both pass. A learned judge (bar/judges.py) can, and its score is kept
+    as the take's `rank`; without one, a person does. A bench take is a camera test, so it only
+    stands for the shot when nothing else was made.
     """
     takes = [t for t in takes if not t.get("bench")] or takes
     passing = [t for t in takes if t["ok"]]
     if passing:
-        return int(min(passing, key=lambda t: t["n"])["n"])
+        return int(min(passing, key=lambda t: (-_rank(t), t["n"]))["n"])
     return int(max(takes, key=_score)["n"])
+
+
+def _rank(take: Take) -> float:
+    found = (take.get("readings") or {}).get("rank")
+    return float(found) if found is not None else float("-inf")
 
 
 def record(job: Job, shot: str, take: Take) -> dict[str, Any]:

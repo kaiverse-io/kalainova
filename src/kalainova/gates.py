@@ -35,6 +35,7 @@ from typing import Any
 
 from . import packages
 from .jobfs import ContractError, Job
+from .providers import balances
 
 STOP = "STOP"
 LOG = "gates.log.jsonl"
@@ -315,6 +316,9 @@ def admit(call: Call, reserve: Callable[[], str | None]) -> tuple[Allowed, str |
     root = studio(call.job)
     with _studio_locked(root):
         _within_limits(root, call.job, call.estimate)
+        low = balances.short(call.provider, call.estimate)
+        if low:
+            raise ContractError(f"{call.job.id}: {low}; nothing was called")
         allowed = _cover(root, call)
         _append(root, {"package": allowed.package, "entry": allowed.entry, "job": call.job.id,
                        "attempt": call.attempt, "usd": round(call.estimate, 6),
