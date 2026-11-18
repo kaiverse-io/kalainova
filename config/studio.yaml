@@ -135,6 +135,7 @@ prices:
     sing: {per_sec: 0.16}
     fal-ai/bytedance/omnihuman/v1.5: {per_sec: 0.16, checked: "fal's pricing API 2026-11-18: $0.16 a second"}
     fal-ai/kling-video/ai-avatar/v2/pro: {per_sec: 0.115, checked: "fal's pricing API 2026-11-18: $0.115 a second"}
+    fal-ai/ltx-2.3/audio-to-video: {per_sec: 0.10, checked: "fal's pricing API 2026-11-18: $0.10 a second"}
     wan/v2.6/image-to-video: {per_sec: 0.15, checked: "fal billed $0.75 for 5 s at 1080p on 2026-11-18; the pricing API's $0.10 is a lower tier"}
     bytedance/seedance-2.0/reference-to-video: {per_sec: 0.68}   # ESTIMATE: $0.014 per 1,000 tokens, about 48,600 tokens a second at 1080p
     motion: {cost_usd: 0.02}
@@ -305,6 +306,10 @@ sing_models:
       durations: "5,10,15"
       takes_seed: true
       extra: {resolution: "1080p", enable_prompt_expansion: false, multi_shots: false}
+    fal-ai/ltx-2.3/audio-to-video:       # a scene model (LTX-2.3) led by the audio: 2 to 20 s
+      image_param: image_url
+      audio_param: audio_url
+      aspect_param: aspect_ratio
     bytedance/seedance-2.0/reference-to-video:   # reference audio guides the video: VERIFY that it lip-syncs
       images_param: image_urls
       image_tag: "@Image{n}"
