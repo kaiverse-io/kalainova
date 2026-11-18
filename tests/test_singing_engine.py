@@ -274,6 +274,17 @@ def test_no_shot_is_cut_shorter_than_a_bar_unless_the_whole_piece_is():
     assert [round(s["end"] - s["start"], 2) for s in kept] == [5.0, 4.0], "it joins the one before"
 
 
+def test_a_face_held_past_the_ceiling_is_cut_on_a_bar_without_leaving_a_sliver():
+    from kalainova.editor import musiccuts as mc
+
+    found = {"beats": [0.48 * n for n in range(40)]}  # a bar is 1.92 s, the unit two bars
+    held = [{"start": 0.0, "end": 4.28, "text": "", "strong": False}]
+    cut = mc.split_for_ceiling(held, found, 4.0)
+    assert [(s["start"], s["end"]) for s in cut] == [(0.0, 1.92), (1.92, 4.28)], "not 3.84 + 0.44"
+    longer = mc.split_for_ceiling([{**held[0], "end": 7.68}], found, 4.0)
+    assert [s["end"] for s in longer] == [3.84, 7.68], "whole units stay as they were"
+
+
 def test_a_bench_rehearsal_names_its_shot_and_its_models():
     from kalainova import rehearse
 

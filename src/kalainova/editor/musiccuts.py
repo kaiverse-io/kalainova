@@ -19,6 +19,7 @@ Span = dict[str, Any]
 Analysis = dict[str, Any]  # beats, bars (times), energy per bar, rise (bar, lift) or None, notes
 LAG_FRAMES = round(beat_tools.WIN / 2 / beat_tools.HOP)  # an envelope frame is stamped at its start
 BAR_BEATS = 4  # a bar is four beats unless a caller says otherwise
+SHORTEST_BARS = 0.9  # no shot is cut shorter than about a bar
 MIN_PULSE = 3.0  # onset energy on the beats over its average elsewhere; below, the grid is a guess
 MIN_LIFT = 0.3  # a rise must lift the next two bars this far above the last two; ESTIMATE
 # both are ESTIMATE until reviewed tracks tune them
@@ -178,7 +179,9 @@ def _section_at(starts: list[int], bars: list[float], at: float) -> int | None:
 
 def split_for_ceiling(spans: list[Span], found: Analysis, ceiling: float | None) -> list[Span]:
     """Cut a long shot into whole bars (whole beats where one bar is too long), each from another
-    angle, so a character is never held past the ceiling: cutaways, not a long take."""
+    angle, so a character is never held past the ceiling: cutaways, not a long take. A remainder
+    shorter than a bar is not a shot: the last two pieces split their time on the bar nearest
+    the middle instead."""
     if not ceiling:
         return spans
     beats = found["beats"]
@@ -186,27 +189,33 @@ def split_for_ceiling(spans: list[Span], found: Analysis, ceiling: float | None)
     bar = beat * BAR_BEATS
     whole = bar if bar <= ceiling else beat
     unit = whole * max(1, int(ceiling // whole))
+    least = bar * SHORTEST_BARS
     out: list[Span] = []
     for span in spans:
-        at = span["start"]
+        cuts, at = [span["start"]], span["start"]
         while at < span["end"] - 1e-6:
             end = min(at + unit, span["end"])
             if span["end"] - end < beat * 0.5:
                 end = span["end"]
+            cuts.append(end)
+            at = end
+        if len(cuts) > 2 and cuts[-1] - cuts[-2] < least:  # a sliver: the last two share a line
+            mid = (cuts[-1] + cuts[-3]) / 2
+            cuts[-2] = cuts[-3] + whole * max(1, round((mid - cuts[-3]) / whole))
+        for a, b in zip(cuts, cuts[1:], strict=False):
             out.append(
                 {
                     **span,
-                    "start": round(at, 3),
-                    "end": round(end, 3),
+                    "start": round(a, 3),
+                    "end": round(b, 3),
                     "angle": ANGLES[len(out) % len(ANGLES)],
-                    "strong": span["strong"] and at == span["start"],
+                    "strong": span["strong"] and a == span["start"],
                 }
             )
-            at = end
     return out
 
 
-def merge_short(spans: list[Span], found: Analysis, bars: float = 0.9) -> list[Span]:
+def merge_short(spans: list[Span], found: Analysis, bars: float = SHORTEST_BARS) -> list[Span]:
     """A shot shorter than about a bar joins its neighbour, so a lyric line heard in passing, or a
     sliver left at an excerpt's edge, never gets a cut of its own: no shot is shorter than a bar
     unless the whole piece is."""
