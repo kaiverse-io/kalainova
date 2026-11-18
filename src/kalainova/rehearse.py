@@ -106,24 +106,28 @@ def bench_asked(shot: str | None, models: str | None) -> tuple[str, list[str]] |
 
 
 def run(
-    job: Job, check: Check | None = published_schema, bench: tuple[str, list[str]] | None = None
+    job: Job,
+    check: Check | None = published_schema,
+    bench: tuple[str, list[str]] | None = None,
+    again: bool = False,
 ) -> dict[str, Any]:
     """Rehearse the job's stills and moving shots; write what would be sent and what it costs.
     `check` reads each model's published schema, which is free and needs no key. With `bench`, a
-    shot and its models, the stills are rehearsed and then that shot on each model (bench.py)."""
+    shot and its models, that shot on each model (bench.py), after its still when it has none."""
     stopped = ""
     with tempfile.TemporaryDirectory(prefix="kalainova-rehearsal-") as tmp:
         copy = _copy(job, Path(tmp))
         try:
             with rehearsal.opened() as dry:
                 try:
-                    dry.phase = "stills"  # what the animatic pays for
-                    assets.run(copy, animatic=True)
-                    if bench:
-                        from . import bench as benching
+                    from . import bench as benching
 
+                    if not (bench and benching.ready(copy, bench[0])):  # else it has its start
+                        dry.phase = "stills"  # what the animatic pays for
+                        assets.run(copy, animatic=True)
+                    if bench:
                         dry.phase = "bench"
-                        benching.run(copy, bench[0], bench[1], say=lambda _: None)
+                        benching.run(copy, bench[0], bench[1], say=lambda _: None, again=again)
                     else:
                         dry.phase = "motion"  # what the full run pays for once it is accepted
                         assets.run(copy, force=copy.has("asset_manifest"))

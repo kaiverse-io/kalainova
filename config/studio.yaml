@@ -329,6 +329,7 @@ sing_models:
       image_param: image_url
       audio_param: audio_url
       min_audio_sec: 4
+      short_side: 716                    # measured on a 9:16 bench take, 2026-11-18: under the 1080 floor
     minimax/h3-max/lip-sync/image-to-video:   # the line drives the mouth; transcription off for singing over music
       image_param: image_url
       audio_param: audio_url
@@ -408,9 +409,35 @@ identity:
 #     - name: mouth          # Apache-2.0 (MediaPipe face landmarker): the mouth's opening against the
 #       command: [~/tools/mouth-env/bin/python,   # line's loudness; best correlation and its lag
 #                 src/kalainova/providers/runners/mouth_run.py, --model, ~/tools/face_landmarker.task]
+#   performance:             # any take with a character in it: how the person moves
+#     - name: performance    # Apache-2.0 (MediaPipe face and person mask, OpenCV flow): head turn,
+#       command: [~/tools/mouth-env/bin/python,  # nod and tilt, eyes, the person apart from the
+#                 src/kalainova/providers/runners/perform_run.py,  # background, and the camera
+#                 --face-model, ~/tools/face_landmarker.task,
+#                 --person-model, ~/tools/selfie_segmenter.tflite]
 judges:
   song: []
   lipsync: []
+  performance: []
+
+# rank: the readings that order a bench's takes of one shot against each other (benchreport.py,
+#   ADR 0026), by capability. Each is scaled within the takes compared, never held to a fixed mark,
+#   and weighted equally unless `weight` says otherwise; `better` is higher or lower. A take a
+#   ranking judge did not read is listed but not ranked. `close`: first and second nearer than
+#   this, in the takes' own spread, and a person decides. A reading joins only once
+#   `kalainova agreement` shows it follows a person's preferences on enough varied shots; none of
+#   the performance readings has yet, so none ranks.
+rank:
+  close: 0.25
+  sing:
+    - {reading: syncnet.confidence, better: higher}
+    - {reading: syncnet.distance, better: lower}
+    - {reading: mouth.corr, better: higher}
+  video: []
+
+# review_aspects: what a person's preference between two takes may be about (`kalainova verdict
+#   --aspect`), so each judge is held to what was said of its own aspect.
+review_aspects: [overall, lips, head, eyes, body, picture, sound]
 
 # The studio bar (docs/studio-bar.md). Limits come from measured work, and only tighten.
 bar:

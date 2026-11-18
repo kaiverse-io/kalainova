@@ -10,13 +10,12 @@ same start frame, and the same seeds, so a difference between rows comes from th
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from . import config, consistency, media, shotmake, shots, takes, timeline
+from . import benchreport, config, consistency, media, shotmake, shots, takejudges, takes, timeline
 from .editor import singing
 from .jobfs import ContractError, Job
 from .providers import base, router
@@ -135,6 +134,15 @@ def _setup(job: Job, shot: str) -> _Setup:
     return _Setup(beat, float(span), still, prompt, aspect, kw, resolved, lock, line)
 
 
+def ready(job: Job, shot: str) -> bool:
+    """Whether the shot has the still and the length a bench starts from, so nothing before it
+    needs making, or rehearsing."""
+    try:
+        return _setup(job, shot).span > 0
+    except ContractError:
+        return False
+
+
 def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> shotmake.Held:
     """What one model is given, worked out for that model rather than the stream's pinned one.
 
@@ -187,19 +195,63 @@ def conditioning(provider: str, model: str, held: shotmake.Held, sings: bool = F
     return f"{kit} reference(s), the still among them; no start frame"
 
 
-def estimate(job: Job, shot: str, models: list[str], count: int, say: Say = print) -> list[Row]:
+def _not_made_before(job: Job, shot: str, model: str, prompt: str, again: bool) -> None:
+    """A bench row the same as one already made, on the same model, prompt, and still, would buy
+    the same test twice. It is made again only when asked (`--again`)."""
+    if again:
+        return
+    entry = takes.load(job)["shots"].get(shot) or {}
+    same = [
+        t["n"]
+        for t in entry.get("takes", [])
+        if t.get("bench") and t.get("model") == model and t.get("prompt") == prompt
+    ]
+    if same:
+        raise ContractError(
+            f"{job.id}: {shot} was already benched on {model} with this prompt (take "
+            f"{', '.join(map(str, same))}); change the prompt, or ask for another take with --again"
+        )
+
+
+def _size_warning(job: Job, setup: _Setup, provider: str, model: str, say: Say) -> None:
+    """Said before spend: a model known to make a character shot under the profile's size floor.
+    Known from config (`short_side` on its sing row) or from a take it made before."""
+    prof = config.profile(job.job.get("profile") or "short-9x16")
+    floor = int(prof.get("character_source_min_px") or 0)
+    if not floor or not setup.beat.get("cast"):
+        return
+    made = split(model)[0]
+    side = (config.sing_spec(provider, made) or {}).get("short_side") if setup.line else None
+    if side is None:
+        for entry in takes.load(job)["shots"].values():
+            for take in entry.get("takes", []):
+                r = take.get("readings") or {}
+                if take.get("model") == model and r.get("width") and r.get("height"):
+                    side = min(int(r["width"]), int(r["height"]))
+    if side is not None and int(side) < floor:
+        say(
+            f"{model} makes {side} px on its short side, under this profile's {floor} px floor: "
+            "its takes go to a person and are not picked"
+        )
+
+
+def estimate(
+    job: Job, shot: str, models: list[str], count: int, say: Say = print, again: bool = False
+) -> list[Row]:
     """What each model's takes should cost, said before anything is spent. Refuses over the cap."""
     setup = _setup(job, shot)
     rows = []
     table = config.studio().get("prices") or {}
     for model in models:
         made, repaint = split(model)
+        _not_made_before(job, shot, model, setup.prompt, again)
         if repaint and not setup.line:
             raise ContractError(
                 f"{job.id}: {shot} does not sing, so there is no line to repaint to"
             )
         capability = "video" if repaint else setup.capability
         provider = _provider_of(job, made, capability)
+        _size_warning(job, setup, provider, model, say)
         request = _request_for(replace(setup, line=None) if repaint else setup, provider, made, say)
         asked = Billable(
             capability=capability,
@@ -240,11 +292,13 @@ def estimate(job: Job, shot: str, models: list[str], count: int, say: Say = prin
     return rows
 
 
-def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print) -> dict[str, Any]:
+def run(
+    job: Job, shot: str, models: list[str], count: int = 1, say: Say = print, again: bool = False
+) -> dict[str, Any]:
     """Make the shot on each model, and write one sheet with a row per model."""
     if count < 1:
         raise ContractError("a bench makes at least one take of each model")
-    rows = estimate(job, shot, models, count, say)
+    rows = estimate(job, shot, models, count, say, again)
     setup = _setup(job, shot)
     made: list[dict[str, Any]] = []
     failed: dict[str, str] = {}
@@ -292,9 +346,12 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                     n,
                     suffix=".mp4",
                     make=make,
-                    assess=shotmake.judged_sung(takes.assess_clip, setup.line)
-                    if setup.line
-                    else takes.assess_clip,
+                    assess=takejudges.judged_on_camera(
+                        takejudges.judged_sung(takes.assess_clip, setup.line)
+                        if setup.line
+                        else takes.assess_clip,
+                        setup.beat,
+                    ),
                     prompt=setup.prompt,
                     seed=takes.seed_for(setup.prompt, i),
                     extra={
@@ -323,9 +380,11 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
     entry = takes.load(job)["shots"].get(shot) or {}
     benched = [t for t in entry.get("takes", []) if t.get("bench")]  # every row so far
     sheet = _sheet(job, shot, benched)
-    if setup.line and benched:  # lips are judged moving, so a sung bench is watched as well
-        say(f"watch them: {side_by_side(job, shot, benched, setup.line)}")
-    return {"takes": made, "failed": failed, "sheet": sheet}
+    report = benchreport.write(job, shot) if benched else None
+    if report:
+        say(f"watch them: {report['video']}")
+        say(f"{report['status']}: {report['reason']}")
+    return {"takes": made, "failed": failed, "sheet": sheet, "report": report}
 
 
 def _unsung(dst: Path) -> Path:
@@ -368,30 +427,3 @@ def _sheet(job: Job, shot: str, made: list[dict[str, Any]]) -> Path | None:
     folder = job.work / "bench"
     folder.mkdir(exist_ok=True)
     return timeline.bench_sheet(rows, folder / f"{shot}.jpg")
-
-
-def side_by_side(job: Job, shot: str, made: list[dict[str, Any]], line: Path) -> Path:
-    """A sung bench's takes side by side, in the order listed, with the line they all sing playing
-    over them, so the lips can be watched against the one vocal. Each is slipped onto the line by
-    the offset its lip judge measured, as the piece would play it."""
-    folder = job.work / "bench"
-    folder.mkdir(exist_ok=True)
-    out = folder / f"{shot}.mp4"
-    aligned = []
-    for take in made:
-        copy = folder / f"{shot}.take-{take['n']:02d}.aligned.mp4"
-        shutil.copyfile(job.work / take["file"], copy)
-        singing.slip(copy, singing.offset_of(take.get("readings") or {}))
-        aligned.append(copy)
-    inputs = [arg for clip in aligned for arg in ("-i", str(clip))]
-    fitted = "".join(
-        f"[{n}:v]scale=360:640:force_original_aspect_ratio=decrease,pad=360:640:-1:-1,"
-        f"fps=25,setsar=1[v{n}];"
-        for n in range(len(made))
-    )
-    stack = "".join(f"[v{n}]" for n in range(len(made)))
-    joined = f"{stack}hstack=inputs={len(made)}[v]" if len(made) > 1 else "[v0]null[v]"
-    media.run([*inputs, "-i", str(line), "-filter_complex", fitted + joined, "-map", "[v]",
-               "-map", f"{len(made)}:a", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-               "-c:a", "aac", str(out)])  # fmt: skip
-    return out

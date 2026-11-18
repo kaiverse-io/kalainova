@@ -235,3 +235,65 @@ def test_a_sung_rows_tier_padding_and_first_frame_are_said(monkeypatch):
     assert said == ", at 480P, the line padded to 5 s and cut back"
     assert bench.settings("fal", "refs/only", 3.82).endswith("not a fixed first frame")
     assert bench.settings("fal", "plain/one", 3.82) == ""
+
+
+def test_a_bench_row_already_made_is_not_bought_twice(stage):
+    bench.run(stage, "b1", ["cam-a"], 1, say=lambda _: None)
+    Camera.calls = []
+    with pytest.raises(ContractError, match="already benched on cam-a"):
+        bench.run(stage, "b1", ["cam-a"], 1, say=lambda _: None)
+    assert Camera.calls == [], "refused before any call"
+    bench.run(stage, "b1", ["cam-a"], 1, say=lambda _: None, again=True)
+    assert len(Camera.calls) == 1, "made again when asked"
+
+
+def test_every_bench_writes_a_labelled_report_with_the_engines_reading(stage):
+    from kalainova import benchreport
+
+    found = bench.run(stage, "b1", ["cam-a", "cam-b"], 1, say=lambda _: None)
+    report = found["report"]
+    assert report["panels"] == [0, 1] and report["status"] == "none", "nothing ranks plain video"
+    folder = stage.work / "bench"
+    assert "| take |" in (folder / "b1.report.md").read_text().replace("| panel ", "")
+    assert media.summarize(folder / "b1.mp4")["height"] == 640 + benchreport.LABEL_H
+    config.studio()["rank"] = {"video": [{"reading": "shot_motion", "better": "higher"}]}
+    again = benchreport.write(stage, "b1", only=[1, 0])
+    assert again["panels"] == [1, 0]
+    assert again["status"] == "close", "the same test picture from both: a person decides"
+
+
+def test_a_model_known_to_make_under_the_floor_is_said_before_spend(stage):
+    from types import SimpleNamespace
+
+    bench.run(stage, "b1", ["cam-a"], 1, say=lambda _: None)
+    said: list[str] = []
+    cast = SimpleNamespace(beat={"cast": ["lead"]}, line=None)
+    bench._size_warning(stage, cast, "camera", "cam-a", said.append)
+    assert said and "180 px" in said[0] and "1080 px floor" in said[0]
+    bench._size_warning(stage, SimpleNamespace(beat={}, line=None), "camera", "cam-a", said.append)
+    assert len(said) == 1, "a shot with no one in it has no character floor"
+
+
+def test_a_bench_is_read_and_judged_from_the_command_line(stage, tmp_path, monkeypatch, capsys):
+    from kalainova.__main__ import main
+
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    assert main(["bench", "p1", "b1", "--models", "cam-a,cam-b"]) == 0
+    assert "b1.report.md" in capsys.readouterr().out
+    assert main(["bench-report", "p1", "b1", "--only", "1,0"]) == 0
+    assert "watch them:" in capsys.readouterr().out
+    best = ["verdict", "p1", "accept", "--reviewer", "r", "--shot", "b1", "--best", "1",
+            "--among", "0,1", "--aspect", "picture"]  # fmt: skip
+    assert main(best) == 0
+    assert '"aspect": "picture"' in capsys.readouterr().out
+    one = ["verdict", "p1", "accept", "--reviewer", "r", "--shot", "b1", "--take", "0"]
+    assert main(one) == 0
+    config.studio()["rank"] = {"video": [{"reading": "shot_motion", "better": "higher"}]}
+    assert main(["agreement"]) == 0
+    said = capsys.readouterr().out
+    assert "shot_motion" not in said, "two takes that read alike say nothing of a reading"
+    assert "picture" in said and "the engine pick" in said, "the engine's own order is held to it"
+
+    assert main(["signals"]) == 0 and main(["review-set"]) == 0
+    assert main(["bench-report", "p1", "b1", "--only", "one,two"]) != 0
+    assert "written 5,7,10" in capsys.readouterr().err

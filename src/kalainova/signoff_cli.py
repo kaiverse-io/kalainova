@@ -29,6 +29,11 @@ CONFIRM_CHARS = 8
 
 
 def add_parsers(sub: Any) -> None:
+    rh = sub.add_parser("rehearse", help="what a job's paid stage would send and cost, unsent")
+    rh.add_argument("job")
+    rh.add_argument("--bench", help="a shot to rehearse on --models, as kalainova bench would")
+    rh.add_argument("--models")
+    rh.add_argument("--again", action="store_true", help="a bench row already made, once more")
     halt = sub.add_parser("stop", help="stop every paid call in this studio until resumed")
     halt.add_argument("--by", required=True)
     halt.add_argument("--why", default="")
@@ -137,12 +142,26 @@ def _sign_off(a: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _rehearse(a: argparse.Namespace) -> int:
+    from . import rehearse
+
+    job = open_job(a.job)
+    benched = rehearse.bench_asked(a.bench, a.models)
+    report = rehearse.run(job, bench=benched, again=a.again)
+    for line in rehearse.lines(report):
+        print(line)
+    print(job.work / (rehearse.BENCH_REPORT if benched else rehearse.REPORT))
+    return 1 if report["stopped"] else 0
+
+
 def dispatch(a: argparse.Namespace) -> int | None:
     """Run a command from this module, or None if it belongs to another."""
     handler = {"stop": _spend, "resume": _spend, "limits": _limits, "package": _package,
                "sign-off": _sign_off}.get(a.cmd)  # fmt: skip
     if handler is not None:
         return handler(a, home())
+    if a.cmd == "rehearse":
+        return _rehearse(a)
     if a.cmd == "packages":
         job_id = a.job if a.job == "*" else open_job(a.job).id
         for line in gates.listing(home(), job_id):

@@ -343,7 +343,7 @@ def test_a_still_over_a_models_file_limit_is_sent_as_a_jpeg_of_the_same_size(tmp
 
 @needs_ffmpeg
 def test_a_sung_bench_is_watched_side_by_side_with_its_one_line(tmp_path):
-    from kalainova import bench, media
+    from kalainova import benchreport, media
 
     job = make_job(tmp_path, media=["video"])
     line = _stem(job.work / "s00.voice.wav", 2.0, [(0.0, 2.0)])
@@ -353,9 +353,10 @@ def test_a_sung_bench_is_watched_side_by_side_with_its_one_line(tmp_path):
         media.run(["-f", "lavfi", "-i", "testsrc2=s=270x480:d=2:r=24", "-pix_fmt", "yuv420p",
                    str(clip)])  # fmt: skip
         made.append({"n": n, "file": clip.name})
-    out = bench.side_by_side(job, "s00", made, line)
+    out = benchreport.side_by_side(job, "s00", made, line)
     info = media.summarize(out)
-    assert (info["width"], info["height"]) == (720, 640), "two takes across, each in a 9:16 slot"
+    tall = 640 + benchreport.LABEL_H
+    assert (info["width"], info["height"]) == (720, tall), "two 9:16 slots under a strip of names"
     assert media.duration(out) == pytest.approx(2.0, abs=0.1)
     assert media.decode_stereo(out)[0].size, "the line plays over them"
 
