@@ -195,3 +195,27 @@ def test_between_jobs_the_pick_follows_the_rule_within_one():
     none = [(a, take(0, False, 4.9, 0.5, ["song.words_found"])), (b, take(0, False, 3.0, 0.9))]
     told = reviewpage._pick(none)
     assert told.startswith("pick: none passes every reading; the closest is arm-b take 0")
+
+
+@needs_ffmpeg
+def test_a_short_with_no_one_singing_on_screen_is_still_cut_where_the_words_are_sung(
+    tmp_path, monkeypatch, studio
+):
+    """A performance short of a sung song: the stretch comes from the vocal stem and the words, so
+    a track whose energy has no clear peak still gets one, and no shot is made to sing."""
+    from test_songs import _heard, _job
+
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    studio.heard = _heard()
+    job = _job(tmp_path)
+    songs.run(job)
+    listed = tmp_path / "shots.txt"
+    listed.write_text("front, at the decks: she nods to the kick\nB-roll: the faders\n")
+    said: list[str] = []
+    real = musicvideo.build
+    monkeypatch.setattr(musicvideo, "build", lambda *a, **k: real(*a, **{**k, "say": said.append}))
+    child = Job(
+        songs.video_job(job, "p1-perf", excerpt={"length": 6.0, "start": None}, shots=listed)
+    )
+    assert any("heard sung" in line for line in said)
+    assert not any(b.get("sings") for b in child.read("script_packet")["beats"])

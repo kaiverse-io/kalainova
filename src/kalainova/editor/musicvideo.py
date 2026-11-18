@@ -275,8 +275,9 @@ def _stretch(
     sung_words: list[dict[str, Any]],
     say: Say,
 ) -> tuple[float, float]:
-    """The piece's bounds on the track: all of it, a given start, where a singing short is sung
-    (singing.best_window), or else the strongest stretch."""
+    """The piece's bounds on the track: all of it, a given start, where a sung song's words are
+    heard sung (singing.best_window), whether or not anyone sings on screen, or else, for an
+    instrumental or a song with no vocal stem, the strongest stretch."""
     if not excerpt:
         return 0.0, length
     if excerpt.get("start") is None and sung is not None:
@@ -351,7 +352,8 @@ def build(
     notes = list(found["notes"])
     stem = job.work / VOCALS
     listed = bool(shot_list) and any(singing.sings(line) for line in shot_list or [])
-    sung = singing.voiced(stem) if listed and stem.is_file() else None
+    voiced = listed or not song.get("instrumental")  # a singing shot needs the stem either way
+    sung = singing.voiced(stem) if voiced and stem.is_file() else None
     a, b = _stretch(found, length, excerpt, song, sung, sung_words or [], say)
     if excerpt:
         spans = mc.clip_to_window(spans, a, b)
@@ -364,7 +366,7 @@ def build(
             " moving shots, so the price stays inside a cap"
         )
     kinds = _kinds(spans, still_only, moving)
-    shot_list = _placed(shot_list, kinds, spans, sung, a, say)
+    shot_list = _placed(shot_list, kinds, spans, sung if listed else None, a, say)
     pad = (60 / found["bpm"]) if found["bpm"] else 0.5
     cast_in = [
         bool(_listed(shot_list[n % len(shot_list)], chosen)[1] if shot_list else chosen)
