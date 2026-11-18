@@ -223,7 +223,7 @@ def take_clip(
     floor = int(prof.get("character_source_min_px") or 0)
     assess = takes.held_to(floor) if floor and beat.get("cast") else takes.assess_clip
     line = job.work / "beats" / f"{beat['id']}.voice.wav"
-    sung = bool(beat.get("sings")) and singing.sung_line(job, beat, line) >= singing.SUNG_MIN
+    sung = bool(beat.get("sings")) and singing.sung_line(job, beat, line) >= singing.NO_VOICE
     if beat.get("sings") and not sung:
         print(f"{job.id}: {beat['id']}: no singing in its span, so it is made as a plain clip")
     assess = judged_sung(assess, line) if sung else assess

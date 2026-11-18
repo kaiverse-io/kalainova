@@ -107,6 +107,39 @@ def test_a_song_video_sings_each_singing_shot_from_its_line_in_one_call(
     assert any(b["sings"]["start_sec"] > 0 for b in sung), "a shot after the first is checked"
 
 
+def test_a_planned_singing_shot_is_sung_unless_its_line_is_silent(tmp_path, monkeypatch, studio):
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    (tmp_path / "jobs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "streams").mkdir(parents=True, exist_ok=True)
+    make_character(tmp_path)
+    make_stream(tmp_path, "chan", silent=True)
+    song_job = make_job(tmp_path, media=["song"], job_id="s1")
+    song_job.write("song", _song())
+    song_job.write("asset_manifest", _song_manifest("s1"))
+    _track(song_job.work / "final.wav", seconds=12.0)
+    _write(song_job.work / "vocals.wav", np.full(int(12.0 * SR), 0.5))
+    listed = tmp_path / "shots.txt"
+    listed.write_text("Sings: front, she sings\nSings: close, she sings\nB-roll: the faders\n")
+    child = Job(
+        songs.video_job(song_job, "s1-video", stream="chan", profile="short-9x16", shots=listed)
+    )
+    sung = [b for b in child.read("script_packet")["beats"] if b.get("sings")]
+    assert len(sung) >= 2
+    voice = np.full(int(12.0 * SR), 0.5)  # the excerpt's stem: one line part sung, one silent
+    part, quiet = sung[0]["sings"], sung[1]["sings"]
+    a, b = int(part["start_sec"] * SR), int(part["end_sec"] * SR)
+    voice[a : a + int((b - a) * 0.7)] = 0.0
+    voice[int(quiet["start_sec"] * SR) : int(quiet["end_sec"] * SR)] = 0.0
+    _write(child.work / "vocals.wav", voice)
+    data = json.loads((child.folder / "job.json").read_text())
+    data["providers"] = {**(data.get("providers") or {}), "sing": ["fake"]}
+    (child.folder / "job.json").write_text(json.dumps(data))
+    assets.run(Job(child.folder))
+    sang = {c["audio"].name.split(".")[0] for c in studio.calls if c["capability"] == "sing"}
+    assert sung[0]["id"] in sang, "sung under half the way, as the plan chose: still sung"
+    assert sung[1]["id"] not in sang, "a silent line has nothing to sing, so it is a plain clip"
+
+
 def test_a_singing_span_that_ends_before_it_starts_fails_the_plan():
     from kalainova import shots
 

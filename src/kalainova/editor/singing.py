@@ -21,7 +21,10 @@ from . import musiccuts as mc
 FRAME_SEC = 0.05
 SUNG_DB = -20.0  # a frame within this of the stem's loud singing has a voice in it
 LOUD_PERCENTILE = 95  # the stem's loud singing, robust to a stray peak
-SUNG_MIN = 0.5  # a shot sung this much of the way has a mouth worth syncing
+SUNG_MIN = 0.5  # a shot sung this much of the way has a mouth worth syncing, when it is planned
+# A planned singing shot is sung unless its line is this nearly silent. The plan measured it
+# against the whole song's stem, and the excerpt's own level must not undo that choice.
+NO_VOICE = 0.1
 CHORUS_WEIGHT = 2  # a chorus word heard counts this many times: a short wants the hook
 SHORT_WORD = 2  # words this short or shorter ("a", "in") say nothing about which line it is
 SINGS = "sings:"

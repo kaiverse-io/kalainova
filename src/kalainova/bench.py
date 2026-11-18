@@ -106,7 +106,7 @@ def _setup(job: Job, shot: str) -> _Setup:
     prof = config.profile(data.get("profile") or "short-9x16")
     aspect = str(prof.get("aspect", "9:16"))
     line = job.work / "beats" / f"{shot}.voice.wav" if beat.get("sings") else None
-    if line and singing.sung_line(job, beat, line) < singing.SUNG_MIN:
+    if line and singing.sung_line(job, beat, line) < singing.NO_VOICE:
         raise ContractError(f"{job.id}: {shot} is not sung over its span, so it has no line")
     return _Setup(beat, float(span), still, prompt, aspect, kw, resolved, lock, line)
 
