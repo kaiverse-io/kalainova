@@ -8,6 +8,7 @@ readings warn and pick among takes. They never block a song on taste.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -36,6 +37,8 @@ WINDOW_SEC = 8.0
 HOP_SEC = 4.0
 LOW_BPM, HIGH_BPM = 70.0, 180.0
 SHORT_WORD = 3  # "the", "of", and "me" are heard anywhere and prove nothing
+STEM_HEARD = ".vocals.heard.json"  # beside a take: what was heard of its vocal stem alone
+MIX_HEARD = ".heard.json"  # beside a take: what was heard of the take itself
 
 
 def tempo_miss(detected: float, asked: float) -> float:
@@ -83,6 +86,25 @@ def words_found(lines: list[str], heard: list[Word]) -> float:
         return 1.0
     got = {t for word in heard for t in _tokens(str(word.get("text", "")))}
     return len(wanted & got) / len(wanted)
+
+
+def chorus_heard(song: Song, heard: list[Word]) -> float | None:
+    """Share of the chorus's lines a listener picks out at least half of, anywhere in the take:
+    a song whose hook is never heard is not the song asked for. None when no section is a chorus."""
+    lines = [
+        line
+        for section in song["sections"]
+        if section.get("kind") in ("chorus", "hook")
+        for line in section.get("lines") or []
+    ]
+    if not lines:
+        return None
+    got = {t for word in heard for t in _tokens(str(word.get("text", "")))}
+    found = 0
+    for line in dict.fromkeys(lines):
+        wanted = {t for t in _tokens(line) if len(t) > SHORT_WORD}
+        found += bool(wanted) and len(wanted & got) * 2 >= len(wanted)
+    return found / len(dict.fromkeys(lines))
 
 
 def _sound_readings(path: Path) -> list[Reading]:
@@ -133,7 +155,26 @@ def measure(path: Path, song: Song, heard: list[Word] | None) -> dict[str, Any]:
     if heard is not None and not song.get("instrumental"):
         found = words_found(lyric_lines(song), heard)
         readings.append(at_least("song.words_found", found, "song_words_found_min"))
+        chorus = chorus_heard(song, heard)
+        if chorus is not None:
+            readings.append(at_least("song.chorus_heard", chorus, "song_chorus_heard_min"))
     return summarise([asdict(r) for r in readings])
+
+
+def saved_heard(take: Path) -> list[Word] | None:
+    """What was heard of a take, kept beside it: off its vocal stem when that was transcribed, as a
+    transcriber hears far more of a voice without its band; else off the take."""
+    for saved in (take.with_suffix(STEM_HEARD), take.with_suffix(MIX_HEARD)):
+        if saved.exists():
+            return list(json.loads(saved.read_text()))
+    return None
+
+
+def assessed(path: Path, song: Song, heard: list[Word] | None) -> tuple[dict[str, Any], bool]:
+    """A take's readings as a take keeps them, and whether it passes every one."""
+    report = measure(path, song, heard)
+    misses = [r["id"] for r in report["readings"] if not r["ok"]]
+    return {"score": score(report), "misses": misses, "readings": report["readings"]}, not misses
 
 
 def score(report: dict[str, Any]) -> float:

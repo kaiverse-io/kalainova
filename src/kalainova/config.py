@@ -27,8 +27,30 @@ def overlay(base: dict, over: dict) -> dict:
     return out
 
 
+class _OneOfEach(yaml.SafeLoader):
+    """A YAML reader that refuses a key written twice in one table. YAML lets the second copy win
+    silently, so a section added at the end of a file would drop the one above it."""
+
+
+def _one_of_each(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    seen: set = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in seen:
+            raise ValueError(f"{node.start_mark.name}: {key!r} is written twice (line "
+                             f"{key_node.start_mark.line + 1}); merge the two into one")  # fmt: skip
+        seen.add(key)
+    return loader.construct_mapping(node, deep)
+
+
+_OneOfEach.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _one_of_each)
+
+
 def _read(path: Path) -> dict:
-    return (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
+    if not path.exists():
+        return {}
+    with path.open() as text:  # the file object, so a duplicate key names its file
+        return yaml.load(text, Loader=_OneOfEach) or {}  # noqa: S506 - a SafeLoader subclass
 
 
 @lru_cache(maxsize=1)
@@ -96,6 +118,11 @@ def audio_spec(provider: str, model: str) -> dict:
 def video_spec(provider: str, model: str) -> dict:
     """How a plain video model takes its inputs, or {} if it is not listed."""
     return dict((studio().get("video_models", {}).get(provider, {})).get(model) or {})
+
+
+def sing_spec(provider: str, model: str) -> dict:
+    """How a model sings a shot in one call (a still and a line in), or {} if it is not listed."""
+    return dict((studio().get("sing_models", {}).get(provider, {})).get(model) or {})
 
 
 def profile(name: str) -> dict:

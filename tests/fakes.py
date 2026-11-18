@@ -29,6 +29,7 @@ EVERY = (
     "sfx",
     "transcribe",
     "lipsync",
+    "sing",
     "separate",
     "graphics",
     "llm",
@@ -177,6 +178,16 @@ class Studio(base.Provider):
         shortest = min(media.duration(req.video), media.duration(req.audio))
         media.run(["-i", str(req.video), "-t", f"{shortest:.3f}", "-c", "copy", str(req.dst)])
         return Result(path=req.dst, model="fake-lipsync")
+
+    def sing(self, req, ctx):
+        """A clip as long as the line, with the line as its sound, as a model that sings returns."""
+        self._log("sing", still=req.still, audio=req.audio, model=ctx.model, prompt=req.prompt)
+        length = media.duration(req.audio)
+        media.run(
+            ["-f", "lavfi", "-i", f"testsrc2=s=320x180:d={length:.3f}:r=24", "-i", str(req.audio),
+             "-pix_fmt", "yuv420p", "-shortest", str(req.dst)]
+        )  # fmt: skip
+        return Result(path=req.dst, model=ctx.model or "fake-sing", billed_seconds=length)
 
     def separate(self, req, ctx):
         self._log("separate")

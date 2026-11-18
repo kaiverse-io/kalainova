@@ -394,6 +394,32 @@ class LipsyncRequest(Request):
 
 
 @dataclass(frozen=True, kw_only=True)
+class SingRequest(Request):
+    """A shot sung in one call: its still and the line it sings in, and the voice moves the face,
+    the mouth and the body, so nothing is synced afterwards. It runs as long as the line, unless
+    the model makes set lengths."""
+
+    capability: ClassVar[str] = "sing"
+    OUTPUTS: ClassVar[tuple[str, ...]] = ("dst",)
+    prompt: str
+    still: Path
+    audio: Path
+    dst: Path
+    aspect: str
+    references: tuple[Reference, ...] = ()  # the kit, for a model that takes pictures besides it
+    seed: int | None = None
+
+    def billable(self) -> Billable:
+        return Billable(capability="sing", duration=_seconds(self.audio), image=True)
+
+    def _shape(self) -> tuple[list[Any], dict[str, Any]]:
+        kw: dict[str, Any] = {"aspect": self.aspect, "seed": self.seed}
+        if self.references:
+            kw["references"] = [r.shape() for r in self.references]
+        return [self.prompt, self.still, self.audio], kw
+
+
+@dataclass(frozen=True, kw_only=True)
 class SeparateRequest(Request):
     """A mix split into its vocals and everything else."""
 

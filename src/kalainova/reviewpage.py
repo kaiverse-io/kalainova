@@ -19,6 +19,7 @@ from typing import Any
 
 from . import config, consistency, kits, media, takes
 from .bar import judges
+from .bar import song as musicbar
 from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 
@@ -268,34 +269,53 @@ def rank(folder: Path, order: str, reviewer: str) -> str:
 def judged(jobs: list[Job]) -> str:
     """Every song take of these jobs scored by the configured judges, one run each, kept on each
     take (`judged`, `rank`), and listed best first with what its readings missed. A judge's
-    score ranks; the misses say where a take it likes still fails the brief."""
+    score ranks; the misses say where a take it likes still fails the brief.
+
+    Each take is read again first, with today's bar and the transcript kept beside it, so a reading
+    added since it was made counts and nothing is spent. Last comes the pick between the jobs, by
+    the rule that chooses within one (`takes.best`). A job's own choice is left as it stands."""
     if not judges.configured("song"):
         raise ContractError("no judges.song in config/studio.yaml; see docs/how-to/make-a-song.md")
-    found = []
-    for job in jobs:
-        shot = takes.load(job)["shots"].get("song") or {}
-        found += [(job, t) for t in shot.get("takes", []) if not t.get("bench")]
+    held = [(job, takes.load(job)) for job in jobs]
+    found = [
+        (job, t)
+        for job, data in held
+        for t in (data["shots"].get("song") or {}).get("takes", [])
+        if not t.get("bench")
+    ]
     if not found:
         raise ContractError("no song takes in these jobs, so there is nothing to judge")
     scores, notes = judges.score("song", [job.work / t["file"] for job, t in found])
-    for job in jobs:
-        data = takes.load(job)
-        for take in (data["shots"].get("song") or {}).get("takes", []):
-            mine = scores.get(job.work / take["file"])
-            if mine is not None and not take.get("bench"):
-                rank = judges.rank_value("song", mine)
-                take["readings"] = {**(take.get("readings") or {}), "judged": mine, "rank": rank}
+    for job, take in found:
+        path = job.work / take["file"]
+        read, take["ok"] = musicbar.assessed(path, job.read("song"), musicbar.saved_heard(path))
+        mine = scores.get(path, {})
+        take["readings"] = {**read, "judged": mine, "rank": judges.rank_value("song", mine)}
+    for job, data in held:
         job.write("takes", data)
-    lines = [*notes]
-    order = sorted(
-        found, key=lambda f: -(judges.rank_value("song", scores[f[0].work / f[1]["file"]]) or 0)
-    )
-    for job, take in order:
-        mine = scores[job.work / take["file"]]
-        said = ", ".join(f"{k} {v:g}" for k, v in mine.items()) or "not judged"
-        missed = ", ".join((take.get("readings") or {}).get("misses") or []) or "none"
-        lines.append(f"{job.id} take {take['n']} ({take.get('model')}): {said}; misses {missed}")
-    return "\n".join(lines)
+    order = sorted(found, key=lambda f: -(f[1]["readings"]["rank"] or 0))
+    lines = [*notes, *(_judged_line(job, take) for job, take in order)]
+    return "\n".join([*lines, _pick(found)])
+
+
+def _judged_line(job: Job, take: dict[str, Any]) -> str:
+    readings = take["readings"]
+    said = ", ".join(f"{k} {v:g}" for k, v in readings["judged"].items()) or "not judged"
+    missed = ", ".join(readings["misses"]) or "none"
+    stem = (job.work / take["file"]).with_suffix(musicbar.STEM_HEARD).exists()
+    heard = "; words heard off its vocal stem" if stem else ""
+    return f"{job.id} take {take['n']} ({take.get('model')}): {said}; misses {missed}{heard}"
+
+
+def _pick(found: list[tuple[Job, dict[str, Any]]]) -> str:
+    """Between jobs, the take the rule within one would choose, and why."""
+    chosen = takes.best([take for _, take in found])
+    job = next(job for job, take in found if take is chosen)
+    named = f"{job.id} take {chosen['n']} ({chosen.get('model')})"
+    if chosen["ok"]:
+        return f"pick: {named}, the judge's highest of the takes that pass every reading"
+    missed = ", ".join(chosen["readings"]["misses"])
+    return f"pick: none passes every reading; the closest is {named}, which misses {missed}"
 
 
 def cli(

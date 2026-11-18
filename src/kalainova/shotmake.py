@@ -15,9 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from . import config, consistency, media, shots, takes, trace
+from .bar import judges
 from .blobstore import sha256_file
+from .editor import singing
 from .jobfs import ContractError, Job
-from .providers import base, router
+from .providers import base, rehearsal, router
 from .providers.contract import (
     Card,
     GraphicsRequest,
@@ -28,6 +30,7 @@ from .providers.contract import (
     Request,
     Result,
     SfxRequest,
+    SingRequest,
     VideoRequest,
 )
 
@@ -70,10 +73,13 @@ def style(job: Fields) -> str:
 
 
 def picture_prompt(resolved: Any, packet: Fields, beat: Fields, data: Fields) -> str:
-    """What a shot's first frame shows. A stream job's kits say it, otherwise the script does."""
+    """What a shot's first frame shows. A stream job's kits say it, otherwise the script does. A
+    shot that sings starts on a mouth in full view, since the voice has to move it."""
     if resolved:
-        return str(consistency.shot_prompt(resolved, beat, style(data)))
-    return str(shots.still_prompt(packet, beat, style(data)))
+        said = consistency.shot_prompt(resolved, beat, style(data))
+    else:
+        said = shots.still_prompt(packet, beat, style(data))
+    return f"{said} {shots.MOUTH_CLEAR}" if beat.get("sings") else str(said)
 
 
 def shot_kw(
@@ -216,8 +222,25 @@ def take_clip(
         prompt = f"{prompt} {note}"
     floor = int(prof.get("character_source_min_px") or 0)
     assess = takes.held_to(floor) if floor and beat.get("cast") else takes.assess_clip
+    line = job.work / "beats" / f"{beat['id']}.voice.wav"
+    sung = bool(beat.get("sings")) and singing.sung_line(job, beat, line) >= singing.NO_VOICE
+    if beat.get("sings") and not sung:
+        print(f"{job.id}: {beat['id']}: no singing in its span, so it is made as a plain clip")
+    assess = judged_sung(assess, line) if sung else assess
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
+        if sung:  # the voice moves the face and the body in the same call, so nothing syncs after
+            return gen(
+                SingRequest(
+                    prompt=prompt,
+                    still=still,
+                    audio=line,
+                    dst=dst,
+                    aspect=prof.get("aspect", "9:16"),
+                    references=clip_kw.references,
+                    seed=seed,
+                )
+            )
         request: Request = VideoRequest(
             prompt=prompt,
             dst=dst,
@@ -262,15 +285,13 @@ def take_clip(
 
 
 def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Fields:
-    """Match the speaker's mouth to their line. The picture is replaced, and the line stays.
+    """Match a speaker's mouth to their spoken line. The picture is replaced, and the line stays.
 
     The vendor cuts to the shorter input, and a line is shorter than its shot by the pause after it.
     So the line is padded with silence to the clip's length first, and the clip as it was before the
-    sync is kept beside the synced one. A shot that sings takes its line from the song's vocal stem,
-    over the span the shot is on screen."""
+    sync is kept beside the synced one. A shot that sings is never synced afterwards: it is sung in
+    the call that makes it (take_clip)."""
     line = job.work / "beats" / f"{beat['id']}.voice.wav"
-    if beat.get("sings"):
-        sung_line(job, beat, line)
     length = media.duration(clip)
     padded = line.with_suffix(".padded.wav")
     media.run(["-i", str(line), "-af", "apad", "-t", f"{length:.3f}", str(padded)])
@@ -282,14 +303,38 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
     return {"lipsync_model": res.model, "presync_path": f"beats/{before.name}"}
 
 
-def sung_line(job: Job, beat: Fields, dst: Path) -> None:
-    """A singing shot's line: the vocal stem from where the shot starts on the piece's clock, so
-    the mouth moves with what is heard over it."""
-    stem = job.work / "vocals.wav"
-    if not stem.is_file():
-        raise ContractError(f"{job.id}: {beat['id']} sings, and the job has no vocal stem")
-    start, end = float(beat["sings"]["start_sec"]), float(beat["sings"]["end_sec"])
-    media.run(["-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(stem), str(dst)])
+def judged_sung(assess: takes.Assess, line: Path) -> takes.Assess:
+    """A sung take is also judged on how its lips follow its line (judges.lipsync), with the line
+    itself laid on its picture, so what is scored is the vocal the piece plays over it."""
+    if not judges.configured("lipsync") or rehearsal.active() is not None:
+        return assess  # a rehearsal's stand-in is a test pattern, with no lips to judge
+
+    def judged(path: Path) -> tuple[Fields, bool]:
+        readings, ok = assess(path)
+        heard = path.with_suffix(".sync.mp4")
+        media.run(["-i", str(path), "-i", str(line), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                   "-shortest", str(heard)])  # fmt: skip
+        return {**readings, **judges.of_take("lipsync", heard)}, ok
+
+    return judged
+
+
+def after_take(
+    job: Job, beat: Fields, clip: Path, span: float, gen: Gen, take: Fields
+) -> Fields | None:
+    """A placed take before the edit: a spoken line's mouth is synced to it; a sung take's picture
+    is slipped onto its line by the offset its lip judge measured (singing.slip)."""
+    if synced_after(beat):
+        return lip_sync(job, beat, clip, span, gen)
+    if not beat.get("sings"):
+        return None
+    slipped = singing.slip(clip, singing.offset_of(take.get("readings") or {}))
+    return {"slipped_sec": slipped} if slipped else None
+
+
+def synced_after(beat: Fields) -> bool:
+    """Whether a mouth is synced to its line after the clip is made: a line spoken on camera."""
+    return bool(beat.get("on_camera")) and not beat.get("sings")
 
 
 def clip_ambience(
@@ -405,11 +450,11 @@ def motion_break(job: Job, bid: str, take: Fields, allow_stills: bool) -> Fields
 
 def apply_chosen(job: Job, bid: str, gen: Gen | None = None) -> Fields:
     """Make the chosen take the one the piece uses, and say so in its record. A take is placed as
-    the model made it, so a shot said or sung on camera is lip-synced again, through the same gate
-    as any paid call: a sync no package covers stops here rather than leave the mouth unsynced."""
+    the model made it, so a line spoken on camera is lip-synced again, through the same gate as any
+    paid call: a sync no package covers stops here rather than leave the mouth unsynced."""
     clip = job.work / "beats" / f"{bid}.video.mp4"
     take = takes.place(job, bid, clip)
-    synced = _resync(job, bid, clip, gen)
+    synced = _resync(job, bid, clip, gen, take)
     manifest = job.read("asset_manifest")
     allowed = bool((job.job.get("brief") or {}).get("allow_stills"))
     breaks = [
@@ -440,11 +485,11 @@ def apply_chosen(job: Job, bid: str, gen: Gen | None = None) -> Fields:
     return take
 
 
-def _resync(job: Job, bid: str, clip: Path, gen: Gen | None) -> Fields | None:
-    """The lip sync of a shot said or sung on camera, made again on the take just placed."""
+def _resync(job: Job, bid: str, clip: Path, gen: Gen | None, take: Fields) -> Fields | None:
+    """after_take, again, on the take just placed: a spoken line synced, a sung one slipped."""
     beats = job.read("script_packet").get("beats", []) if job.has("script_packet") else []
     beat = next((b for b in beats if b["id"] == bid), None)
-    if not beat or not beat.get("on_camera"):
+    if not beat or not (synced_after(beat) or beat.get("sings")):
         return None
     timeline = job.read("asset_manifest").get("timeline") or []
     span = next(s["end_sec"] - s["start_sec"] for s in timeline if s["beat_id"] == bid)
@@ -452,4 +497,4 @@ def _resync(job: Job, bid: str, clip: Path, gen: Gen | None) -> Fields | None:
     def routed(request: Request, **kw: Any) -> tuple[base.Provider, Result]:
         return router.generate(job, request, **kw)
 
-    return lip_sync(job, beat, clip, span, gen or routed)
+    return after_take(job, beat, clip, span, gen or routed, take)

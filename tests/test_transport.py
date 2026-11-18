@@ -10,6 +10,7 @@ from kalainova.providers.contract import (
     BilledError,
     InvalidRequestError,
     RateLimitedError,
+    RefusalError,
     UnauthorizedError,
     UnavailableError,
 )
@@ -32,6 +33,12 @@ def test_an_http_failure_is_said_in_the_engines_terms_with_what_the_vendor_said(
     with pytest.raises(kind, match=f"answered {status}: the field `tail` is not allowed"):
         transport.raise_for(Reply(status=status, text="the field `tail` is not allowed"), "v")
     transport.raise_for(Reply(status=200), "v")  # a success raises nothing
+
+
+def test_a_models_moderation_is_a_refusal_and_not_a_malformed_request():
+    said = '{"detail":[{"msg":"cannot be processed","type":"content_policy_violation"}]}'
+    with pytest.raises(RefusalError, match="answered 422"):
+        transport.raise_for(Reply(status=422, text=said), "v")
 
 
 def test_a_reply_is_read_by_path_and_a_missing_file_is_malformed():

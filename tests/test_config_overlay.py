@@ -37,3 +37,9 @@ def test_a_private_file_keeps_every_section_it_leaves_out(private):
 
 def test_a_missing_private_file_leaves_the_repo_config(private):
     assert config.studio() == config._repo()
+
+
+def test_a_key_written_twice_in_a_private_file_is_refused_not_dropped(private):
+    private.write_text("models:\n  mac: {song: a}\nidentity: {}\nmodels:\n  fal: {sing: b}\n")
+    with pytest.raises(ValueError, match="'models' is written twice"):
+        config.studio()

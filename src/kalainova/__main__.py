@@ -139,10 +139,11 @@ def _rehearse(a) -> int:
     from . import rehearse
 
     job = open_job(a.job)
-    report = rehearse.run(job)
+    benched = rehearse.bench_asked(a.bench, a.models)
+    report = rehearse.run(job, bench=benched)
     for line in rehearse.lines(report):
         print(line)
-    print(job.work / rehearse.REPORT)
+    print(job.work / (rehearse.BENCH_REPORT if benched else rehearse.REPORT))
     return 1 if report["stopped"] else 0
 
 
@@ -282,6 +283,8 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--dry-run", action="store_true")
     rh = sub.add_parser("rehearse", help="what a job's paid stage would send and cost, unsent")
     rh.add_argument("job")
+    rh.add_argument("--bench", help="a shot to rehearse on --models, as kalainova bench would")
+    rh.add_argument("--models")
     rv = sub.add_parser("review", help="a page of every take; --blind hears song jobs blind")
     rv.add_argument("jobs", nargs="+")
     rv.add_argument("--blind", action="store_true")

@@ -93,6 +93,18 @@ def run(
     return proc
 
 
+def within_bytes(path: Path, most: int) -> Path:
+    """The picture as it is, or a high-quality JPEG of it beside it when the file is larger than a
+    model takes: the same pixels, a lighter encoding."""
+    if path.stat().st_size <= most:
+        return path
+    lighter = path.with_suffix(".upload.jpg")
+    run(["-i", str(path), "-q:v", "2", str(lighter)])
+    if lighter.stat().st_size > most:
+        raise MediaError(f"{path.name} is over {most} bytes even as a JPEG")
+    return lighter
+
+
 def filter_path(path: str | Path) -> str:
     """A path as one filtergraph value, with the characters the parser treats as syntax escaped."""
     return re.sub(r"([\\:',\[\];])", r"\\\1", str(path))

@@ -25,6 +25,8 @@ The first blind test of three song models, on one brief, showed what each kind o
    - Of the takes that pass their readings, the highest rank stands (`takes._best`). With no judge set, the first take that passes stands, as before.
    - When no take passes, the one closest to passing stands, by readings alone, so a judge never lifts a take that misses the brief.
 4. **Takes already made are judged together.** `kalainova review <job>... --judge` scores every song take across the jobs it names, keeps the scores, and lists them best first, each with what its readings missed.
+   - Each take is read again first, with the current readings and the transcript kept beside it, so a reading added since the take was made counts. Nothing is spent.
+   - The last line is the pick between the jobs, by the rule in 3 (`takes.best`). A job's own chosen take stands until its song is made again.
 
 ## Consequences
 

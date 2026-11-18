@@ -87,6 +87,12 @@ def continuity_text(packet: Packet, beat: Beat) -> list[str]:
     return out
 
 
+MOUTH_CLEAR = (  # a singing shot's first frame: the voice has to move the mouth
+    "The singer's mouth is in full view, lips apart mid-note, with nothing in front of it: "
+    "no microphone, no hand, no hair."
+)
+
+
 def still_prompt(packet: Packet, beat: Beat, style: str) -> str:
     """The picture at the start of the shot."""
     shot = beat.get("shot") or {}

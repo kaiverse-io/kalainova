@@ -133,7 +133,7 @@ def _make_parsers(sub: Any) -> None:
         video.add_argument(a)
     video.add_argument("--stream")
     video.add_argument("--cast")
-    video.add_argument("--profile", default="landscape")
+    video.add_argument("--profile", default=None)  # landscape; a short with --excerpt
     video.add_argument("--stills", action="store_true")
     video.add_argument("--excerpt", type=float)
     video.add_argument("--start", type=float)

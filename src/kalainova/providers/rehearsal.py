@@ -31,6 +31,7 @@ from .contract import (
     LipsyncRequest,
     MotionRequest,
     Request,
+    SingRequest,
     VideoRequest,
     VoiceRequest,
 )
@@ -172,6 +173,8 @@ def _size(asked: Request | None) -> tuple[int, int]:
         return _picture_size(asked.start) or SIZES["9:16"]
     if isinstance(asked, LipsyncRequest):
         return _picture_size(asked.video) or SIZES["9:16"]
+    if isinstance(asked, SingRequest):
+        return SIZES.get(asked.aspect) or _picture_size(asked.still) or SIZES["9:16"]
     if isinstance(asked, MotionRequest):
         return _picture_size(asked.character) or SIZES["9:16"]
     return SIZES["9:16"]

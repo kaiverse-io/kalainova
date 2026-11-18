@@ -25,6 +25,7 @@ from .jobfs import ContractError, Job
 from .providers import base, rehearsal
 
 REPORT = "rehearsal.json"
+BENCH_REPORT = "rehearsal.bench.json"
 Check = Callable[[str, str, dict[str, Any]], list[str]]  # provider, model, payload
 SKIP = ("jobs", "out")  # the studio's other folders are seen through links, read only
 
@@ -93,9 +94,23 @@ def _checked(calls: list[dict[str, Any]], check: Check | None) -> list[str]:
     return found
 
 
-def run(job: Job, check: Check | None = published_schema) -> dict[str, Any]:
+def bench_asked(shot: str | None, models: str | None) -> tuple[str, list[str]] | None:
+    """`--bench <shot> --models a,b`: the shot and its models, or None for the job's own run."""
+    if bool(shot) != bool(models):
+        raise ContractError("--bench takes a shot, and --models the models to rehearse it on")
+    if not shot or not models:
+        return None
+    from .bench import parse_models
+
+    return shot, parse_models(models)
+
+
+def run(
+    job: Job, check: Check | None = published_schema, bench: tuple[str, list[str]] | None = None
+) -> dict[str, Any]:
     """Rehearse the job's stills and moving shots; write what would be sent and what it costs.
-    `check` reads each model's published schema, which is free and needs no key."""
+    `check` reads each model's published schema, which is free and needs no key. With `bench`, a
+    shot and its models, the stills are rehearsed and then that shot on each model (bench.py)."""
     stopped = ""
     with tempfile.TemporaryDirectory(prefix="kalainova-rehearsal-") as tmp:
         copy = _copy(job, Path(tmp))
@@ -104,8 +119,14 @@ def run(job: Job, check: Check | None = published_schema) -> dict[str, Any]:
                 try:
                     dry.phase = "stills"  # what the animatic pays for
                     assets.run(copy, animatic=True)
-                    dry.phase = "motion"  # what the full run pays for once the animatic is accepted
-                    assets.run(copy, force=copy.has("asset_manifest"))
+                    if bench:
+                        from . import bench as benching
+
+                        dry.phase = "bench"
+                        benching.run(copy, bench[0], bench[1], say=lambda _: None)
+                    else:
+                        dry.phase = "motion"  # what the full run pays for once it is accepted
+                        assets.run(copy, force=copy.has("asset_manifest"))
                 except ContractError as exc:
                     stopped = str(exc).replace(copy.id, job.id)
                 calls, shots = dry.report(), _shots(copy)
@@ -127,7 +148,8 @@ def run(job: Job, check: Check | None = published_schema) -> dict[str, Any]:
         "animatic_gate": _gate(job),
         "stopped": stopped,
     }
-    (job.work / REPORT).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    name = BENCH_REPORT if bench else REPORT
+    (job.work / name).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     return report
 
 

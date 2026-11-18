@@ -28,3 +28,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0022](0022-no-paid-call-until-a-ready-package-is-signed-off.md) | No paid call until a person signs off a package that is ready to buy |
 | [0023](0023-the-engine-speaks-to-models-in-its-own-terms.md) | The engine speaks to models in its own terms: typed requests, transports, and a contract every adapter passes |
 | [0024](0024-learned-judges-rank-takes-and-never-block.md) | Learned judges rank takes, and never block |
+| [0025](0025-a-singing-shot-is-sung-in-the-call-that-makes-it.md) | A singing shot is sung in the call that makes it, from its still and its line, and nothing is synced afterwards |
