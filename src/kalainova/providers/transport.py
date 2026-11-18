@@ -13,7 +13,8 @@ using a transport rather than by rewriting it:
 - **Labels.** The router's labels go with the request where the vendor takes them.
 - **Errors in the engine's terms.** An HTTP failure becomes `InvalidRequestError`,
   `UnauthorizedError`, `RateLimitedError` or `UnavailableError` (providers/contract.py), keeping
-  what the vendor said.
+  what the vendor said. A vendor's moderation sent as an invalid request is `RefusalError`, since
+  the request was well formed and the model declined what it showed.
 - **A billed failure.** A file that does not arrive after the vendor finished is `BilledError`.
 - **The signed payload.** A paid call a person signed for carries the payload digests they signed
   (`Context.signed`, ADR 0022). `send` refuses any other payload before it leaves, so a change to
@@ -36,6 +37,7 @@ from .contract import (
     Context,
     InvalidRequestError,
     RateLimitedError,
+    RefusalError,
     UnauthorizedError,
     UnavailableError,
     VendorError,
@@ -44,6 +46,7 @@ from .contract import (
 TIMEOUT = 120
 REQUEST_ID_HEADERS = ("x-fal-request-id", "request-id", "x-request-id")
 INVALID = (400, 404, 405, 409, 413, 415, 422)
+POLICY = ("content_policy_violation",)  # a vendor's moderation, sent with an "invalid" status
 
 
 @dataclass
@@ -89,8 +92,11 @@ def raise_for(resp: Any, platform: str) -> None:
     status = int(getattr(resp, "status_code", 200) or 200)
     if status < 400:
         return
-    said = str(getattr(resp, "text", "") or "")[:400]
+    whole = str(getattr(resp, "text", "") or "")
+    said = whole[:400]
     message = f"{platform} answered {status}" + (f": {said}" if said else "")
+    if status in INVALID and any(mark in whole for mark in POLICY):
+        raise RefusalError(message)  # the model declined the content; the request was well formed
     if status in INVALID:
         raise InvalidRequestError(message)
     if status in (401, 403):
