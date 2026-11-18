@@ -24,7 +24,10 @@ from kalainova.jobfs import ContractError, Job
 SONG = {
     "sections": [
         {"kind": "verse", "lines": ["folding paper boats again"]},
-        {"kind": "chorus", "lines": ["hold the lantern over water", "count the windows one by one"]},
+        {
+            "kind": "chorus",
+            "lines": ["hold the lantern over water", "count the windows one by one"],
+        },
     ]
 }
 
