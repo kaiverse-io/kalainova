@@ -132,6 +132,7 @@ prices:
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
     lipsync: {per_min: 3.00}       # ESTIMATE
+    fal-ai/sync-lipsync/v3: {per_min: 8.00, checked: "fal's model page 2026-11-18: sync-3, $8 a minute"}
     sing: {per_sec: 0.16}
     fal-ai/bytedance/omnihuman/v1.5: {per_sec: 0.16, checked: "fal's pricing API 2026-11-18: $0.16 a second"}
     fal-ai/kling-video/ai-avatar/v2/pro: {per_sec: 0.115, checked: "fal's pricing API 2026-11-18: $0.115 a second"}

@@ -170,3 +170,51 @@ def test_a_fal_clip_is_estimated_at_the_length_it_is_billed(monkeypatch):
     # a lip sync made on that clip is billed on the clip as it comes back, not as it was asked
     assert fal.billed_seconds(clip, "m/x") == 5.0
     assert fal.billed_seconds(Billable(capability="lipsync", duration=2.4)) == 2.4
+
+
+def test_a_repaint_row_names_the_model_that_makes_it_and_the_one_that_repaints_it():
+    assert bench.split("maker/o3+sync/v3") == ("maker/o3", "sync/v3")
+    assert bench.split("maker/o3") == ("maker/o3", "")
+
+
+def test_a_repaint_row_needs_a_shot_that_sings(stage):
+    with pytest.raises(ContractError, match="does not sing"):
+        bench.estimate(stage, "b1", ["cam-a+sync/v3"], 1, say=lambda _: None)
+
+
+def test_a_repainted_take_is_the_plain_clip_with_its_mouth_redrawn_to_the_line(
+    tmp_path, monkeypatch
+):
+    from kalainova import shotmake
+    from kalainova.providers import router
+    from kalainova.providers.contract import LipsyncRequest, Result, Sent, VideoRequest
+
+    job = make_job(
+        tmp_path, beats=[{"id": "s00", "role": "hook", "text": "", "visual_kind": "video"}]
+    )
+    sent = []
+
+    def generate(job, request, *, only=None, note="", fresh=False):
+        sent.append((request, only, note))
+        if isinstance(request, VideoRequest):
+            shown = Sent(start_frame=True, end_frame=False, seeded=True)
+            made = Result(path=request.dst, cost=0.42, model="maker/o3", seed=7, sent=shown)
+            return "maker", made
+        return "painter", Result(path=request.dst, cost=0.53, model="sync/v3")
+
+    monkeypatch.setattr(router, "generate", generate)
+    line, dst = tmp_path / "s00.voice.wav", tmp_path / "take-05.mp4"
+    setup = bench._Setup({"id": "s00"}, 3.82, tmp_path / "s00.still.png", "she sings", "9:16",
+                         shotmake.Held(), line=line)  # fmt: skip
+    row = bench.Row("maker/o3+sync/v3", "fal", 0.95, True, "sync/v3", "fal")
+    plain = VideoRequest(prompt="she sings", dst=bench._unsung(dst), duration=3.82, aspect="9:16",
+                         start=setup.still, seed=7, sound=False)  # fmt: skip
+    provider, res = bench._repainted(job, setup, row, plain, dst)
+    (first, _, _), (second, only, note) = sent
+    assert first.dst.name == "take-05.unsung.mp4", "the plain clip is kept beside the take"
+    assert isinstance(second, LipsyncRequest) and second.video == first.dst
+    assert second.audio == line and second.dst == dst, "redrawn to the shot's own line"
+    assert second.pin.model == "sync/v3" and only == ["fal"] and note == "bench maker/o3+sync/v3"
+    assert res.cost == pytest.approx(0.95), "one take carries both calls' cost"
+    assert res.model == "maker/o3+sync/v3" and res.seed == 7 and res.sent.start_frame is True
+    assert provider == "painter"

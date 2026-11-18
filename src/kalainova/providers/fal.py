@@ -340,7 +340,8 @@ class Fal(Provider):
             "sync_mode": "cut_off",
         }
         reply = self._send(model, payload, ctx, wait=1800)
-        cost = media.duration(req.video) / 60 * float(price_for("fal", "lipsync").get("per_min", 0))
+        made = min(media.duration(req.video), media.duration(req.audio))  # cut_off: the shorter
+        cost = made / 60 * float(price_for("fal", "lipsync", model).get("per_min", 0))
         self.transport.fetch(reply, req.dst, at=("video.url",), billed=cost)
         return Result(path=req.dst, cost=cost, model=model)
 

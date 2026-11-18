@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +20,18 @@ from . import config, consistency, media, shotmake, shots, takes, timeline
 from .editor import singing
 from .jobfs import ContractError, Job
 from .providers import base, router
-from .providers.contract import Billable, Pin, Request, SingRequest, VideoRequest
+from .providers.contract import (
+    Billable,
+    LipsyncRequest,
+    Pin,
+    Request,
+    Result,
+    SingRequest,
+    VideoRequest,
+)
 
 Say = Callable[[str], None]
+REPAINT = "+"  # "made-by+repainted-by": one model makes the shot, another redraws its mouth
 
 
 @dataclass
@@ -31,6 +40,21 @@ class Row:
     provider: str
     per_take: float
     own_price: bool  # the price table has a row for this model, not just for the capability
+    repaint: str = ""  # the model that redraws the mouth to the line afterwards, when one does
+    repaint_provider: str = ""
+
+
+def split(model: str) -> tuple[str, str]:
+    """The model that makes the shot, and the one that repaints its mouth ("" when none does)."""
+    made, _, repaint = model.partition(REPAINT)
+    return made.strip(), repaint.strip()
+
+
+def _repainter(job: Job) -> str:
+    names = config.preference("lipsync", job.job)
+    if not names:
+        raise ContractError(f"{job.id}: no provider is listed for lipsync, so nothing can repaint")
+    return names[0]
 
 
 def parse_models(text: str) -> list[str]:
@@ -153,20 +177,36 @@ def estimate(job: Job, shot: str, models: list[str], count: int, say: Say = prin
     rows = []
     table = config.studio().get("prices") or {}
     for model in models:
-        provider = _provider_of(job, model, setup.capability)
-        request = _request_for(setup, provider, model, say)
+        made, repaint = split(model)
+        if repaint and not setup.line:
+            raise ContractError(
+                f"{job.id}: {shot} does not sing, so there is no line to repaint to"
+            )
+        capability = "video" if repaint else setup.capability
+        provider = _provider_of(job, made, capability)
+        request = _request_for(replace(setup, line=None) if repaint else setup, provider, made, say)
         asked = Billable(
-            capability=setup.capability,
+            capability=capability,
             duration=setup.span,
             image=True,
             references=bool(request.references),
         )
         quote = router.quote(job, asked, only=[provider], pin=request.pin)
         if quote is None:
-            raise ContractError(f"{job.id}: {provider} is not ready, so {model} cannot be tested")
+            raise ContractError(f"{job.id}: {provider} is not ready, so {made} cannot be tested")
         if quote[1] is None:
-            raise ContractError(f"{job.id}: no price for {model}, so its cost cannot be estimated")
-        rows.append(Row(model, provider, quote[1], bool((table.get(provider) or {}).get(model))))
+            raise ContractError(f"{job.id}: no price for {made}, so its cost cannot be estimated")
+        per, by = quote[1], ""
+        if repaint:  # the repaint is billed on the clip the first model makes
+            by = _repainter(job)
+            clip = base.get(provider).billed_seconds(asked, made)
+            redo = Billable(capability="lipsync", duration=clip)
+            second = router.quote(job, redo, only=[by], pin=Pin(provider=by, model=repaint))
+            if second is None or second[1] is None:
+                raise ContractError(f"{job.id}: no price for {repaint} on {by}")
+            per += second[1]
+        own = bool((table.get(provider) or {}).get(made))
+        rows.append(Row(model, provider, per, own, repaint, by))
     total = sum(r.per_take for r in rows) * count
     for r in rows:
         note = "" if r.own_price else "  (no price of its own: the generic video rate)"
@@ -193,16 +233,18 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
     made: list[dict[str, Any]] = []
     failed: dict[str, str] = {}
     for row in rows:
-        request = _request_for(setup, row.provider, row.model, lambda _: None)
+        made_by = split(row.model)[0]
+        part = replace(setup, line=None) if row.repaint else setup
+        request = _request_for(part, row.provider, made_by, lambda _: None)
         for i in range(count):
             n = takes.next_take_number(job, shot)
 
             def make(
                 seed: int, dst: Path, request: shotmake.Held = request, row: Row = row
             ) -> tuple[Any, Any]:
-                clip: Request = VideoRequest(
+                plain = VideoRequest(
                     prompt=setup.prompt,
-                    dst=dst,
+                    dst=_unsung(dst) if row.repaint else dst,
                     duration=setup.span,
                     aspect=setup.aspect,
                     start=setup.still,
@@ -211,6 +253,9 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                     references=request.references,
                     pin=request.pin,
                 )
+                if row.repaint:
+                    return _repainted(job, setup, row, plain, dst)
+                clip: Request = plain
                 if setup.line:  # the same line for every model, sung in the call that makes it
                     clip = SingRequest(
                         prompt=setup.prompt,
@@ -239,8 +284,13 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                     extra={
                         "bench": True,
                         "conditioning": conditioning(
-                            row.provider, row.model, request, bool(setup.line)
-                        ),
+                            row.provider, made_by, request, bool(setup.line) and not row.repaint
+                        )
+                        + (
+                            f", then its mouth repainted to the line by {row.repaint}"
+                            if row.repaint
+                            else ""
+                        ),  # fmt: skip
                     },
                 )
             except RuntimeError as exc:
@@ -255,6 +305,26 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
     if setup.line and benched:  # lips are judged moving, so a sung bench is watched as well
         say(f"watch them: {side_by_side(job, shot, benched, setup.line)}")
     return {"takes": made, "failed": failed, "sheet": sheet}
+
+
+def _unsung(dst: Path) -> Path:
+    return dst.with_name(f"{dst.stem}.unsung{dst.suffix}")
+
+
+def _repainted(
+    job: Job, setup: _Setup, row: Row, clip: VideoRequest, dst: Path
+) -> tuple[Any, Result]:
+    """The shot made as a plain clip, then its mouth redrawn to the line: one take, both costs."""
+    assert setup.line is not None
+    _, made = router.generate(job, clip, only=[row.provider], note=f"bench {split(row.model)[0]}")
+    pin = Pin(provider=row.repaint_provider, model=row.repaint)
+    redo = LipsyncRequest(video=clip.dst, audio=setup.line, dst=dst, pin=pin)
+    provider, res = router.generate(
+        job, redo, only=[row.repaint_provider], note=f"bench {row.model}"
+    )
+    both = replace(res, cost=float(made.cost or 0) + float(res.cost or 0), model=row.model,
+                   seed=made.seed, sent=made.sent)  # fmt: skip
+    return provider, both
 
 
 def _reading(take: dict[str, Any]) -> str:
