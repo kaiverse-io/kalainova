@@ -221,6 +221,11 @@ takes:
   retakes_per_shot: 2              # `kalainova retake` is refused past this, however it is called
   retakes_per_job: 6               # and past this across the job; a brief can set max_retakes
 
+# The look a still is made in when a brief sets none. Neutral here: a look is a studio's taste, set in
+# its own config (ADR 0027). The old default, "cinematic, high contrast", fed a flat, glossy,
+# too-perfect look in review, so the engine no longer adds one.
+visual_style: ""
+
 # Words a video model reads well. Past this a model drops what comes last, so motion goes first.
 prompt_words_max:
   mac: 80
@@ -288,7 +293,7 @@ video_models:
 # faces (bar/identity.py). The engine ships no face model. face_command takes `--out FILE` and
 # image paths after it, and writes {path: [{box, score, embedding}]}. providers/runners/face_run.py
 # does this with OpenCV's YuNet, embedding with SFace, or with ArcFace given --arcface FILE:
-#   face_command: [~/models/.venv/bin/python, src/kalainova/providers/runners/face_run.py, --models, ~/models/face]
+#   face_command: [~/models/.venv/bin/python, "{runners}/face_run.py", --models, ~/models/face]
 # With none set, identity is not measured, and the check says so; it never passes by default.
 # The limits belong to the recognizer, so set them with the command. Measured on one character's
 # generated stills and clips (docs/how-to/run-models-on-a-mac.md): ArcFace separated her (0.62)
@@ -298,6 +303,11 @@ video_models:
 # moves the face, the mouth and the body. Nothing is lip-synced afterwards. Fields as each model's
 # schema names them. With no `durations` the shot runs as long as its line; a model that takes
 # several pictures (images_param) gets the still first, then the kit, the line named by audio_tag.
+# limits: claims about what a model takes (ADR 0027), each with its source, the date it was seen, its
+# class (vendor, reseller, tested, observed) and whether it is provisional. A prompt over
+# `prompt_chars` is refused before it is sent, since upstream it is rejected or cut without a word.
+# A limit no source states is unknown, never safe: `kalainova guide <model>` shows which.
+# `kalainova models refresh` holds each claim against the vendor's schema now, and changes nothing.
 sing_models:
   fal:
     fal-ai/bytedance/omnihuman/v1.5:
@@ -329,6 +339,8 @@ sing_models:
       image_param: image_url
       audio_param: audio_url
       min_audio_sec: 4
+      limits:
+        prompt_chars: {max: 300, class: reseller, observed: 2026-11-18, provisional: true, source: "apimodels.app/docs/omnihuman-2-0, modelfold.ai/docs/en/market/omnihuman-2-0, api.nereo.io/docs/models/byteplus/omnihuman-2.0/avatar; fal's schema states none"}
       short_side: 716                    # measured on a 9:16 bench take, 2026-11-18: under the 1080 floor
     minimax/h3-max/lip-sync/image-to-video:   # the line drives the mouth; transcription off for singing over music
       image_param: image_url
@@ -341,6 +353,8 @@ sing_models:
       image_param: image_url
       audio_param: audio_url
       prompt_param: motion_prompt
+      limits:
+        prompt_chars: {max: 1200, class: vendor, observed: 2026-11-18, source: "fal's schema: motion_prompt maxLength"}
       extra: {resolution: "1080p"}
     alibaba/wan-3.0-prime/reference-to-video:   # reference audio guides it, and no first frame: VERIFY lips
       images_param: reference_image_urls
@@ -396,23 +410,23 @@ identity:
 # takes already made. For example, in the private config:
 #   song:
 #     - name: muqeval        # MIT; musical impression 1-5, clip Spearman 0.838 (arXiv 2603.22677)
-#       command: [~/tools/muq-eval-env/bin/python, src/kalainova/providers/runners/muqeval_run.py,
+#       command: [~/tools/muq-eval-env/bin/python, "{runners}/muqeval_run.py",
 #                 --repo, ~/tools/muq-eval-src, --checkpoint, ~/models/muq-eval-a1]
 #       rank_by: mi
 #     - name: aesthetics     # CC-BY-4.0; Meta's four axes 1-10, mostly production
-#       command: [~/tools/audiobox-env/bin/python, src/kalainova/providers/runners/aesthetics_run.py]
+#       command: [~/tools/audiobox-env/bin/python, "{runners}/aesthetics_run.py"]
 #   lipsync:                 # a sung take, with its line laid on its picture
 #     - name: syncnet        # MIT (joonson/syncnet_python); LSE-C, LSE-D and the A/V offset in frames
-#       command: [~/tools/syncnet-env/bin/python, src/kalainova/providers/runners/syncnet_run.py,
+#       command: [~/tools/syncnet-env/bin/python, "{runners}/syncnet_run.py",
 #                 --repo, ~/tools/syncnet-src]
 #       rank_by: confidence
 #     - name: mouth          # Apache-2.0 (MediaPipe face landmarker): the mouth's opening against the
 #       command: [~/tools/mouth-env/bin/python,   # line's loudness; best correlation and its lag
-#                 src/kalainova/providers/runners/mouth_run.py, --model, ~/tools/face_landmarker.task]
+#                 "{runners}/mouth_run.py", --model, ~/tools/face_landmarker.task]
 #   performance:             # any take with a character in it: how the person moves
 #     - name: performance    # Apache-2.0 (MediaPipe face and person mask, OpenCV flow): head turn,
 #       command: [~/tools/mouth-env/bin/python,  # nod and tilt, eyes, the person apart from the
-#                 src/kalainova/providers/runners/perform_run.py,  # background, and the camera
+#                 "{runners}/perform_run.py",  # background, and the camera
 #                 --face-model, ~/tools/face_landmarker.task,
 #                 --person-model, ~/tools/selfie_segmenter.tflite]
 judges:

@@ -13,8 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-REPO = Path(__file__).resolve().parents[2]
-SCHEMAS = REPO / "schemas"
+from platformdirs import user_data_path
+
+from . import resources
+
+REPO = resources.root()  # the engine's own files: a checkout's root, or the package's data
+SCHEMAS = resources.path("schemas")
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -31,9 +35,16 @@ def write_atomic(path: Path, text: str) -> None:
 
 
 def home() -> Path:
-    """Where operator data lives: jobs, kits, streams. This repo is public, so real work belongs in
-    a private directory named by $KALAINOVA_HOME. The engine, schemas, and prompts stay in the repo."""
-    return Path(os.environ.get("KALAINOVA_HOME", REPO))
+    """Where a studio's work lives: jobs, kits, streams. $KALAINOVA_HOME names it; unset, it is this
+    user's own data folder on this machine, never the engine's files (ADR 0027): an installed copy's
+    folder is not the user's to write in, and a checkout's is public."""
+    named = os.environ.get("KALAINOVA_HOME")
+    return Path(named) if named else default_home()
+
+
+def default_home() -> Path:
+    """This user's data folder for the engine, as the platform names it."""
+    return user_data_path("kalainova", appauthor=False)
 
 
 CONTRACT_FILES = {

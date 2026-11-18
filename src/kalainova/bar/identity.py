@@ -25,6 +25,7 @@ import numpy as np
 
 from .. import config, media, opentools
 from ..jobfs import ContractError
+from . import judges
 from .readings import Reading
 
 FACE_TIMEOUT_SEC = 300.0
@@ -74,7 +75,7 @@ def limit() -> float:
 
 def faces(paths: list[Path]) -> dict[Path, list[Face]]:
     """Every face in each picture, from one run of the configured command."""
-    command = [str(Path(part).expanduser()) for part in _settings().get("face_command") or []]
+    command = [judges.part(str(part)) for part in _settings().get("face_command") or []]
     if not command:
         raise ContractError("no identity.face_command in config/studio.yaml")
     wanted = [str(p.resolve()) for p in paths]

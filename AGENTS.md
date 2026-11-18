@@ -31,7 +31,7 @@ The quality target is `docs/studio-bar.md`. `kalainova bar <job or file>` measur
 ```
 src/kalainova/      engine; ARCHITECTURE.md covers every top-level module
 schemas/            the job, kit, stream, and lock contracts
-prompts/            versioned prompts, loaded at runtime
+prompts/            versioned prompts and directions, loaded at runtime; ship in the package
 config/studio.yaml  model and price table; which models take references; the studio bar's limits
 fonts/              vendored open fonts, so every machine sets the same type
 scripts/            the contract and docs gates (stdlib)
@@ -74,6 +74,27 @@ docs/feature-map.md feature to entry point to code to tests; start here to find 
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`.
 - Significant decisions get an ADR in `docs/decisions/`, numbered flat.
 - Coverage ratchet: `fail_under` and `--cov-fail-under` in `pyproject.toml` only rise, together.
+
+## The learning loop
+
+The engine and the agent that runs it get better with every piece. A mistake a person had to point out is not made twice. Each time a person corrects a result, gives a verdict with a reason, or a paid call disappoints, follow `.agents/skills/learn-from-feedback/SKILL.md`:
+
+1. **Record it.** Put the person's words in `kalainova verdict ... --note`.
+2. **Find the root cause.** It could be a prompt's wording, a default, the still, the model, a missing check, or how the agent worked.
+3. **Research before changing anything.** Read the vendor's docs and prompt guides, and mark the evidence as vendor, independent, our own takes, or inference.
+4. **Fix it where every later job gets the fix:**
+   - a versioned prompt in `prompts/`;
+   - a config default or limit;
+   - a plan or readiness check;
+   - a judge;
+   - a test;
+   - or, when it is about how an agent works, this file or a skill.
+
+   A hand edit to one job's files is only a stopgap. Name it as one.
+5. **Prove it.** Run a free check first: a dry run shows the new prompt, or readiness flags the old mistake. Then run the smallest real test.
+6. **Log it.** Add one file to `.agents/memory/`: what happened, the root cause, where the fix lives, and whether it is proved.
+
+Know what a model reads before writing for it: its prompt field and limit, its guide, and what it decides itself. A first take should already follow every lesson.
 
 ## Architecture documentation
 

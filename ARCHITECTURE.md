@@ -342,6 +342,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
 
 ```
  __main__ ──▶ studio_cli ──▶ streams ──▶ consistency ──▶ kits ──▶ blobstore
+    │            ├─▶ knowledge_cli ─▶ knowledge: guide, models refresh
     │            └─▶ lookdev ─▶ kits, kitrules, timeline, providers
     │                                       │  │          │
     │                                       │  └─▶ kitrules ◀── scripts/check.py
@@ -350,7 +351,8 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ production_cli ──▶ dub, nle, provenance, qa, research, shotmake, shots,
     │                      songs, takes, timeline, editor, config, assets, preproduction,
     │                      judging_cli
-    ├─▶ judging_cli ─▶ bench, benchreport, verdicts: the bench, verdicts, and agreement
+    ├─▶ judging_cli ─▶ bench, benchreport, verdicts, bar: the bench, verdicts, agreement, judges
+    ├─▶ knowledge ─▶ config, fingerprint, resources: directions by version, limits as claims
     ├─▶ plan ──────▶ consistency, prompts, providers, shots
     ├─▶ research ──▶ plan, prompts, providers, config
     ├─▶ writers ───▶ consistency, plan, prompts, providers
@@ -362,7 +364,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, takejudges, trace, config,
     │                providers
     ├─▶ takejudges ─▶ bar, media, providers: the learned judges a take is read by
-    ├─▶ takes ─────▶ bar, blobstore, media, config
+    ├─▶ takes ─────▶ bar, blobstore, knowledge, media, config
     ├─▶ bench ─────▶ benchreport, consistency, shotmake, shots, takejudges, takes, timeline,
     │                config, providers
     ├─▶ benchreport ▶ bar, captions, config, editor, media, takejudges, takes: labels, table, pick
@@ -372,7 +374,7 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ packages ──▶ jobfs: the paid calls a person signs off, from a rehearsal or an allowance
     ├─▶ readiness ─▶ config, preproduction, shotmake, shots, providers: is each call ready to buy
     ├─▶ signoff_cli ▶ gates, packages, readiness, rehearse: limits, package, packages, sign-off
-    ├─▶ shots ─────▶ config
+    ├─▶ shots ─────▶ config, knowledge
     ├─▶ edit ──────▶ config
     ├─▶ render ────▶ bar, captions, look, motion, media, mediascan
     ├─▶ qa ────────▶ bar, comic, story, songs, research, timeline, qachecks, plan, prompts,
@@ -400,13 +402,14 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     ├─▶ templates ─▶ jobfs
     ├─▶ stock
     ├─▶ router ─────▶ gates, trace ─▶ fingerprint: gates first; every call's labels, attempt, commit
-    ├─▶ fingerprint ─▶ jobfs
+    ├─▶ fingerprint ─▶ jobfs, resources
     ├─▶ host ────────▶ config
     ├─▶ scorecard ───▶ jobfs
     ├─▶ audit ───────▶ config
     ├─▶ calibration
     ├─▶ sound_identity
     ├─▶ prompts, captions, look, motion, media: imported throughout, and import no stage
+    ├─▶ resources: the engine's own files, from the package or a checkout
     └─▶ jobfs, config: the foundation, imported throughout
 ```
 
@@ -416,7 +419,27 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
 The command line. Parses arguments and calls a stage. Holds no rules.
 
 ### studio_cli
-Commands for kits, streams, canon, schedules, requests, and the look sheet. It registers `signoff_cli`'s commands first, so the sign-off sits with the studio's other commands.
+Commands for kits, streams, canon, schedules, requests, and the look sheet. It registers `signoff_cli`'s commands first, so the sign-off sits with the studio's other commands, and `knowledge_cli`'s after them.
+
+### knowledge
+What the engine knows that is not code (ADR 0027), in two layers merged field by field: the engine's, shipped in the package, and a studio's, from its own config.
+- **Directions.** `prompts/directions.yaml` holds each kind of shot's direction by id and version (`perform.sing@1`). `directions.lock` pins every released text, so a text never changes under an old version. A studio overrides one under `directions` with its own version.
+- **Limits.** A model's `limits` in its config row are claims with a source, a date, a class (vendor, reseller, tested, observed) and whether they are provisional. A limit nobody states is unknown, never safe.
+- **`refresh`** holds each recorded prompt limit against the vendor's schema now, and changes nothing.
+- **`stamp`** is what every take records in `made_with`: the engine, a fingerprint of the merged knowledge, the directions given, the judges' setup, and the inputs' hashes.
+
+```
+prompts/directions.yaml ─┐                         ┌─▶ shots.motion_prompt (a shot's direction)
+studio config: directions ┼─▶ knowledge (merged) ───┼─▶ takes: made_with on every take
+config rows: limits ──────┘          │              └─▶ fal_sing / fal_catalog: refuse over a limit
+                                     └─▶ knowledge_cli: guide, models refresh
+```
+
+### knowledge_cli
+`kalainova guide [kind|model]` prints a direction with why it reads so, or what a model takes with every limit and its source. `kalainova models refresh` reports how the recorded limits stand against what vendors publish now. An agent on any machine reads this from the installed tool, never from a checkout's files.
+
+### resources
+Where the engine's own files are: `prompts/`, the default `config/studio.yaml`, `schemas/`, `fonts/` and `jobs/_template`. The wheel's build copies them into `kalainova/_data`, so an installed copy finds them beside its code with no checkout. A checkout reads them from its root. `just ci-wheel` builds the wheel, installs it alone in an empty folder, and runs the engine there.
 
 ### signoff_cli
 Commands for what must be true before money leaves (ADR 0022): `rehearse` (what a paid stage or a bench would send and cost, unsent), `stop` and `resume` (the kill switch), `limits` (show the studio's; setting them needs a terminal), `package` (a stage package from a rehearsal with its readiness, or an allowance), `packages` (each package a job can spend under, and its state), and `sign-off`. `sign-off` runs only at a terminal: it prints the package, asks a reason for each risk and the start of the package's hash, and writes the sign-off. Agents build packages and never sign them off or set limits. Depends on `gates`, `packages`, `readiness`, and `rehearse`.
@@ -425,7 +448,7 @@ Commands for what must be true before money leaves (ADR 0022): `rehearse` (what 
 Commands for making a piece shot by shot, songs, research, and everything after a cut: takes, retakes, the shot sheet, timeline export, clips, dubbing, provenance, and the ledger. It registers `judging_cli`'s commands after its own.
 
 ### judging_cli
-Commands for testing models on one shot and holding the engine's judgement to a person's: `bench`, `bench-report` (the labelled side by side, the table, and the pick, at no cost), `verdict` (with `--best N --among a,b` and `--aspect`), `signals`, `agreement` (which readings, and the engine's own picks, follow a person's preferences aspect by aspect), and `review-set`. Depends on `bench`, `benchreport`, and `verdicts`.
+Commands for testing models on one shot and holding the engine's judgement to a person's: `bench`, `bench-report` (the labelled side by side, the table, and the pick, at no cost), `verdict` (with `--best N --among a,b` and `--aspect`), `signals`, `agreement` (which readings, and the engine's own picks, follow a person's preferences aspect by aspect), `review-set`, and `judges` (which configured judges this machine can run, and what it lacks for the rest, with nothing run). Depends on `bench`, `benchreport`, `verdicts`, and `bar`.
 
 ### kitrules
 What makes a kit legal. Stdlib only, shared by the engine and `scripts/check.py`.
@@ -460,7 +483,7 @@ Stream records, canon, the schedule packet, and `request`, which turns a stream 
 Resolves a stream's kits, builds and verifies the lock, applies the fixed things to each shot and script, and holds `RULES`, the table of how each is enforced.
 
 ### prompts
-Loads versioned prompts from `prompts/`.
+Loads versioned prompts from `prompts/`, wherever `resources` finds them.
 
 ### plan
 Intent to script. Loads the kits' persona and canon for a stream job, and only verified findings for a job with research.
@@ -641,7 +664,7 @@ A story to a typeset book and a real EPUB with live text. Pages are laid out onc
 A book's pages as a PDF with live text in embedded fonts, at the same places as its page images. The same input gives the same bytes, because approval binds to them.
 
 ### bar
-The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks. `identity` reads whether a picture or a video shows a kit's character: a configured command (`identity.face_command`; `providers/runners/face_run.py` runs OpenCV's YuNet, embedding with SFace or ArcFace) describes every face as an embedding, and each face is compared with the kit's reference faces, so a crowd is read face by face. A video is read from one sampled frame a second, by its median closest face and the stretches where the character is lost (`clip_report`). The animatic checks each still against the characters its shot names (`check_cast`, printed by `kalainova animatic`). With no command set, identity is reported as not measured, never as a pass; it warns and does not block. `judges` runs learned judges the same way (ADR 0024). Each is a command named under `judges.<kind>` (`providers/runners/muqeval_run.py`, `aesthetics_run.py`) that scores files as numbers. Its scores are kept on each take, and the first judge's `rank_by` score ranks the takes that pass their readings (`takes._best`). A judge never blocks, and none ships with the engine.
+The studio bar: what "finished" means, as numbers a tool computes. Pure signals over pixels (`picture`), motion (`motion`), and samples (`sound`), plus the readers that apply them to a file, a job's sources (`sources`), a delivery master (`master`), or a song (`song`). Limits live in `config/studio.yaml`. It reports conformance and craft apart, because a single total flatters whatever the renderer makes. It informs the human gate, and only an objective defect blocks. `identity` reads whether a picture or a video shows a kit's character: a configured command (`identity.face_command`; `providers/runners/face_run.py` runs OpenCV's YuNet, embedding with SFace or ArcFace) describes every face as an embedding, and each face is compared with the kit's reference faces, so a crowd is read face by face. A video is read from one sampled frame a second, by its median closest face and the stretches where the character is lost (`clip_report`). The animatic checks each still against the characters its shot names (`check_cast`, printed by `kalainova animatic`). With no command set, identity is reported as not measured, never as a pass; it warns and does not block. `judges` runs learned judges the same way (ADR 0024). Each is a command named under `judges.<kind>` (`providers/runners/muqeval_run.py`, `aesthetics_run.py`) that scores files as numbers. Its scores are kept on each take, and the first judge's `rank_by` score ranks the takes that pass their readings (`takes._best`). A judge never blocks, and none ships with the engine. A command names a runner as `{runners}/<script>.py`, which resolves to the runners shipped in the package, so one config works wherever the engine is installed; the judge's own environment and weights stay outside it.
 
 ### qa
 Runs the automated checks before the human gate, for a rendered piece, a document, a song, or a file from an outside tool.
@@ -680,13 +703,13 @@ ffmpeg and ffprobe helpers. Commands are argument lists, never shell strings.
 Reading a whole file: where its picture sits, its frames one at a time, and how it bands.
 
 ### jobfs
-The job folder, schema validation, the ledger, and the private home. A ledger entry carries when it was charged and what the router hands it to join on: the attempt, its labels, the model, the vendor's request id and the billed units.
+The job folder, schema validation, the ledger, and the private home. The home is `$KALAINOVA_HOME`, or, unset, this user's own data folder (`platformdirs`), never the engine's files. A ledger entry carries when it was charged and what the router hands it to join on: the attempt, its labels, the model, the vendor's request id and the billed units.
 
 ### config
 The model and price table.
 
 ### fingerprint
-Engine version, git commit, prompts hash, and studio config fingerprinting. Pins jobs to exact engine releases and verifies stream compatibility during approval. `code_stamp` is the commit a running command came from, with `+dirty` for uncommitted code; every trace row carries it.
+Engine version, git commit, prompts hash, and studio config fingerprinting. Pins jobs to exact engine releases and verifies stream compatibility during approval. `code_stamp` is the commit a running command came from, with `+dirty` for uncommitted code; every trace row carries it. An installed copy never asks git, since the folder around it may be someone else's repository; its stamp is its version.
 
 ### host
 Operator hardware capability and prerequisite detection. Validates Python version, ffmpeg/ffprobe binaries, GPU accelerators, and adapter presence.

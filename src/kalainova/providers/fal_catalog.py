@@ -10,6 +10,7 @@ from typing import Any
 
 import requests
 
+from .. import knowledge
 from . import rehearsal
 from .transport import TIMEOUT
 
@@ -49,18 +50,30 @@ def unit_price(model: str) -> float | None:
 
 
 @cache
-def input_schema(model: str) -> tuple[frozenset[str], frozenset[str]]:
-    """The request fields fal's published schema lists for a model, and the ones it requires. Free:
-    fal serves every model's schema with no key. Raises when it cannot be read."""
+def _inputs(model: str) -> tuple[dict[str, Fields], frozenset[str]]:
+    """Every request field fal's published schema lists for a model, with what it says of each
+    (type, maxLength, maximum...), and the ones it requires. Free: fal serves every model's schema
+    with no key. Raises when it cannot be read."""
     r = requests.get(SCHEMA + model, timeout=30)
     r.raise_for_status()
-    found: set[str] = set()
+    found: dict[str, Fields] = {}
     needed: set[str] = set()
     for name, body in r.json()["components"]["schemas"].items():
         if name.endswith("Input") and "properties" in body and "Element" not in name:
-            found |= set(body["properties"])
+            found.update(body["properties"])
             needed |= set(body.get("required") or [])
-    return frozenset(found), frozenset(needed)
+    return found, frozenset(needed)
+
+
+def input_schema(model: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The request fields fal's published schema lists for a model, and the ones it requires."""
+    fields, needed = _inputs(model)
+    return frozenset(fields), needed
+
+
+def input_fields(model: str) -> dict[str, Fields]:
+    """What fal's published schema says of each request field of a model."""
+    return _inputs(model)[0]
 
 
 def schema_problems(model: str, payload: Fields) -> list[str]:
@@ -72,4 +85,10 @@ def schema_problems(model: str, payload: Fields) -> list[str]:
         return [f"could not read {model}'s schema ({exc})"]
     sent = set(payload)
     found = [f"not in {model}'s schema: {sorted(sent - have)}"] if sent - have else []
-    return found + ([f"{model} requires {sorted(need - sent)}"] if need - sent else [])
+    found += [f"{model} requires {sorted(need - sent)}"] if need - sent else []
+    fields = input_fields(model)
+    for name, value in payload.items():  # a limit the vendor states is checked before sending
+        most = knowledge.stated_max(fields.get(name) or {})
+        if isinstance(value, str) and most is not None and len(value) > most:
+            found.append(f"{name} is {len(value)} characters and {model} takes at most {most}")
+    return found

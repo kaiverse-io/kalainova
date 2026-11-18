@@ -14,7 +14,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from .. import media
+from .. import media, resources
 from .base import Provider, register
 from .contract import (
     Card,
@@ -30,7 +30,7 @@ from .contract import (
     Word,
 )
 
-FONT_DIRS = [Path(__file__).resolve().parents[3] / "fonts"]
+FONT_DIRS = [resources.path("fonts")]
 
 
 def find_font(*names: str) -> str | None:

@@ -8,15 +8,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 from html import escape
-from pathlib import Path
 
 import numpy as np
 from PIL import ImageFont
 
+from . import resources
+
 FONT = "Inter SemiBold"
-FONTS = (
-    Path(__file__).resolve().parents[2] / "fonts"
-)  # vendored, so every machine sets the same type
+FONTS = resources.path("fonts")  # vendored and shipped, so every machine sets the same type
 
 
 def ts(sec: float) -> str:

@@ -105,6 +105,19 @@
                 "meta": {
                   "type": "object"
                 },
+                "made_with": {
+                  "type": "object",
+                  "description": "What made the take beyond its model and prompt (ADR 0027): the engine, the merged knowledge, the directions given, the judges' setup, and the inputs' hashes.",
+                  "properties": {
+                    "engine": {"type": "string"},
+                    "knowledge": {"type": "string"},
+                    "judges": {"type": "string"},
+                    "directions": {"type": "array", "items": {"type": "string"}},
+                    "inputs": {"type": "object", "additionalProperties": {"type": "string"}}
+                  },
+                  "required": ["engine", "knowledge", "directions"],
+                  "additionalProperties": false
+                },
                 "words": {
                   "type": "array"
                 },

@@ -10,13 +10,12 @@ import hashlib
 import shutil
 import subprocess
 from functools import cache
-from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__, resources
 from .jobfs import ContractError
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = resources.root()  # the engine's own files: a checkout's root, or the package's data
 
 
 def engine_version() -> str:
@@ -25,9 +24,12 @@ def engine_version() -> str:
 
 
 def git_sha() -> str:
-    """The current git commit SHA, or 'untracked' if git is unavailable or outside a repository."""
+    """The current git commit SHA, or 'untracked' if git is unavailable or outside a repository.
+
+    An installed copy is never asked: the folder around it may be someone's own repository, whose
+    commit says nothing about the engine. Its version is engine_version()."""
     git_bin = shutil.which("git")
-    if not git_bin:
+    if not git_bin or not resources.in_checkout():
         return "untracked"
     try:
         out = subprocess.check_output(  # noqa: S603 - fixed git argument list
@@ -48,7 +50,7 @@ def code_stamp() -> str:
     sha = git_sha()
     git_bin = shutil.which("git")
     if sha == "untracked" or not git_bin:
-        return sha
+        return sha if resources.in_checkout() else f"v{engine_version()}"
     try:
         changed = subprocess.check_output(  # noqa: S603 - fixed git argument list
             [git_bin, "status", "--porcelain", "--untracked-files=no"],
@@ -63,7 +65,7 @@ def code_stamp() -> str:
 
 def prompts_hash() -> str:
     """SHA-256 hash of all files in prompts/, sorted deterministically by path."""
-    prompts_dir = ROOT / "prompts"
+    prompts_dir = resources.path("prompts")
     if not prompts_dir.is_dir():
         return hashlib.sha256(b"").hexdigest()
     hasher = hashlib.sha256()
@@ -77,7 +79,7 @@ def prompts_hash() -> str:
 
 def config_hash() -> str:
     """SHA-256 hash of config/studio.yaml."""
-    cfg = ROOT / "config" / "studio.yaml"
+    cfg = resources.path("config", "studio.yaml")
     if not cfg.is_file():
         return hashlib.sha256(b"").hexdigest()
     return hashlib.sha256(cfg.read_bytes()).hexdigest()

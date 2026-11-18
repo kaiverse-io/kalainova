@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import bar, config, media
+from . import bar, config, knowledge, media
 from .blobstore import sha256_file
 from .jobfs import ContractError, Job
 
@@ -213,8 +213,11 @@ def attempt(
     note: str = "",
     seed: int | None = None,
     extra: dict[str, Any] | None = None,
+    made_with: dict[str, Any] | None = None,
 ) -> Take:
-    """Make one attempt with its own seed, read it, and record it with what it cost."""
+    """Make one attempt with its own seed, read it, and record it with what it cost and what made
+    it (`made_with`: the engine, the knowledge, the directions, the judges' setup, the inputs), so
+    a verdict on it can say which direction on which model won (ADR 0027)."""
     seed = seed_for(prompt, n) if seed is None else seed
     dst = take_path(job, shot, n, suffix)
     provider, res = make(seed, dst)
@@ -229,6 +232,7 @@ def attempt(
         "readings": readings,
         "ok": bool(ok),
         **({"cost": round(float(res.cost), 6)} if res.cost else {}),
+        "made_with": made_with or knowledge.stamp(),
         **(extra or {}),
     }
     if prompt:
@@ -252,6 +256,7 @@ def make_until_good(
     make: Callable[[int, Path], tuple[Any, Any]],
     assess: Assess,
     prompt: str = "",
+    made_with: dict[str, Any] | None = None,
 ) -> Take:
     """The planned attempts, then more until one reads well, but only while they are free.
 
@@ -280,7 +285,8 @@ def make_until_good(
         if len(done) >= always and (charged or any(t["ok"] for t in done)):
             break
         n = next_take_number(job, shot)
-        attempt(job, shot, n, suffix=suffix, make=watched, assess=assess, prompt=prompt)
+        attempt(job, shot, n, suffix=suffix, make=watched, assess=assess, prompt=prompt,
+                made_with=made_with)  # fmt: skip
     if paid and not any(t["ok"] for t in made()):
         print(
             f"{job.id}: {shot}: no take read well. It was made on a paid model, so no further "

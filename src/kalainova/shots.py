@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from . import config
+from . import config, knowledge
 
 Packet = dict[str, Any]
 Beat = dict[str, Any]
@@ -87,10 +87,23 @@ def continuity_text(packet: Packet, beat: Beat) -> list[str]:
     return out
 
 
-MOUTH_CLEAR = (  # a singing shot's first frame: the voice has to move the mouth
-    "The singer's mouth is in full view, lips apart mid-note, with nothing in front of it: "
+# A singing shot's first frame. The voice has to move the mouth, so nothing may cover it, and the
+# lips start relaxed: a still caught mid-note sets the mouth wide from the first frame on.
+MOUTH_CLEAR = (
+    "The singer's face is in full view with relaxed lips and nothing in front of the mouth: "
     "no microphone, no hand, no hair."
 )
+# A sung cue that directs the eyes or the mouth fights the engine's direction and the voice.
+PERFORMED = re.compile(
+    r"\b(?:eyes?\s+(?:half[- ]?)?(?:closed|shut)|(?:half[- ]?)?closed eyes|mouth|lips)\b", re.I
+)
+
+
+def performance(kind: str) -> str:
+    """How a person on camera performs in a kind of shot (`perform.<kind>` in
+    prompts/directions.yaml, or the studio's): the same direction for every such shot, so a first
+    take is directed the way verdicts have taught."""
+    return knowledge.direction(f"perform.{kind}").text
 
 
 def still_prompt(packet: Packet, beat: Beat, style: str) -> str:
@@ -143,6 +156,8 @@ def motion_prompt(
     only be a guess, so they are written only when asked for."""
     shot = beat.get("shot") or {}
     text = _what_moves(beat, shot, end_in_text)
+    for given in knowledge.for_beat(beat):  # before the picture and sound, so a limit keeps it
+        text = f"{text} {given.text}"
     if not has_start_image:
         text = f"{text} {still_prompt(packet, beat, style)}"
     text = re.sub(r"\s{2,}", " ", STILL_WORDS.sub("", text))
@@ -206,6 +221,9 @@ def _moving_shot_problems(beat: Beat) -> list[Problem]:
         out.append(
             _problem("motion_stated", "warn", f"{bid} moves, but nothing says what moves", bid)
         )
+    if beat.get("sings") and PERFORMED.search(cue):
+        detail = f"{bid} is sung, and its cue directs the eyes or the mouth"
+        out.append(_problem("performance_words", "warn", detail, bid))
     return out
 
 

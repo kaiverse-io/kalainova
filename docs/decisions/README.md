@@ -30,3 +30,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0024](0024-learned-judges-rank-takes-and-never-block.md) | Learned judges rank takes, and never block |
 | [0025](0025-a-singing-shot-is-sung-in-the-call-that-makes-it.md) | A singing shot is sung in the call that makes it, from its still and its line, and nothing is synced afterwards |
 | [0026](0026-a-bench-ranks-within-itself-and-is-held-to-preferences.md) | A bench ranks its takes within itself, and is held to a person's preferences by aspect |
+| [0027](0027-the-engine-learns-from-verdicts-and-its-knowledge-ships-with-it.md) | The engine learns from verdicts, and its knowledge ships with it |
