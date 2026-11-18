@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from .. import media
-from ..jobfs import ContractError
+from ..jobfs import ContractError, Job
 from . import musiccuts as mc
 
 FRAME_SEC = 0.05
@@ -235,3 +235,43 @@ def timed_lines(
         for n in range(len(lines))
     ]
     return _fill_unheard(cues, lines, start, end), "heard"
+
+
+# ------------------------------------------------------------------ a sung take and its line
+def sung_line(job: Job, beat: dict[str, Any], dst: Path) -> float:
+    """A singing shot's line: the vocal stem from where the shot starts on the piece's clock, so
+    the voice that moves the mouth is what is heard over it. Returns how much of it is sung."""
+    stem = job.work / "vocals.wav"
+    if not stem.is_file():
+        raise ContractError(f"{job.id}: {beat['id']} sings, and the job has no vocal stem")
+    start, end = float(beat["sings"]["start_sec"]), float(beat["sings"]["end_sec"])
+    media.run(["-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(stem), str(dst)])
+    return share(voiced(stem), start, end)
+
+
+def offset_of(readings: dict[str, Any]) -> float:
+    """How late a sung take's lips run behind its line, in seconds, as its lip judge measured it
+    (`<judge>.offset_sec`): negative when they run early. Nothing measured is no offset."""
+    found = [v for k, v in (readings.get("judged") or {}).items() if k.endswith(".offset_sec")]
+    return float(found[0]) if found else 0.0
+
+
+def slip(clip: Path, late: float, fps: float = 25.0) -> float:
+    """Line a sung clip's picture up with its line, as an editor slips picture against sound: lips
+    that run late start that far into the clip, and lips that run early wait on the first frame.
+    The clip keeps its length, its last or first frame held, and nothing in it is redrawn. Returns
+    the seconds slipped; under half a frame is left alone."""
+    if abs(late) < 0.5 / fps:
+        return 0.0
+    out = clip.with_suffix(".slipped.mp4")
+    length = media.duration(clip)
+    hold = (
+        f"tpad=stop_mode=clone:stop_duration={late:.3f}"
+        if late > 0
+        else (f"tpad=start_mode=clone:start_duration={-late:.3f}")
+    )
+    head = ["-ss", f"{late:.3f}"] if late > 0 else []
+    media.run([*head, "-i", str(clip), "-vf", hold, "-t", f"{length:.3f}", "-an", "-c:v", "libx264",
+               "-crf", "10", "-pix_fmt", "yuv420p", str(out)])  # fmt: skip
+    out.replace(clip)
+    return round(late, 3)

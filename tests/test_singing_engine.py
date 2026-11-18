@@ -347,3 +347,27 @@ def test_a_sung_bench_is_watched_side_by_side_with_its_one_line(tmp_path):
     assert (info["width"], info["height"]) == (720, 640), "two takes across, each in a 9:16 slot"
     assert media.duration(out) == pytest.approx(2.0, abs=0.1)
     assert media.decode_stereo(out)[0].size, "the line plays over them"
+
+
+@needs_ffmpeg
+def test_a_sung_take_is_slipped_onto_its_line_by_the_offset_its_judge_measured(tmp_path):
+    from kalainova import media
+    from kalainova.blobstore import sha256_file
+
+    assert singing.offset_of({"judged": {"syncnet.offset_sec": 0.12, "syncnet.confidence": 4.3}})
+    assert singing.offset_of({"judged": {"syncnet.confidence": 4.3}}) == 0.0, "none measured"
+    clip = tmp_path / "s00.video.mp4"
+    media.run(["-f", "lavfi", "-i", "testsrc2=s=320x568:d=4:r=25", "-pix_fmt", "yuv420p",
+               str(clip)])  # fmt: skip
+    before = sha256_file(clip)
+    assert singing.slip(clip, 0.01) == 0.0 and sha256_file(clip) == before, "under half a frame"
+    late = {"readings": {"judged": {"syncnet.offset_sec": 0.12}}}
+    sung = {"id": "s00", "on_camera": True, "sings": {"start_sec": 0.0, "end_sec": 4.0}}
+    job = make_job(tmp_path)
+    kept = shotmake.after_take(job, sung, clip, 4.0, lambda *a: None, late)
+    assert kept == {"slipped_sec": 0.12}
+    assert media.duration(clip) == pytest.approx(4.0, abs=0.05), "it keeps its length"
+    assert singing.slip(clip, -0.08) == -0.08, "lips that run early wait on the first frame"
+    assert media.duration(clip) == pytest.approx(4.0, abs=0.05)
+    plain = {"id": "s01"}
+    assert shotmake.after_take(job, plain, clip, 4.0, lambda *a: None, late) is None

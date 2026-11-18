@@ -22,7 +22,11 @@ Other models make the shot from the voice itself. They take a picture and an aud
 4. **A sung take is judged on its own line.**
    - With `judges.lipsync` set, the line is laid on the take's picture, and the judge scores how the lips follow it. `providers/runners/syncnet_run.py` runs SyncNet (MIT), which gives a confidence, a distance, and the offset between picture and sound in frames.
    - The score ranks takes and never blocks (0024).
-5. **The model is chosen by a bench.** `kalainova bench <job> <shot> --models a,b` on a singing shot gives every model the same still and the same line, and the judge scores each one, so the choice rests on the same evidence for every model.
+5. **A sung take is slipped onto its line.**
+   - Every model on the first bench returned lips a few frames behind or ahead of the voice: Kling Avatar 2 frames late, Wan 2.7 3 frames late, OmniHuman 2 frames early.
+   - Slipping the picture by the measured offset brought each to 0, with the same lip-match score.
+   - So the lip judge also reports `offset_sec`. Once a sung take is placed, its picture starts that far in when the lips are late, or holds its first frame when they are early (`singing.slip`). The clip keeps its length, and nothing in it is redrawn, as an editor slips picture against sound.
+6. **The model is chosen by a bench.** `kalainova bench <job> <shot> --models a,b` on a singing shot gives every model the same still and the same line, and the judge scores each one, so the choice rests on the same evidence for every model.
 
 ## Consequences
 

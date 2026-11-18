@@ -10,6 +10,7 @@ same start frame, and the same seeds, so a difference between rows comes from th
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,7 +106,7 @@ def _setup(job: Job, shot: str) -> _Setup:
     prof = config.profile(data.get("profile") or "short-9x16")
     aspect = str(prof.get("aspect", "9:16"))
     line = job.work / "beats" / f"{shot}.voice.wav" if beat.get("sings") else None
-    if line and shotmake.sung_line(job, beat, line) < singing.SUNG_MIN:
+    if line and singing.sung_line(job, beat, line) < singing.SUNG_MIN:
         raise ContractError(f"{job.id}: {shot} is not sung over its span, so it has no line")
     return _Setup(beat, float(span), still, prompt, aspect, kw, resolved, lock, line)
 
@@ -280,11 +281,18 @@ def _sheet(job: Job, shot: str, made: list[dict[str, Any]]) -> Path | None:
 
 def side_by_side(job: Job, shot: str, made: list[dict[str, Any]], line: Path) -> Path:
     """A sung bench's takes side by side, in the order listed, with the line they all sing playing
-    over them, so the lips can be watched against the one vocal."""
+    over them, so the lips can be watched against the one vocal. Each is slipped onto the line by
+    the offset its lip judge measured, as the piece would play it."""
     folder = job.work / "bench"
     folder.mkdir(exist_ok=True)
     out = folder / f"{shot}.mp4"
-    inputs = [arg for t in made for arg in ("-i", str(job.work / t["file"]))]
+    aligned = []
+    for take in made:
+        copy = folder / f"{shot}.take-{take['n']:02d}.aligned.mp4"
+        shutil.copyfile(job.work / take["file"], copy)
+        singing.slip(copy, singing.offset_of(take.get("readings") or {}))
+        aligned.append(copy)
+    inputs = [arg for clip in aligned for arg in ("-i", str(clip))]
     fitted = "".join(
         f"[{n}:v]scale=360:640:force_original_aspect_ratio=decrease,pad=360:640:-1:-1,"
         f"fps=25,setsar=1[v{n}];"

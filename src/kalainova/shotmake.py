@@ -223,7 +223,7 @@ def take_clip(
     floor = int(prof.get("character_source_min_px") or 0)
     assess = takes.held_to(floor) if floor and beat.get("cast") else takes.assess_clip
     line = job.work / "beats" / f"{beat['id']}.voice.wav"
-    sung = bool(beat.get("sings")) and sung_line(job, beat, line) >= singing.SUNG_MIN
+    sung = bool(beat.get("sings")) and singing.sung_line(job, beat, line) >= singing.SUNG_MIN
     if beat.get("sings") and not sung:
         print(f"{job.id}: {beat['id']}: no singing in its span, so it is made as a plain clip")
     assess = judged_sung(assess, line) if sung else assess
@@ -319,21 +319,22 @@ def judged_sung(assess: takes.Assess, line: Path) -> takes.Assess:
     return judged
 
 
+def after_take(
+    job: Job, beat: Fields, clip: Path, span: float, gen: Gen, take: Fields
+) -> Fields | None:
+    """A placed take before the edit: a spoken line's mouth is synced to it; a sung take's picture
+    is slipped onto its line by the offset its lip judge measured (singing.slip)."""
+    if synced_after(beat):
+        return lip_sync(job, beat, clip, span, gen)
+    if not beat.get("sings"):
+        return None
+    slipped = singing.slip(clip, singing.offset_of(take.get("readings") or {}))
+    return {"slipped_sec": slipped} if slipped else None
+
+
 def synced_after(beat: Fields) -> bool:
-    """Whether a shot's mouth is matched to its line after the clip is made: a line spoken on
-    camera. A sung one is sung as it is made."""
+    """Whether a mouth is synced to its line after the clip is made: a line spoken on camera."""
     return bool(beat.get("on_camera")) and not beat.get("sings")
-
-
-def sung_line(job: Job, beat: Fields, dst: Path) -> float:
-    """A singing shot's line: the vocal stem from where the shot starts on the piece's clock, so
-    the voice that moves the mouth is what is heard over it. Returns how much of it is sung."""
-    stem = job.work / "vocals.wav"
-    if not stem.is_file():
-        raise ContractError(f"{job.id}: {beat['id']} sings, and the job has no vocal stem")
-    start, end = float(beat["sings"]["start_sec"]), float(beat["sings"]["end_sec"])
-    media.run(["-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(stem), str(dst)])
-    return singing.share(singing.voiced(stem), start, end)
 
 
 def clip_ambience(
@@ -453,7 +454,7 @@ def apply_chosen(job: Job, bid: str, gen: Gen | None = None) -> Fields:
     paid call: a sync no package covers stops here rather than leave the mouth unsynced."""
     clip = job.work / "beats" / f"{bid}.video.mp4"
     take = takes.place(job, bid, clip)
-    synced = _resync(job, bid, clip, gen)
+    synced = _resync(job, bid, clip, gen, take)
     manifest = job.read("asset_manifest")
     allowed = bool((job.job.get("brief") or {}).get("allow_stills"))
     breaks = [
@@ -484,11 +485,11 @@ def apply_chosen(job: Job, bid: str, gen: Gen | None = None) -> Fields:
     return take
 
 
-def _resync(job: Job, bid: str, clip: Path, gen: Gen | None) -> Fields | None:
-    """The lip sync of a line spoken on camera, made again on the take just placed."""
+def _resync(job: Job, bid: str, clip: Path, gen: Gen | None, take: Fields) -> Fields | None:
+    """after_take, again, on the take just placed: a spoken line synced, a sung one slipped."""
     beats = job.read("script_packet").get("beats", []) if job.has("script_packet") else []
     beat = next((b for b in beats if b["id"] == bid), None)
-    if not beat or not synced_after(beat):
+    if not beat or not (synced_after(beat) or beat.get("sings")):
         return None
     timeline = job.read("asset_manifest").get("timeline") or []
     span = next(s["end_sec"] - s["start_sec"] for s in timeline if s["beat_id"] == bid)
@@ -496,4 +497,4 @@ def _resync(job: Job, bid: str, clip: Path, gen: Gen | None) -> Fields | None:
     def routed(request: Request, **kw: Any) -> tuple[base.Provider, Result]:
         return router.generate(job, request, **kw)
 
-    return lip_sync(job, beat, clip, span, gen or routed)
+    return after_take(job, beat, clip, span, gen or routed, take)

@@ -7,7 +7,8 @@ run_syncnet.py scores each one. Nothing of SyncNet is imported here.
 
 Writes {path: {"confidence": LSE-C, "distance": LSE-D, "offset": frames}} for the face track it is
 surest of. Higher confidence and lower distance mean the lips follow the sound more closely; an
-offset of 0 means picture and sound line up, at 25 frames a second. It was trained on speech, so
+offset of 0 means picture and sound line up, at 25 frames a second; `offset_sec` is how late the
+lips run behind the sound, in seconds. It was trained on speech, so
 read the scores of takes of one sung line against each other, not as a pass mark.
 
     python syncnet_run.py --repo <checkout> --out scores.json clip.mp4 [clip.mp4 ...]
@@ -26,6 +27,7 @@ from pathlib import Path
 TRACK = re.compile(
     r"AV offset:\s*(-?\d+).*?Min dist:\s*(-?[\d.]+).*?Confidence:\s*(-?[\d.]+)", re.DOTALL
 )
+FPS = 25.0  # SyncNet reads every clip at 25 frames a second
 MIN_TRACK = 40  # frames at 25 fps: a sung shot is 3 to 4 s, under the authors' default of 100
 
 
@@ -47,7 +49,13 @@ def score(repo: Path, clip: Path, min_track: int = MIN_TRACK) -> dict[str, float
     if not tracks:
         return None
     offset, distance, confidence = max(tracks, key=lambda t: t[2])
-    return {"confidence": confidence, "distance": distance, "offset": float(offset)}
+    late = round(offset / FPS, 3)  # positive: the lips run behind the sound
+    return {
+        "confidence": confidence,
+        "distance": distance,
+        "offset": float(offset),
+        "offset_sec": late,
+    }
 
 
 def main() -> None:

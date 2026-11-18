@@ -290,11 +290,7 @@ def _film_shot(
     if broken:
         piece.breaks.append(broken)
         print(f"{piece.job.id}: {beat['id']}: {broken['reason']}", file=sys.stderr)
-    synced = (
-        shotmake.lip_sync(piece.job, beat, clip, span, piece.gen)
-        if shotmake.synced_after(beat)
-        else None
-    )
+    synced = shotmake.after_take(piece.job, beat, clip, span, piece.gen, take)
     piece.add(
         id=f"{beat['id']}.video",
         kind="video",
