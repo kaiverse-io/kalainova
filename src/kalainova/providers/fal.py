@@ -366,6 +366,8 @@ class Fal(Provider):
         if not spec:
             raise ValueError(f"{model} is not listed under sing_models")
         up = self.transport.upload
+        most = int(spec.get("max_image_bytes") or 0)
+        still = media.within_bytes(req.still, most) if most else req.still
         billed, length = _sung_length(spec, media.duration(req.audio))
         payload: Fields = {**spec.get("extra", {})}
         text = req.prompt
@@ -376,10 +378,10 @@ class Fal(Provider):
             guide += [f"{tag.format(n=i)} is {r.label}" for i, r in enumerate(refs, start=2)]
             guide += [f"{spec['audio_tag']} is the vocal she sings, her lips and breath on it"]
             text = f"{req.prompt}. {'; '.join(guide)}."
-            payload[spec["images_param"]] = [up(req.still), *(up(r.path) for r in refs)]
+            payload[spec["images_param"]] = [up(still), *(up(r.path) for r in refs)]
             payload[spec["audios_param"]] = [up(req.audio)]
         else:
-            payload[spec.get("image_param", "image_url")] = up(req.still)
+            payload[spec.get("image_param", "image_url")] = up(still)
             payload[spec.get("audio_param", "audio_url")] = up(req.audio)
         payload["prompt"] = text
         if spec.get("durations"):

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import config, consistency, shotmake, shots, takes, timeline
+from . import config, consistency, media, shotmake, shots, takes, timeline
 from .editor import singing
 from .jobfs import ContractError, Job
 from .providers import base, router
@@ -33,9 +33,10 @@ class Row:
 
 
 def parse_models(text: str) -> list[str]:
+    """The models to make the shot on. One is enough to add a row to a bench already run."""
     found = list(dict.fromkeys(m.strip() for m in text.split(",") if m.strip()))
-    if len(found) < 2:
-        raise ContractError("a bench compares at least two models: --models a,b")
+    if not found:
+        raise ContractError("a bench names its models: --models a,b")
     return found
 
 
@@ -247,7 +248,11 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                 break
             made.append(take)
             say(f"{row.model} take {take['n']}, given {take['conditioning']}: {_reading(take)}")
-    sheet = _sheet(job, shot, made)
+    entry = takes.load(job)["shots"].get(shot) or {}
+    benched = [t for t in entry.get("takes", []) if t.get("bench")]  # every row so far
+    sheet = _sheet(job, shot, benched)
+    if setup.line and benched:  # lips are judged moving, so a sung bench is watched as well
+        say(f"watch them: {side_by_side(job, shot, benched, setup.line)}")
     return {"takes": made, "failed": failed, "sheet": sheet}
 
 
@@ -271,3 +276,23 @@ def _sheet(job: Job, shot: str, made: list[dict[str, Any]]) -> Path | None:
     folder = job.work / "bench"
     folder.mkdir(exist_ok=True)
     return timeline.bench_sheet(rows, folder / f"{shot}.jpg")
+
+
+def side_by_side(job: Job, shot: str, made: list[dict[str, Any]], line: Path) -> Path:
+    """A sung bench's takes side by side, in the order listed, with the line they all sing playing
+    over them, so the lips can be watched against the one vocal."""
+    folder = job.work / "bench"
+    folder.mkdir(exist_ok=True)
+    out = folder / f"{shot}.mp4"
+    inputs = [arg for t in made for arg in ("-i", str(job.work / t["file"]))]
+    fitted = "".join(
+        f"[{n}:v]scale=360:640:force_original_aspect_ratio=decrease,pad=360:640:-1:-1,"
+        f"fps=25,setsar=1[v{n}];"
+        for n in range(len(made))
+    )
+    stack = "".join(f"[v{n}]" for n in range(len(made)))
+    joined = f"{stack}hstack=inputs={len(made)}[v]" if len(made) > 1 else "[v0]null[v]"
+    media.run([*inputs, "-i", str(line), "-filter_complex", fitted + joined, "-map", "[v]",
+               "-map", f"{len(made)}:a", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-c:a", "aac", str(out)])  # fmt: skip
+    return out

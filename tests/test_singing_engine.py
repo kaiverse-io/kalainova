@@ -274,15 +274,15 @@ def test_no_shot_is_cut_shorter_than_a_bar_unless_the_whole_piece_is():
     assert [round(s["end"] - s["start"], 2) for s in kept] == [5.0, 4.0], "it joins the one before"
 
 
-def test_a_bench_rehearsal_names_its_shot_and_at_least_two_models():
+def test_a_bench_rehearsal_names_its_shot_and_its_models():
     from kalainova import rehearse
 
     assert rehearse.bench_asked(None, None) is None, "the job's own run"
     assert rehearse.bench_asked("s00", "a,b") == ("s00", ["a", "b"])
     with pytest.raises(ContractError, match="--bench takes a shot"):
         rehearse.bench_asked("s00", None)
-    with pytest.raises(ContractError, match="at least two models"):
-        rehearse.bench_asked("s00", "a")
+    with pytest.raises(ContractError, match="names its models"):
+        rehearse.bench_asked("s00", ",")
 
 
 def test_a_singing_shot_starts_on_a_mouth_in_full_view_and_a_hidden_one_is_flagged(
@@ -315,3 +315,35 @@ def test_a_singing_shot_starts_on_a_mouth_in_full_view_and_a_hidden_one_is_flagg
     )
     assert refusal and "microphone covers her mouth" in refusal
     assert "This shot sings, so the mouth must be in full view" in asked[0]
+
+
+@needs_ffmpeg
+def test_a_still_over_a_models_file_limit_is_sent_as_a_jpeg_of_the_same_size(tmp_path):
+    from kalainova import media
+
+    still = tmp_path / "s00.still.png"
+    grain = ["-vf", "noise=alls=25:allf=t"]  # a photo's grain, which a PNG keeps and a JPEG eases
+    media.run(["-f", "lavfi", "-i", "testsrc2=s=640x1136", *grain, "-frames:v", "1", str(still)])
+    assert media.within_bytes(still, still.stat().st_size) == still, "within the limit: as it is"
+    sent = media.within_bytes(still, still.stat().st_size - 1)
+    assert sent.suffix == ".jpg" and sent.stat().st_size < still.stat().st_size
+    assert (media.summarize(sent)["width"], media.summarize(sent)["height"]) == (640, 1136)
+
+
+@needs_ffmpeg
+def test_a_sung_bench_is_watched_side_by_side_with_its_one_line(tmp_path):
+    from kalainova import bench, media
+
+    job = make_job(tmp_path, media=["video"])
+    line = _stem(job.work / "s00.voice.wav", 2.0, [(0.0, 2.0)])
+    made = []
+    for n in range(2):
+        clip = job.work / f"s00.take-0{n}.mp4"
+        media.run(["-f", "lavfi", "-i", "testsrc2=s=270x480:d=2:r=24", "-pix_fmt", "yuv420p",
+                   str(clip)])  # fmt: skip
+        made.append({"n": n, "file": clip.name})
+    out = bench.side_by_side(job, "s00", made, line)
+    info = media.summarize(out)
+    assert (info["width"], info["height"]) == (720, 640), "two takes across, each in a 9:16 slot"
+    assert media.duration(out) == pytest.approx(2.0, abs=0.1)
+    assert media.decode_stereo(out)[0].size, "the line plays over them"

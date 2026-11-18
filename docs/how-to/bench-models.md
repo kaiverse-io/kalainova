@@ -42,3 +42,5 @@ The motion reading says whether the clip moves, not whether it is good. Running 
 A shot that sings (`Sings:` in a song video's shot list) is benched on the models under `sing_models`: each gets the shot's still and the same line of the vocal stem, and with `judges.lipsync` set each take is also scored on how its lips follow that line (ADR 0025).
 
 To see every request and its price first, with nothing sent: `kalainova rehearse <job> --bench <shot> --models model-a,model-b`. It rehearses the stills too, and checks each request against the model's published schema. A bench can run as soon as the shot's still exists, from the stills package alone; the shot's length then comes from its plan.
+
+One model is enough to add a row to a bench already run: the sheet shows every bench take of the shot so far. A picture over a model's file limit (`max_image_bytes` in its `sing_models` row) is sent as a high-quality JPEG of the same size.

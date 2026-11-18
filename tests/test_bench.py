@@ -112,8 +112,9 @@ def test_an_unlisted_model_is_refused(stage):
 
 
 def test_a_bench_needs_at_least_two_models():
-    with pytest.raises(ContractError, match="at least two"):
-        bench.parse_models("cam-a")
+    with pytest.raises(ContractError, match="names its models"):
+        bench.parse_models(" , ")
+    assert bench.parse_models("cam-a") == ["cam-a"], "one model adds a row to a bench already run"
     assert bench.parse_models("cam-a, cam-b,cam-a") == ["cam-a", "cam-b"]
 
 
