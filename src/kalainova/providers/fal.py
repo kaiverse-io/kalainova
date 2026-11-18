@@ -11,7 +11,6 @@ has finished is billed, because the vendor has already charged for it.
 from __future__ import annotations
 
 import base64
-import math
 import mimetypes
 import os
 import time
@@ -22,6 +21,7 @@ import requests
 
 from .. import media
 from ..config import audio_spec, model_for, price_for, reference_spec, sing_spec, video_spec
+from . import fal_sing
 from .base import Provider, register
 from .contract import (
     Billable,
@@ -42,6 +42,7 @@ from .contract import (
     Word,
 )
 from .fal_catalog import list_price, schema_problems, unit_price
+from .fal_sing import set_length as _billed_length
 from .transport import TIMEOUT, Reply, Transport, raise_for, request_id
 
 QUEUE = "https://queue.fal.run/"
@@ -59,21 +60,6 @@ Fields = dict[str, Any]
 def aspect_for(width: int, height: int) -> str:
     r = width / height
     return min(ASPECTS, key=lambda a: abs(r - int(a.split(":")[0]) / int(a.split(":")[1])))
-
-
-def _billed_length(spec: Fields, duration: float) -> tuple[int, int | str]:
-    """Seconds the vendor bills for this ask, and the length as this model wants it written."""
-    allowed = [int(x) for x in str(spec.get("durations") or "5,10").split(",")]
-    billed = min((d for d in allowed if d >= duration), default=max(allowed))
-    return billed, billed if spec.get("duration_type") == "int" else str(billed)
-
-
-def _sung_length(spec: Fields, line: float) -> tuple[float, int | str]:
-    """A sung shot runs as long as its line, billed by the whole second, unless the model makes set
-    lengths; then the next one up, as a plain clip is."""
-    if spec.get("durations"):
-        return _billed_length(spec, line)
-    return float(math.ceil(line)), ""
 
 
 def _seed(reply: Reply, given: int | None) -> int | None:
@@ -202,7 +188,7 @@ class Fal(Provider):
         """A clip comes back at the next length the model allows, never shorter than the ask."""
         if billable.capability == "sing" and billable.duration:
             spec = sing_spec("fal", model or model_for("fal", "sing"))
-            return float(_sung_length(spec, billable.duration)[0])
+            return float(fal_sing.sung_length(spec, billable.duration)[0])
         if billable.capability == "video" and billable.duration:
             name = model or model_for("fal", self.price_key(billable))
             spec = (
@@ -359,8 +345,7 @@ class Fal(Provider):
         return Result(path=req.dst, cost=cost, model=model)
 
     def sing(self, req: SingRequest, ctx: Context) -> Result:
-        """A shot sung in one call. A model that takes one picture gets the still; one that takes
-        several gets the still first, then the kit, with the line named in the prompt."""
+        """A shot sung in one call, sent as fal_sing says for the model's row."""
         model = ctx.model or model_for("fal", "sing")
         spec = sing_spec("fal", model)
         if not spec:
@@ -368,32 +353,17 @@ class Fal(Provider):
         up = self.transport.upload
         most = int(spec.get("max_image_bytes") or 0)
         still = media.within_bytes(req.still, most) if most else req.still
-        billed, length = _sung_length(spec, media.duration(req.audio))
-        payload: Fields = {**spec.get("extra", {})}
-        text = req.prompt
-        if spec.get("images_param"):
-            refs = req.references[: max(int(spec.get("max_images", 1)) - 1, 0)]
-            tag = str(spec["image_tag"])
-            guide = [f"{tag.format(n=1)} is the first frame"]
-            guide += [f"{tag.format(n=i)} is {r.label}" for i, r in enumerate(refs, start=2)]
-            guide += [f"{spec['audio_tag']} is the vocal she sings, her lips and breath on it"]
-            text = f"{req.prompt}. {'; '.join(guide)}."
-            payload[spec["images_param"]] = [up(still), *(up(r.path) for r in refs)]
-            payload[spec["audios_param"]] = [up(req.audio)]
-        else:
-            payload[spec.get("image_param", "image_url")] = up(still)
-            payload[spec.get("audio_param", "audio_url")] = up(req.audio)
-        payload["prompt"] = text
-        if spec.get("durations"):
-            payload["duration"] = length
-        if spec.get("aspect_param"):
-            payload[spec["aspect_param"]] = req.aspect
-        seeded = req.seed is not None and bool(spec.get("takes_seed"))
-        if seeded:
-            payload["seed"] = req.seed
+        line = media.duration(req.audio)
+        billed, length = fal_sing.sung_length(spec, line)
+        refs = [up(r.path) for r in fal_sing.references(spec, req)]
+        sent = up(fal_sing.line_for(spec, req.audio))
+        payload = fal_sing.payload(spec, req, up(still), sent, refs, length)
         reply = self._send(model, payload, ctx, wait=1800)
         cost = billed * float(price_for("fal", "sing", model).get("per_sec", 0))
         self.transport.fetch(reply, req.dst, at=("video.url",), billed=cost)
+        if fal_sing.shortest(spec) > line and req.dst.is_file():
+            fal_sing.cut_to_line(req.dst, line)
+        seeded = "seed" in payload
         return Result(
             path=req.dst,
             cost=cost,

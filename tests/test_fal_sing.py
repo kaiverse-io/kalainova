@@ -19,6 +19,7 @@ from kalainova.providers.contract import Billable, Reference, SingRequest
 ONE = "vendor/one-picture"
 MANY = "vendor/pictures-and-audio"
 SET = "vendor/set-lengths"
+FLOOR = "vendor/five-second-floor"
 
 TABLE = {
     "models": {"fal": {"sing": ONE}},
@@ -40,6 +41,12 @@ TABLE = {
                 "audio_param": "audio_url",
                 "durations": "5,10,15",
                 "takes_seed": True,
+            },
+            FLOOR: {
+                "image_param": "image_url",
+                "audio_param": "audio_url",
+                "prompt_param": "",
+                "min_audio_sec": 5,
             },
         }
     },
@@ -109,7 +116,39 @@ def test_a_sung_shot_is_quoted_at_the_length_it_is_billed(monkeypatch):
     assert fal.Fal().billed_seconds(asked) == 7.0
     assert fal.Fal().billed_seconds(asked, SET) == 10.0
     assert fal.Fal().estimate(asked) == pytest.approx(7 * 0.16)
-    assert fal.Fal().models("sing") == [ONE, MANY, SET]
+    assert fal.Fal().models("sing") == [ONE, MANY, SET, FLOOR]
+    assert fal.Fal().billed_seconds(Billable(capability="sing", duration=3.8), FLOOR) == 5.0
+
+
+def test_a_line_under_a_models_shortest_is_padded_and_the_clip_cut_back_to_it(
+    wire, tmp_path, monkeypatch
+):
+    cut = []
+    monkeypatch.setattr(fal.fal_sing, "cut_to_line", lambda clip, line: cut.append(line))
+    made = _sing(tmp_path, FLOOR, seconds=3.82)
+    sent = wire.sent[-1]["payload"]
+    assert sent["audio_url"] == "up:s01.voice.padded.wav", "silence added at the end"
+    padded = tmp_path / "s01.voice.padded.wav"
+    assert padded.is_file()
+    from kalainova import media
+
+    assert media.duration(padded) == pytest.approx(5.0, abs=0.05)
+    assert "prompt" not in sent, "a model with no prompt field is sent none"
+    assert made.cost == pytest.approx(5 * 0.2), "billed for the padded five seconds"
+    assert cut == [pytest.approx(3.82, abs=0.02)], "and the shot runs as long as its line"
+
+
+def test_a_padded_clip_is_cut_to_the_line_without_its_sound(tmp_path):
+    from kalainova import media
+    from kalainova.providers import fal_sing
+
+    clip = tmp_path / "s01.mp4"
+    media.run(["-f", "lavfi", "-i", "testsrc=size=64x64:rate=25:duration=5", "-c:v", "libx264",
+               "-pix_fmt", "yuv420p", str(clip)])  # fmt: skip
+    fal_sing.cut_to_line(clip, 3.82)
+    assert media.duration(clip) == pytest.approx(3.82, abs=0.05)
+    fal_sing.cut_to_line(clip, 3.82)  # already the line's length: left alone
+    assert media.duration(clip) == pytest.approx(3.82, abs=0.05)
 
 
 def test_a_model_not_listed_to_sing_is_refused_before_anything_is_sent(wire, tmp_path):
