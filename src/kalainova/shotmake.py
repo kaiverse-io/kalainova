@@ -15,11 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from . import config, consistency, media, shots, takes, trace
-from .bar import judges
 from .blobstore import sha256_file
 from .editor import singing
 from .jobfs import ContractError, Job
-from .providers import base, rehearsal, router
+from .providers import base, router
 from .providers.contract import (
     Card,
     GraphicsRequest,
@@ -33,6 +32,7 @@ from .providers.contract import (
     SingRequest,
     VideoRequest,
 )
+from .takejudges import judged_on_camera, judged_sung
 
 Fields = dict[str, Any]
 Gen = Callable[..., tuple[base.Provider, Result]]  # (request, **router options)
@@ -226,7 +226,7 @@ def take_clip(
     sung = bool(beat.get("sings")) and singing.sung_line(job, beat, line) >= singing.NO_VOICE
     if beat.get("sings") and not sung:
         print(f"{job.id}: {beat['id']}: no singing in its span, so it is made as a plain clip")
-    assess = judged_sung(assess, line) if sung else assess
+    assess = judged_on_camera(judged_sung(assess, line) if sung else assess, beat)
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
         if sung:  # the voice moves the face and the body in the same call, so nothing syncs after
@@ -301,22 +301,6 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
     shutil.copyfile(clip, before)
     synced.replace(clip)
     return {"lipsync_model": res.model, "presync_path": f"beats/{before.name}"}
-
-
-def judged_sung(assess: takes.Assess, line: Path) -> takes.Assess:
-    """A sung take is also judged on how its lips follow its line (judges.lipsync), with the line
-    itself laid on its picture, so what is scored is the vocal the piece plays over it."""
-    if not judges.configured("lipsync") or rehearsal.active() is not None:
-        return assess  # a rehearsal's stand-in is a test pattern, with no lips to judge
-
-    def judged(path: Path) -> tuple[Fields, bool]:
-        readings, ok = assess(path)
-        heard = path.with_suffix(".sync.mp4")
-        media.run(["-i", str(path), "-i", str(line), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-                   "-shortest", str(heard)])  # fmt: skip
-        return {**readings, **judges.of_take("lipsync", heard)}, ok
-
-    return judged
 
 
 def after_take(

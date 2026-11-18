@@ -22,7 +22,7 @@ What stays the same (see `kalainova kit --help`, `stream --help`):
   kalainova schedule <stream> <date> "<brief>"
   kalainova request <stream> "<brief>" [--cast a,b]   a locked job for that stream
 
-Before money leaves (signoff_cli.py, ADR 0022): kalainova limits|package|packages|sign|stop|resume
+Before money leaves (signoff_cli.py, ADR 0022): kalainova rehearse|limits|package|packages|sign|stop|resume
 
 Shot by shot, songs, research, and what comes after a cut (see production_cli.py):
   kalainova shotplan|takes|take|retake|bench|sheet|filmstrip|cutcheck|export <job> ...
@@ -133,18 +133,6 @@ def _clean(a) -> int:
             "  the final, its records, every asset and take stay; `make <job> --from render` remakes these"
         )
     return 0
-
-
-def _rehearse(a) -> int:
-    from . import rehearse
-
-    job = open_job(a.job)
-    benched = rehearse.bench_asked(a.bench, a.models)
-    report = rehearse.run(job, bench=benched)
-    for line in rehearse.lines(report):
-        print(line)
-    print(job.work / (rehearse.BENCH_REPORT if benched else rehearse.REPORT))
-    return 1 if report["stopped"] else 0
 
 
 def _render_edit(job) -> int:
@@ -281,10 +269,6 @@ def main(argv: list[str] | None = None) -> int:
     cl = sub.add_parser("clean", help="delete rebuildable render intermediates")
     cl.add_argument("job")
     cl.add_argument("--dry-run", action="store_true")
-    rh = sub.add_parser("rehearse", help="what a job's paid stage would send and cost, unsent")
-    rh.add_argument("job")
-    rh.add_argument("--bench", help="a shot to rehearse on --models, as kalainova bench would")
-    rh.add_argument("--models")
     rv = sub.add_parser("review", help="a page of every take; --blind hears song jobs blind")
     rv.add_argument("jobs", nargs="+")
     rv.add_argument("--blind", action="store_true")
@@ -346,8 +330,6 @@ def main(argv: list[str] | None = None) -> int:
             return _bar(a)
         if a.cmd == "clean":
             return _clean(a)
-        if a.cmd == "rehearse":
-            return _rehearse(a)
         if a.cmd == "review":
             from . import reviewpage
 

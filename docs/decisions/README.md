@@ -29,3 +29,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0023](0023-the-engine-speaks-to-models-in-its-own-terms.md) | The engine speaks to models in its own terms: typed requests, transports, and a contract every adapter passes |
 | [0024](0024-learned-judges-rank-takes-and-never-block.md) | Learned judges rank takes, and never block |
 | [0025](0025-a-singing-shot-is-sung-in-the-call-that-makes-it.md) | A singing shot is sung in the call that makes it, from its still and its line, and nothing is synced afterwards |
+| [0026](0026-a-bench-ranks-within-itself-and-is-held-to-preferences.md) | A bench ranks its takes within itself, and is held to a person's preferences by aspect |

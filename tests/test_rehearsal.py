@@ -176,3 +176,17 @@ def test_a_field_fal_would_refuse_stops_the_rehearsal(tmp_path, studio, offline)
     (call,) = [c for c in report["calls"] if c["capability"] == "video"]
     assert call["requests"][0]["schema"] != "ok"
     assert any("SCHEMA REFUSES" in line for line in rehearse.lines(report))
+
+
+def test_a_bench_that_has_its_still_rehearses_only_the_bench(tmp_path, studio, offline):
+    job = _job(tmp_path, ["fal"])
+    assets.run(job, animatic=True)  # the still, made free by the fake image provider
+    packet = job.read("script_packet")
+    packet["beats"][0]["duration_sec"] = 3.0  # and its length, from the plan
+    job.write("script_packet", packet)
+    model = next(iter(config.studio()["video_models"]["fal"]))
+    report = rehearse.run(job, check=SCHEMA_OK, bench=("b1", [model]))
+    assert report["stopped"] == ""
+    assert report["calls"] and {c["capability"] for c in report["calls"]} == {"video"}, (
+        "the bench starts from the still it has, so no still is priced"
+    )

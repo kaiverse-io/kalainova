@@ -348,8 +348,9 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     │                                       └─▶ providers
     ├─▶ trace: labels each command's stage (and each stage of make)
     ├─▶ production_cli ──▶ dub, nle, provenance, qa, research, shotmake, shots,
-    │                      songs, takes, timeline, verdicts, editor, config, bench,
-    │                      assets, preproduction
+    │                      songs, takes, timeline, editor, config, assets, preproduction,
+    │                      judging_cli
+    ├─▶ judging_cli ─▶ bench, benchreport, verdicts: the bench, verdicts, and agreement
     ├─▶ plan ──────▶ consistency, prompts, providers, shots
     ├─▶ research ──▶ plan, prompts, providers, config
     ├─▶ writers ───▶ consistency, plan, prompts, providers
@@ -358,9 +359,13 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     │                trace, config, providers
     ├─▶ preproduction ▶ media, motion, shotmake, takes, timeline, providers
     ├─▶ soundbed ──▶ blobstore, kits, media, shotmake
-    ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, trace, config, providers
+    ├─▶ shotmake ──▶ blobstore, consistency, media, shots, takes, takejudges, trace, config,
+    │                providers
+    ├─▶ takejudges ─▶ bar, media, providers: the learned judges a take is read by
     ├─▶ takes ─────▶ bar, blobstore, media, config
-    ├─▶ bench ─────▶ consistency, shotmake, shots, takes, timeline, config, providers
+    ├─▶ bench ─────▶ benchreport, consistency, shotmake, shots, takejudges, takes, timeline,
+    │                config, providers
+    ├─▶ benchreport ▶ bar, captions, config, editor, media, takejudges, takes: labels, table, pick
     ├─▶ rehearse ──▶ assets, preproduction, takes, providers
     ├─▶ reviewpage ▶ consistency, kits, takes
     ├─▶ gates ─────▶ packages, jobfs: what must be true before a paid call
@@ -414,10 +419,13 @@ The command line. Parses arguments and calls a stage. Holds no rules.
 Commands for kits, streams, canon, schedules, requests, and the look sheet. It registers `signoff_cli`'s commands first, so the sign-off sits with the studio's other commands.
 
 ### signoff_cli
-Commands for what must be true before money leaves (ADR 0022): `stop` and `resume` (the kill switch), `limits` (show the studio's; setting them needs a terminal), `package` (a stage package from a rehearsal with its readiness, or an allowance), `packages` (each package a job can spend under, and its state), and `sign-off`. `sign-off` runs only at a terminal: it prints the package, asks a reason for each risk and the start of the package's hash, and writes the sign-off. Agents build packages and never sign them off or set limits. Depends on `gates`, `packages`, `readiness`, and `rehearse`.
+Commands for what must be true before money leaves (ADR 0022): `rehearse` (what a paid stage or a bench would send and cost, unsent), `stop` and `resume` (the kill switch), `limits` (show the studio's; setting them needs a terminal), `package` (a stage package from a rehearsal with its readiness, or an allowance), `packages` (each package a job can spend under, and its state), and `sign-off`. `sign-off` runs only at a terminal: it prints the package, asks a reason for each risk and the start of the package's hash, and writes the sign-off. Agents build packages and never sign them off or set limits. Depends on `gates`, `packages`, `readiness`, and `rehearse`.
 
 ### production_cli
-Commands for making and judging a piece shot by shot, songs, research, and everything after a cut: takes, retakes, the shot sheet, timeline export, clips, dubbing, verdicts, provenance, and the ledger.
+Commands for making a piece shot by shot, songs, research, and everything after a cut: takes, retakes, the shot sheet, timeline export, clips, dubbing, provenance, and the ledger. It registers `judging_cli`'s commands after its own.
+
+### judging_cli
+Commands for testing models on one shot and holding the engine's judgement to a person's: `bench`, `bench-report` (the labelled side by side, the table, and the pick, at no cost), `verdict` (with `--best N --among a,b` and `--aspect`), `signals`, `agreement` (which readings, and the engine's own picks, follow a person's preferences aspect by aspect), and `review-set`. Depends on `bench`, `benchreport`, and `verdicts`.
 
 ### kitrules
 What makes a kit legal. Stdlib only, shared by the engine and `scripts/check.py`.
@@ -470,13 +478,25 @@ What a shot says, kept apart: the still prompt, the motion prompt, continuity sh
 Attempts at one shot, each with its own seed and readings. Passing is a floor, not a ranking: among takes that pass, the first is kept; a clip that cannot be read is unmeasurable, never a pass; each reading records the size the model made. `held_to` adds a profile's `character_source_min_px`, so a character shot made smaller does not pass. A person's choice stands (ADR 0013).
 
 ### bench
-A camera test: one shot made on several models from the same start frame, prompt, and seeds. It prints each model's estimate, refuses before any call when the total passes the job's cap, and makes takes marked `bench` through the router and the take store, so each carries its model, seed, and cost. It writes one sheet with a row per take. Depends on `consistency`, `shotmake`, `shots`, `takes`, `timeline`, `config`, and `providers`.
+A camera test: one shot made on several models from the same start frame, prompt, and seeds. It prints each model's estimate, says when a model is known to make a character shot under the profile's size floor, refuses a row already made on the same model and prompt unless asked again, and refuses before any call when the total passes the job's cap. It makes takes marked `bench` through the router and the take store, so each carries its model, seed, and cost, judged by `takejudges`. It writes one sheet with a row per take, then the bench report (`benchreport`). `ready` says whether a shot has the still and length a bench starts from, so a rehearsal of it skips the stills. Depends on `benchreport`, `consistency`, `shotmake`, `shots`, `takejudges`, `takes`, `timeline`, `config`, and `providers`.
 
 ```
- shot + models --> estimate per model --> over the cap? --> refuse, no call
-                                              | no
-                                              v
-        router --> takes.attempt (bench) --> takes.json --> timeline.bench_sheet
+ shot + models --> made before? --> refuse (--again makes it)
+                       | no
+                       v
+                 estimate per model (size floor said) --> over the cap? --> refuse, no call
+                                                              | no
+                                                              v
+        router --> takes.attempt (bench, judged) --> takes.json --> sheet --> benchreport
+```
+
+### benchreport
+A bench, read. Every bench take of a shot side by side under a strip naming each panel's take and model, with a sung shot's line playing and each take slipped onto it; a table of every reading; and the engine's pick with its place on each ranking reading. The readings that rank are named under `rank` in config by capability, each scaled within the takes compared and never held to a fixed mark (ADR 0026). A take that missed its floor or was not read by a ranking judge is listed and not ranked; a character take under the size floor is ranked and not picked; first and second within `rank.close` is a person's call. It judges again at no cost what a take was not read by, and reads how much of a mouth's movement a repaint kept. Depends on `bar`, `captions`, `config`, `editor`, `media`, `takejudges`, and `takes`.
+
+```
+ bench takes --> judges they lack (takejudges) --> rank by config.rank, scaled in the bench
+                                                        |
+        labelled side by side + report.md + report.json: pick | close | unsure | none, and why
 ```
 
 ### rehearse
@@ -512,6 +532,9 @@ One local page to judge a piece's takes by eye: the kit's faces, each moving sho
 
 ### shotmake
 One shot from start to finish: where it starts, its takes, a retake, its lip sync, and the sound of its place. A shot that sings is sung in the call that makes it (`SingRequest`, ADR 0025), from its still and its line of the vocal stem, and with `judges.lipsync` set each sung take is scored on how its lips follow that line; only a line spoken on camera is lip-synced afterwards. A first run and a retake share this code, so they keep the same promise and the same record. A retake is refused past the take limits (`takes.check_retake`), and with no note it reads that shot's finding from `findings.json`.
+
+### takejudges
+The learned judges a take is read by, beside its plain readings (ADR 0024). A sung take is judged by `judges.lipsync` with its line laid on its picture; a take with a character in it by `judges.performance`, how the person moves apart from the background. Each kind adds its scores under the take's `judged`, and the first to rank keeps its rank; a judge never blocks a take, and a rehearsal's stand-in is not judged. Depends on `bar`, `media`, and `providers`.
 
 ### preproduction
 The rough cut before the money, and the gate on it. The assets stage, run with `animatic`, makes the voice and one still per shot and asks for no video. This module prices each moving shot (`moving_quotes`, per shot, at the length asked for), draws the stills under a camera move with the words and the voice into `animatic.mp4` stamped ANIMATIC, and writes `animatic.json`. `require_review` is the gate: with `brief.animatic_gate` set, or by default for a capped job whose video is paid for, the assets stage refuses before any spend unless the job's `animatic_reviewed` is an `accept` for the cut that exists now. Accepting records each still's hash, and a shot whose still changed after that refuses. The model check (`still_judge_refusal`, `prompts/qa_still.md`, the `judge` model) looks at each moving shot's still while the animatic is made and advises the person through `findings.json` and the animatic's printout (`judge_lines`); it blocks nothing there. In the paid run a still the person accepted is not judged again (`still_was_accepted`); with no accepted animatic, a still the check flags is not sent for motion. `publish` refuses an animatic by name and by hash. Depends on `config`, `media`, `motion`, `prompts`, `shotmake`, `takes`, `timeline`, and `providers`.

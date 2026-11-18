@@ -21,6 +21,8 @@ CHOICES = ("accept", "fix", "reject")
 GOOD = {"accept"}
 ENOUGH_OF_EACH = 3  # with fewer than this on either side, any separation is luck
 SEPARATES_AT = 0.8
+PAIRS_ENOUGH = 8  # fewer preferences than this on one aspect, and agreement is luck
+ASPECTS = ("overall", "lips", "head", "eyes", "body", "picture", "sound")
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
 
@@ -78,14 +80,18 @@ def record(
     preferred: int | None = None,
     over: int | None = None,
     animatic: bool = False,
+    aspect: str = "",
 ) -> dict[str, Any]:
     """Write down what a person said. It has to name them, because a verdict is theirs.
 
     A verdict on a shot may name one of its takes, so each model's result in a bench gets its own.
-    A preference names two takes of one shot or track: preferred over another.
+    A preference names two takes of one shot or track: preferred over another, and may say on
+    which aspect (`review_aspects` in config: the lips, the eyes, the picture...), so a judge of
+    one aspect is held to what the person said of that aspect alone.
     A verdict on the animatic is on the rough cut as it stands; the job records which cut it was.
     """
     _check_record_args(job, verdict, reviewer, shot, take, preferred, over, animatic)
+    _check_aspect(aspect)
     # The bytes judged, not only their take number: `assets --force` starts the numbering again,
     # and a number alone would hand an old verdict to a new clip.
     judged = _take_sha(job.folder, shot, take) if shot and preferred is None else ""
@@ -106,6 +112,7 @@ def record(
             if shot and preferred is not None and over is not None
             else {}
         ),
+        **({"aspect": aspect} if aspect else {}),
         **({"note": note} if note else {}),
     }
     with open(job.folder / VERDICTS_FILE, "a") as fh:
@@ -113,6 +120,28 @@ def record(
     if animatic:
         _note_animatic(job, entry)
     return entry
+
+
+def aspects() -> list[str]:
+    from . import config
+
+    return [str(a) for a in config.studio().get("review_aspects") or ASPECTS]
+
+
+def _check_aspect(aspect: str) -> None:
+    if aspect and aspect not in aspects():
+        raise ContractError(
+            f"an aspect is one of {aspects()} (config: review_aspects), not {aspect!r}"
+        )
+
+
+def best_of(job: Job, best: int, among: list[int], **kw: Any) -> list[dict[str, Any]]:
+    """ "The best of these takes": one preference of it over each of the others."""
+    if best not in among:
+        raise ContractError(f"take {best} is not among {among}")
+    return [
+        record(job, "accept", preferred=best, over=other, **kw) for other in among if other != best
+    ]
 
 
 def _note_animatic(job: Job, entry: dict[str, Any]) -> None:
@@ -349,3 +378,91 @@ def review_set(jobs_root: Path) -> str:
     elif not prefs:
         return "no verdicts yet, so nothing can be said"
     return "\n".join(lines).strip()
+
+
+def _numbers(take: dict[str, Any]) -> dict[str, float]:
+    found = take.get("readings") or {}
+    flat = {**{k: v for k, v in found.items() if k != "score"}, **(found.get("judged") or {})}
+    return {
+        k: float(v)
+        for k, v in flat.items()
+        if isinstance(v, int | float) and not isinstance(v, bool)
+    }
+
+
+def _pair(folder: Path, entry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The two takes a preference named, by their bytes when it recorded them."""
+    takes = (_json(folder / "takes.json").get("shots") or {}).get(entry.get("shot") or "") or {}
+    have = takes.get("takes", [])
+
+    def one(n: int, sha: str) -> dict[str, Any]:
+        if sha:
+            return next((t for t in have if t.get("sha256") == sha), {})
+        return next((t for t in have if t["n"] == n), {})
+
+    return (
+        one(entry["preferred"], entry.get("preferred_sha256", "")),
+        one(entry["over"], entry.get("over_sha256", "")),
+    )
+
+
+def preferences(jobs_root: Path) -> list[dict[str, Any]]:
+    """Every preference between two takes, with both takes' readings."""
+    rows = []
+    for folder in (
+        sorted(p for p in jobs_root.iterdir() if p.is_dir()) if jobs_root.is_dir() else []
+    ):
+        for entry in load(folder):
+            if entry.get("preferred") is None or not entry.get("shot"):
+                continue
+            won, lost = _pair(folder, entry)
+            if won and lost:
+                rows.append(
+                    {
+                        "job": folder.name,
+                        "shot": entry["shot"],
+                        "aspect": entry.get("aspect") or "overall",
+                        "won": won,
+                        "lost": lost,
+                    }
+                )
+    return rows
+
+
+def agreement(jobs_root: Path) -> list[dict[str, Any]]:
+    """For each aspect and each reading: in how many of a person's preferences the preferred take
+    read higher. Near 1 or near 0, the reading follows what the person sees on that aspect; near
+    a half, it does not, whatever it claims to measure."""
+    counts: dict[tuple[str, str], list[int]] = {}
+    for row in preferences(jobs_root):
+        won, lost = _numbers(row["won"]), _numbers(row["lost"])
+        for name in sorted(set(won) & set(lost)):
+            if won[name] == lost[name]:
+                continue
+            tally = counts.setdefault((row["aspect"], name), [0, 0])
+            tally[0 if won[name] > lost[name] else 1] += 1
+    out = []
+    for (aspect, name), (higher, lower) in sorted(counts.items()):
+        n = higher + lower
+        share = higher / n
+        says = (
+            NOT_ENOUGH
+            if n < PAIRS_ENOUGH
+            else (
+                "higher matches"
+                if share >= SEPARATES_AT
+                else "lower matches"
+                if share <= 1 - SEPARATES_AT
+                else "does not match"
+            )
+        )
+        out.append(
+            {
+                "aspect": aspect,
+                "reading": name,
+                "pairs": n,
+                "higher_won": round(share, 3),
+                "says": says,
+            }
+        )
+    return out

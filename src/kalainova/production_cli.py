@@ -1,4 +1,4 @@
-"""CLI for making and judging a piece shot by shot.
+"""CLI for making a piece shot by shot (judging_cli.py holds the bench and the verdicts).
 
 kalainova animatic <job>                         a rough cut, before any video is paid for
 kalainova card <job> <beat> --kind title|quote|stat ...  a drawn card for a beat's graphics folder
@@ -6,7 +6,6 @@ kalainova shotplan <job>                         what is wrong with the plan, be
 kalainova takes <job>                            every take of every shot, and how each read
 kalainova take <job> <shot> <n>                  a person's choice of take
 kalainova retake <job> <shot> ["what was wrong"]  another attempt at one shot
-kalainova bench <job> <shot> --models a,b [--takes N]  one shot on several models, side by side
 kalainova sheet <job> [--motion|--cuts]          first and last frame, or --motion, or --cuts
 kalainova findings <job>                         what the last look at the piece in motion found
 kalainova filmstrip <file> <start> <end>         frames over a waveform
@@ -22,9 +21,6 @@ kalainova research <job> --check                 hold written findings to their 
 kalainova clips <job> [--count 3] [--open] [--crop motion|face] [--hook-card] [--close-text T]
                                                  short pieces from a long recording
 kalainova dub <job> <language> <new id>          the piece in another language
-kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]|--animatic]
-kalainova signals                                which readings predict a person's verdict
-kalainova review-set                             every verdict beside its readings
 kalainova provenance <job>                       how it was made, for whoever answers for it
 kalainova ledger <job> [--invoice AMOUNT]        estimated against what a vendor billed
 """
@@ -40,6 +36,7 @@ from typing import Any
 from . import (
     assets,
     config,
+    judging_cli,
     nle,
     preproduction,
     provenance,
@@ -50,10 +47,9 @@ from . import (
     shots,
     takes,
     timeline,
-    verdicts,
 )
 from .bar import identity
-from .jobfs import ContractError, Job, home, open_job
+from .jobfs import ContractError, Job, open_job
 from .render import drawn
 
 
@@ -84,14 +80,12 @@ def _card_parser(sub: Any) -> None:
 def _shot_parsers(sub: Any) -> None:
     sub.add_parser("shotplan").add_argument("job")
     sub.add_parser("takes").add_argument("job")
-    take, retake, bench = sub.add_parser("take"), sub.add_parser("retake"), sub.add_parser("bench")
-    for p in (take, retake, bench):
+    take, retake = sub.add_parser("take"), sub.add_parser("retake")
+    for p in (take, retake):
         p.add_argument("job")
         p.add_argument("shot")
     take.add_argument("n", type=int)
     retake.add_argument("note", nargs="?", default="")
-    bench.add_argument("--models", required=True)
-    bench.add_argument("--takes", type=int, default=1)
 
 
 def _look_parsers(sub: Any) -> None:
@@ -162,18 +156,7 @@ def _make_parsers(sub: Any) -> None:
 
 
 def _record_parsers(sub: Any) -> None:
-    verdict = sub.add_parser("verdict")
-    verdict.add_argument("job")
-    verdict.add_argument("verdict", choices=verdicts.CHOICES)
-    verdict.add_argument("--reviewer", required=True)
-    verdict.add_argument("--shot")
-    verdict.add_argument("--take", type=int)
-    verdict.add_argument("--preferred", type=int)
-    verdict.add_argument("--over", type=int)
-    verdict.add_argument("--animatic", action="store_true")
-    verdict.add_argument("--note", default="")
-    sub.add_parser("signals")
-    sub.add_parser("review-set")
+    judging_cli.add_parsers(sub)
     sub.add_parser("provenance").add_argument("job")
     ledger = sub.add_parser("ledger")
     ledger.add_argument("job")
@@ -207,18 +190,6 @@ def _takes(a: argparse.Namespace) -> int:
             readings = {k: v for k, v in (take.get("readings") or {}).items() if k != "readings"}
             print(f" {mark} {take['n']:>2} {state} seed {take['seed']:<11} {readings}")
     return 0
-
-
-def _bench(a: argparse.Namespace) -> int:
-    from . import bench
-
-    job = open_job(a.job)
-    found = bench.run(job, a.shot, bench.parse_models(a.models), a.takes)
-    print(found["sheet"] or "no take was made")
-    for take in found["takes"]:
-        print(f"judge it: kalainova verdict {job.id} accept|fix|reject --reviewer NAME "
-              f"--shot {a.shot} --take {take['n']}")  # fmt: skip
-    return 0 if found["takes"] and not found["failed"] else 1
 
 
 def _take(a: argparse.Namespace) -> int:
@@ -435,38 +406,6 @@ def _animatic(a: argparse.Namespace) -> int:
     return 0
 
 
-def _verdict(a: argparse.Namespace) -> int:
-    entry = verdicts.record(
-        open_job(a.job),
-        a.verdict,
-        reviewer=a.reviewer,
-        shot=a.shot,
-        note=a.note,
-        take=a.take,
-        preferred=a.preferred,
-        over=a.over,
-        animatic=a.animatic,
-    )
-    print(json.dumps(entry, ensure_ascii=False))
-    return 0
-
-
-def _signals(a: argparse.Namespace) -> int:
-    rows = verdicts.signals(home() / "jobs")
-    for row in rows:
-        print(
-            f"{row['signal']:<32} good {row['good']:>2}  bad {row['bad']:>2}  "
-            f"{row['separation']:>5}  {row['reads']}"
-        )
-    print(f"{len(rows)} readings" if rows else "no verdicts yet, so nothing can be said")
-    return 0
-
-
-def _review_set(a: argparse.Namespace) -> int:
-    print(verdicts.review_set(home() / "jobs"))
-    return 0
-
-
 def _provenance(a: argparse.Namespace) -> int:
     print(provenance.write(open_job(a.job)))
     return 0
@@ -486,9 +425,8 @@ def _ledger(a: argparse.Namespace) -> int:
 
 
 _NAMES = (
-    "animatic card shotplan takes bench take retake sheet findings filmstrip cutcheck "
-    "export timeline-import song song-video research clips dub verdict signals review-set "
-    "provenance ledger"
+    "animatic card shotplan takes take retake sheet findings filmstrip cutcheck "
+    "export timeline-import song song-video research clips dub provenance ledger"
 )
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     cmd: globals()[f"_{cmd.replace('-', '_')}"] for cmd in _NAMES.split()
@@ -497,4 +435,4 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
 
 def dispatch(a: argparse.Namespace) -> int | None:
     command = COMMANDS.get(a.cmd)
-    return command(a) if command else None
+    return command(a) if command else judging_cli.dispatch(a)

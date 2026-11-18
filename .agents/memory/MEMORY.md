@@ -20,3 +20,4 @@
 - [A falling test count is a failure](a-falling-test-count-is-a-failure.md) — a new file overwrote 26 tests and CI stayed green; compare the collected count, not only pass/fail
 - [A call on a clip just bought cannot be keyed by its bytes](a-call-on-a-clip-just-bought-cannot-be-keyed-by-its-bytes.md) — packages match inputs by bytes; a lip sync on a fresh clip would be refused after the video was paid; sign it as a counted allowance on the billed length
 - [A test that runs a studio command needs its own home](a-test-that-runs-a-studio-command-needs-its-own-home.md) — `kalainova limits` in a test with no KALAINOVA_HOME wrote limits.json into the public repo on every CI run
+- [Whole-frame motion is not a performance](whole-frame-motion-is-not-a-performance.md) — 0.09 read as static on the take whose head turned most; judge the person apart from the frame, rank only what preferences confirm
