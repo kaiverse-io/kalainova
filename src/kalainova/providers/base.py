@@ -39,6 +39,7 @@ from .contract import (
     SearchRequest,
     SeparateRequest,
     SfxRequest,
+    SingRequest,
     SongRequest,
     TextRequest,
     TranscribeRequest,
@@ -61,6 +62,7 @@ CAPABILITIES = (
     "sfx",
     "transcribe",
     "lipsync",
+    "sing",
     "separate",
     "graphics",
     "search",
@@ -145,26 +147,29 @@ class Provider:
         provider's default for a plain call is described."""
         name = model or self.default_model(capability)
         refs = config.reference_spec(self.name, capability, name)
-        plain = config.video_spec(self.name, name) if capability == "video" else {}
+        plain = (
+            config.video_spec(self.name, name)
+            if capability == "video"
+            else config.sing_spec(self.name, name)
+            if capability == "sing"
+            else {}
+        )
         sound = config.audio_spec(self.name, name) if capability in ("song", "music") else {}
         most = sound.get("max_sec")
         return Inputs(
-            references=int(refs.get("max_images") or 0),
+            references=int(refs.get("max_images") or plain.get("max_images") or 0),
             characters=int(refs["max_characters"]) if refs.get("max_characters") else None,
             start_with_references=bool(refs.get("start_image_param")),
             end_frame=bool(plain.get("end_image_param") or refs.get("end_image_param")),
-            seed=bool(plain.get("takes_seed", refs.get("takes_seed", True))),
+            seed=bool(plain.get("takes_seed", refs.get("takes_seed", capability != "sing"))),
             longest_sec=float(most) if most else None,
         )
 
     def models(self, capability: str) -> list[str]:
         """The models config/studio.yaml describes for this provider and capability."""
         tables = config.studio()
-        found = (
-            list((tables.get("video_models") or {}).get(self.name) or {})
-            if capability == "video"
-            else []
-        )
+        listed = {"video": "video_models", "sing": "sing_models"}.get(capability)
+        found = list((tables.get(listed) or {}).get(self.name) or {}) if listed else []
         found += list(
             ((tables.get("reference_models") or {}).get(self.name) or {}).get(capability) or {}
         )
@@ -211,6 +216,10 @@ class Provider:
 
     def lipsync(self, req: LipsyncRequest, ctx: Context) -> Result:
         return self._unsupported("lipsync")
+
+    def sing(self, req: SingRequest, ctx: Context) -> Result:
+        """A shot sung in one call, from its still and its line."""
+        return self._unsupported("sing")
 
     def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Split a mix into its vocals and everything else."""

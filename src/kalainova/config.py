@@ -98,6 +98,11 @@ def video_spec(provider: str, model: str) -> dict:
     return dict((studio().get("video_models", {}).get(provider, {})).get(model) or {})
 
 
+def sing_spec(provider: str, model: str) -> dict:
+    """How a model sings a shot in one call (a still and a line in), or {} if it is not listed."""
+    return dict((studio().get("sing_models", {}).get(provider, {})).get(model) or {})
+
+
 def profile(name: str) -> dict:
     return dict(studio().get("profiles", {}).get(name, {}))
 

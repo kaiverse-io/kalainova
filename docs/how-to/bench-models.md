@@ -38,3 +38,5 @@ kalainova verdict <job> accept|fix|reject --reviewer NAME --shot <shot> --take <
 ## Limits
 
 The motion reading says whether the clip moves, not whether it is good. Running the assets stage again with `--force` starts `takes.json` over, so judge and choose first. The sheet and clips stay on disk, and the ledger keeps every charge.
+
+A shot that sings (`Sings:` in a song video's shot list) is benched on the models under `sing_models`: each gets the shot's still and the same line of the vocal stem, and with `judges.lipsync` set each take is also scored on how its lips follow that line (ADR 0025).

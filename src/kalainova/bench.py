@@ -1,4 +1,6 @@
-"""A camera test: one shot made on several models, side by side, before a shoot.
+"""A camera test: one shot made on several models, side by side, before a shoot. A shot that sings
+is made on models that sing it from its still and its line (`sing_models`), the line the same for
+each, so the rows differ only in how each model sings.
 
 Every bench take goes through the router and the take store like any other take, so it carries its
 model, seed, cost, and how it read. It is marked as a bench take, which never replaces the take a
@@ -14,9 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from . import config, consistency, shotmake, shots, takes, timeline
+from .editor import singing
 from .jobfs import ContractError, Job
 from .providers import base, router
-from .providers.contract import Billable, Pin, VideoRequest
+from .providers.contract import Billable, Pin, Request, SingRequest, VideoRequest
 
 Say = Callable[[str], None]
 
@@ -36,20 +39,20 @@ def parse_models(text: str) -> list[str]:
     return found
 
 
-def _provider_of(job: Job, model: str) -> str:
-    """The first provider in the job's video list that names this model."""
-    names = config.preference("video", job.job)
+def _provider_of(job: Job, model: str, capability: str = "video") -> str:
+    """The first provider in the job's list for this capability that names this model."""
+    names = config.preference(capability, job.job)
     known: list[str] = []
     for name in names:
         try:
-            offered = base.get(name).models("video")
+            offered = base.get(name).models(capability)
         except KeyError:
             continue
         if model in offered:
             return name
         known += offered
     raise ContractError(
-        f"{job.id}: {model} is not under video_models for any provider this job uses; "
+        f"{job.id}: {model} is not under {capability}_models for any provider this job uses; "
         f"known: {', '.join(sorted(set(known))) or 'none'}"
     )
 
@@ -64,6 +67,11 @@ class _Setup:
     kw: shotmake.Held
     resolved: Any = None
     lock: dict[str, Any] | None = None
+    line: Path | None = None  # the shot's line of the vocal stem, when it sings
+
+    @property
+    def capability(self) -> str:
+        return "sing" if self.line else "video"
 
 
 def _setup(job: Job, shot: str) -> _Setup:
@@ -94,7 +102,10 @@ def _setup(job: Job, shot: str) -> _Setup:
     )
     prof = config.profile(data.get("profile") or "short-9x16")
     aspect = str(prof.get("aspect", "9:16"))
-    return _Setup(beat, float(span), still, prompt, aspect, kw, resolved, lock)
+    line = job.work / "beats" / f"{shot}.voice.wav" if beat.get("sings") else None
+    if line and shotmake.sung_line(job, beat, line) < singing.SUNG_MIN:
+        raise ContractError(f"{job.id}: {shot} is not sung over its span, so it has no line")
+    return _Setup(beat, float(span), still, prompt, aspect, kw, resolved, lock, line)
 
 
 def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> shotmake.Held:
@@ -106,7 +117,9 @@ def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> shotmake
     pin = Pin(provider=provider, model=model)
     if not setup.kw.references:
         return shotmake.Held(pin=pin)
-    if not base.get(provider).inputs("video", model).references:
+    if setup.line and base.get(provider).inputs("sing", model).references:
+        return shotmake.Held(setup.kw.references, pin)  # the still first, then the kit
+    if setup.line or not base.get(provider).inputs("video", model).references:
         say(f"{model} cannot take this shot's references, so it starts from the frame alone")
         return shotmake.Held(pin=pin)
     lock = dict(setup.lock or {})
@@ -118,8 +131,11 @@ def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> shotmake
     return shotmake.Held(held.references, pin)
 
 
-def conditioning(provider: str, model: str, held: shotmake.Held) -> str:
+def conditioning(provider: str, model: str, held: shotmake.Held, sings: bool = False) -> str:
     """What a bench take was given, in words, so takes with different inputs are not read alike."""
+    if sings:
+        pictures = f", {len(held.references)} kit picture(s)" if held.references else ""
+        return f"the still{pictures} and its line of the vocal"
     if not held.references:
         return "the start frame only"
     kit = len(held.references)
@@ -134,10 +150,10 @@ def estimate(job: Job, shot: str, models: list[str], count: int, say: Say = prin
     rows = []
     table = config.studio().get("prices") or {}
     for model in models:
-        provider = _provider_of(job, model)
+        provider = _provider_of(job, model, setup.capability)
         request = _request_for(setup, provider, model, say)
         asked = Billable(
-            capability="video",
+            capability=setup.capability,
             duration=setup.span,
             image=True,
             references=bool(request.references),
@@ -181,7 +197,7 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
             def make(
                 seed: int, dst: Path, request: shotmake.Held = request, row: Row = row
             ) -> tuple[Any, Any]:
-                clip = VideoRequest(
+                clip: Request = VideoRequest(
                     prompt=setup.prompt,
                     dst=dst,
                     duration=setup.span,
@@ -192,6 +208,17 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                     references=request.references,
                     pin=request.pin,
                 )
+                if setup.line:  # the same line for every model, sung in the call that makes it
+                    clip = SingRequest(
+                        prompt=setup.prompt,
+                        still=setup.still,
+                        audio=setup.line,
+                        dst=dst,
+                        aspect=setup.aspect,
+                        references=request.references,
+                        seed=seed,
+                        pin=request.pin,
+                    )
                 return router.generate(job, clip, only=[row.provider], note=f"bench {row.model}")
 
             try:
@@ -201,12 +228,16 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                     n,
                     suffix=".mp4",
                     make=make,
-                    assess=takes.assess_clip,
+                    assess=shotmake.judged_sung(takes.assess_clip, setup.line)
+                    if setup.line
+                    else takes.assess_clip,
                     prompt=setup.prompt,
                     seed=takes.seed_for(setup.prompt, i),
                     extra={
                         "bench": True,
-                        "conditioning": conditioning(row.provider, row.model, request),
+                        "conditioning": conditioning(
+                            row.provider, row.model, request, bool(setup.line)
+                        ),
                     },
                 )
             except RuntimeError as exc:

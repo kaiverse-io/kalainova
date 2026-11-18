@@ -37,6 +37,7 @@ from kalainova.providers.contract import (
     SearchRequest,
     SeparateRequest,
     SfxRequest,
+    SingRequest,
     SongRequest,
     TextRequest,
     TranscribeRequest,
@@ -118,6 +119,9 @@ def _ask(capability: str, folder: Path, still: Path, clip: Path, wav: Path) -> R
         "song": SongRequest(lyrics="la la", dst=folder / "song.wav", style="pop", duration=10.0),
         "transcribe": TranscribeRequest(src=wav),
         "lipsync": LipsyncRequest(video=clip, audio=wav, dst=folder / "synced.mp4"),
+        "sing": SingRequest(
+            prompt="she sings", still=still, audio=wav, dst=folder / "sung.mp4", aspect="9:16"
+        ),
         "separate": SeparateRequest(
             src=wav, vocals=folder / "vocals.wav", rest=folder / "rest.wav"
         ),

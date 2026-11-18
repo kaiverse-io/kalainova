@@ -1,4 +1,5 @@
-"""A character who sings: the shot list marks the shot, the song's vocal stem drives the mouth."""
+"""A character who sings: the shot list marks the shot, and the song's vocal stem sings it, in the
+one call that makes the clip. Nothing is lip-synced afterwards."""
 
 from __future__ import annotations
 
@@ -39,8 +40,8 @@ def test_a_singing_shot_is_lip_synced_over_its_own_span_of_the_piece(tmp_path):
         )
 
 
-def test_the_estimate_counts_a_lip_sync_for_each_singing_shot(tmp_path, monkeypatch):
-    prices = {"video": 1.0, "lipsync": 0.25}
+def test_the_estimate_prices_a_singing_shot_as_one_sung_call(tmp_path, monkeypatch):
+    prices = {"video": 1.0, "sing": 0.25}
     monkeypatch.setattr(
         router, "price", lambda job, asked, **k: ("fake", prices[asked.capability], [])
     )
@@ -50,11 +51,13 @@ def test_the_estimate_counts_a_lip_sync_for_each_singing_shot(tmp_path, monkeypa
         _parent(tmp_path), spans, ["video", "video"], 0.5, said.append, takes_each=1,
         sings=[True, False],
     )  # fmt: skip
-    assert total == pytest.approx(2.25)
-    assert "$0.25 to lip-sync 1 singing" in said[0]
+    assert total == pytest.approx(1.25), "the singing shot is one sung call, not a clip and a sync"
+    assert "$0.25 of it for 1 singing shot(s), each sung in one call" in said[0]
 
 
-def test_a_song_video_lip_syncs_its_singing_shots_to_the_songs_vocal(tmp_path, monkeypatch, studio):
+def test_a_song_video_sings_each_singing_shot_from_its_line_in_one_call(
+    tmp_path, monkeypatch, studio
+):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
     (tmp_path / "jobs").mkdir(parents=True, exist_ok=True)
     (tmp_path / "streams").mkdir(parents=True, exist_ok=True)
@@ -82,11 +85,16 @@ def test_a_song_video_lip_syncs_its_singing_shots_to_the_songs_vocal(tmp_path, m
     assert sung and all(b["on_camera"] and b["cast"] == ["lead"] for b in sung)
 
     data = json.loads((child.folder / "job.json").read_text())
-    data["providers"] = {**(data.get("providers") or {}), "lipsync": ["fake"]}
+    data["providers"] = {**(data.get("providers") or {}), "sing": ["fake"]}
     (child.folder / "job.json").write_text(json.dumps(data))
     assets.run(Job(child.folder))
-    syncs = [c for c in studio.calls if c["capability"] == "lipsync"]
-    assert len(syncs) == len(sung)
+    sang = [c for c in studio.calls if c["capability"] == "sing"]
+    ids = {b["id"] for b in sung}
+    assert {c["audio"].name.split(".")[0] for c in sang} == ids, "each sung from its own line"
+    assert all(c["still"].name == c["audio"].name.replace("voice.wav", "still.png") for c in sang)
+    plain = [c for c in studio.calls if c["capability"] == "video"]
+    assert not [c for c in plain if c["image"].name.split(".")[0] in ids], "none made unsung"
+    assert not [c for c in studio.calls if c["capability"] == "lipsync"], "no mouth repainted"
     stem, _, rate = media.decode_stereo(child.work / "vocals.wav")
     for beat in sung:  # each line is cut from where its shot sits on the piece's clock
         start, end = beat["sings"]["start_sec"], beat["sings"]["end_sec"]

@@ -149,19 +149,11 @@ def test_an_unsigned_stem_transcript_leaves_the_mixs_standing(tmp_path, monkeypa
     assert "not heard off the vocal stem" in capsys.readouterr().err
 
 
-@needs_ffmpeg
-def test_a_singing_shot_over_silence_pays_for_no_lip_sync(tmp_path):
-    job = make_job(tmp_path, media=["video"])
-    _stem(job.work / "vocals.wav", 6.0, [(4.0, 6.0)])
-    (job.work / "beats").mkdir(parents=True, exist_ok=True)
-    beat = {"id": "s01", "sings": {"start_sec": 0.0, "end_sec": 3.0}}
-
-    def never(*a, **k):
-        raise AssertionError("a lip sync was paid for over silence")
-
-    assert shotmake.lip_sync(job, beat, tmp_path / "clip.mp4", 3.0, never) == {
-        "lipsync_skipped": "no singing in the vocal stem over its span"
-    }
+def test_a_sung_shot_is_never_lip_synced_after_and_a_spoken_line_on_camera_still_is():
+    sung = {"id": "s01", "on_camera": True, "sings": {"start_sec": 0.0, "end_sec": 3.0}}
+    assert not shotmake.synced_after(sung), "it was sung in the call that made it"
+    assert shotmake.synced_after({"id": "s02", "on_camera": True}), "a line spoken on camera"
+    assert not shotmake.synced_after({"id": "s03"})
 
 
 @needs_ffmpeg
@@ -219,3 +211,45 @@ def test_a_short_with_no_one_singing_on_screen_is_still_cut_where_the_words_are_
     )
     assert any("heard sung" in line for line in said)
     assert not any(b.get("sings") for b in child.read("script_packet")["beats"])
+
+
+SAYS_IN_SYNC = """
+import argparse, json, pathlib, subprocess
+p = argparse.ArgumentParser()
+p.add_argument("--out", required=True)
+p.add_argument("files", nargs="+")
+a = p.parse_args()
+def has_sound(f):
+    probe = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+             "-of", "csv=p=0", f]
+    return bool(subprocess.run(probe, capture_output=True, text=True).stdout.strip())
+said = {f: {"confidence": 7.5, "offset": 0.0} for f in a.files if has_sound(f)}
+pathlib.Path(a.out).write_text(json.dumps(said))
+"""
+
+
+@needs_ffmpeg
+def test_a_sung_take_is_judged_with_its_own_line_laid_on_its_picture(tmp_path, monkeypatch):
+    import sys
+
+    from kalainova import config
+
+    script = tmp_path / "syncnet.py"
+    script.write_text(SAYS_IN_SYNC)
+    judge = {"name": "syncnet", "command": [sys.executable, str(script)], "rank_by": "confidence"}
+    monkeypatch.setitem(config.studio(), "judges", {"lipsync": [judge]})
+    line = _stem(tmp_path / "s01.voice.wav", 3.0, [(0.0, 3.0)])
+    clip = tmp_path / "s01.take-00.mp4"
+    from kalainova import media
+
+    media.run(
+        ["-f", "lavfi", "-i", "testsrc2=s=320x180:d=3:r=24", "-pix_fmt", "yuv420p", str(clip)]
+    )
+    readings, ok = shotmake.judged_sung(lambda p: ({"shot_motion": 0.4}, True), line)(clip)
+    assert ok and readings["shot_motion"] == 0.4
+    assert readings["judged"] == {"syncnet.confidence": 7.5, "syncnet.offset": 0.0}
+    assert readings["rank"] == 7.5, "the judge ranks sung takes; it never blocks one"
+    assert clip.with_suffix(".sync.mp4").exists(), "a silent take is heard with the line on it"
+    monkeypatch.setitem(config.studio(), "judges", {"lipsync": []})
+    plain = shotmake.judged_sung(lambda p: ({}, True), line)
+    assert plain(clip) == ({}, True), "with no judge set, nothing is judged"

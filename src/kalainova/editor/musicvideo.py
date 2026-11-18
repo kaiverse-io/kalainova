@@ -130,7 +130,7 @@ def beats_for(
                 raise ContractError(
                     f"s{n:02d}: a singing shot needs a character; open the video on a stream"
                 )
-            beat["on_camera"] = True  # lip-synced, as a spoken line on camera is
+            beat["on_camera"] = True  # sung from its line of the stem, in the call that makes it
             beat["sings"] = {"start_sec": round(at, 3), "end_sec": round(at + length, 3)}
         shot: dict[str, str] = {}
         if span.get("angle") and not shot_list:
@@ -171,7 +171,7 @@ def estimate(
     """Shots, seconds, and the price of the moving ones, said before any call. Refuses past the cap.
     Each clip is priced at its generated length: the slot plus a beat to trim from, times the takes
     every moving shot is planned to get (a paid model makes exactly those). A shot that sings is
-    lip-synced once for each of those takes, at the same length."""
+    one call to a model that sings it from its still and its line, at the line's length."""
     each = takes_each if takes_each is not None else takes.counts({})[0]
     held = refs if refs is not None else [True] * len(spans)  # a character in frame, by default
     sung = sings if sings is not None else [False] * len(spans)
@@ -179,27 +179,22 @@ def estimate(
         (s, r, g) for s, k, r, g in zip(spans, kinds, held, sung, strict=True) if k == "video"
     ]
     seconds = sum(s["end"] - s["start"] for s in spans)
-    total, unpriced, needs, synced = 0.0, False, set(), 0.0
+    total, unpriced, needs, sung_cost = 0.0, False, set(), 0.0
     pin = Pin(provider=only[0], model=model) if model and only else None  # the stream's own pin
     for span, with_refs, sung_shot in moving:  # B-roll goes to the plain model, at its own price
-        length = span["end"] - span["start"] + pad
-        asked = Billable(capability="video", duration=length, image=True, references=with_refs)
-        quote = router.price(job, asked, only=only, pin=pin if with_refs else None)
+        line = span["end"] - span["start"]
+        if sung_shot:  # its line is exactly its span: the sung shot runs as long as what it sings
+            quote = router.price(job, Billable(capability="sing", duration=line, image=True))
+        else:
+            length = line + pad
+            asked = Billable(capability="video", duration=length, image=True, references=with_refs)
+            quote = router.price(job, asked, only=only, pin=pin if with_refs else None)
         if quote is None or quote[1] is None:
             unpriced = True
-        else:
-            total += quote[1] * each
-            needs |= {f"{quote[0]} needs {key}" for key in quote[2]}
-        sync = None
-        if sung_shot:  # the sync is billed on the clip the model returns, at its own length
-            made = router.billed_seconds(job, asked, only=only, pin=pin if with_refs else None)
-            sync = router.price(job, Billable(capability="lipsync", duration=made))
-        if sung_shot and (sync is None or sync[1] is None):
-            unpriced = True
-        elif sync is not None and sync[1] is not None:
-            synced += sync[1] * each
-            needs |= {f"{sync[0]} needs {key}" for key in sync[2]}
-    total += synced
+            continue
+        total += quote[1] * each
+        sung_cost += quote[1] * each if sung_shot else 0.0
+        needs |= {f"{quote[0]} needs {key}" for key in quote[2]}
     stills = 0.0
     for _ in spans if image_only else []:  # every shot starts from a rented still
         still = router.price(job, Billable(capability="image"), only=image_only)
@@ -212,7 +207,12 @@ def estimate(
         f"{len(spans)} shots, {seconds:.1f}s, {len(moving)} moving, {each} take(s) each: "
         f"about ${total:.2f}"
         + (f", ${stills:.2f} of it for a still a shot" if stills else "")
-        + (f", ${synced:.2f} to lip-sync {sum(g for *_, g in moving)} singing" if synced else "")
+        + (
+            f", ${sung_cost:.2f} of it for {sum(g for *_, g in moving)} singing shot(s), each sung"
+            " in one call"
+            if sung_cost
+            else ""
+        )
         + (" (some shots have no priced provider, so the total is low)" if unpriced else "")
         + (f"; before the paid run, {', '.join(sorted(needs))}" if needs else "")
     )
@@ -375,7 +375,7 @@ def build(
     sings = [_sings(shot_list, n, kinds) for n in range(len(spans))]
     if any(sings) and not stem.is_file():
         raise ContractError(
-            f"{job.id}: a singing shot is lip-synced to the song's vocal, and the song has no vocal"
+            f"{job.id}: a singing shot is sung from the song's vocal, and the song has no vocal"
             f" stem ({VOCALS}); list a separate provider in its job and make the song"
         )
     cost = estimate(
