@@ -158,6 +158,22 @@ def _request_for(setup: _Setup, provider: str, model: str, say: Say) -> shotmake
     return shotmake.Held(held.references, pin)
 
 
+def settings(provider: str, model: str, line: float) -> str:
+    """What else a sung row was given that differs between rows: its tier, any padding, and
+    whether the still was its first frame, so rows are not read as alike when they were not."""
+    spec = config.sing_spec(provider, model) or {}
+    said = []
+    tier = (spec.get("extra") or {}).get("resolution")
+    if tier:
+        said.append(f"at {tier}")
+    least = float(spec.get("min_audio_sec") or 0)
+    if least > line:
+        said.append(f"the line padded to {least:g} s and cut back")
+    if spec.get("images_param"):
+        said.append("the still as a reference, not a fixed first frame")
+    return "".join(f", {part}" for part in said)
+
+
 def conditioning(provider: str, model: str, held: shotmake.Held, sings: bool = False) -> str:
     """What a bench take was given, in words, so takes with different inputs are not read alike."""
     if sings:
@@ -290,7 +306,12 @@ def run(job: Job, shot: str, models: list[str], count: int = 1, say: Say = print
                             f", then its mouth repainted to the line by {row.repaint}"
                             if row.repaint
                             else ""
-                        ),  # fmt: skip
+                        )
+                        + (
+                            settings(row.provider, row.model, media.duration(setup.line))
+                            if setup.line and not row.repaint
+                            else ""
+                        ),
                     },
                 )
             except RuntimeError as exc:

@@ -143,6 +143,7 @@ prices:
     minimax/h3-max/lip-sync/image-to-video: {per_sec: 0.16, checked: "fal's model page 2026-11-18: $0.05 480P, $0.08 768P, $0.16 1080P, $0.32 2K"}
     heygen/avatar-6/image-to-video: {per_sec: 0.10, checked: "fal's model page 2026-11-18: $0.10 1080p, $0.145 2K"}
     lightricks/ltx-2.5/audio-to-video/pro: {per_sec: 0.17, checked: "fal's model page 2026-11-18: $0.17 a second of input audio at 1080p"}
+    fal-ai/creatify/aurora: {per_sec: 0.14, checked: "fal's model page 2026-11-18: $0.07 480p, $0.14 720p, whole seconds"}
     bytedance/seedance-2.5/reference-to-video: {per_sec: 1.04}   # ESTIMATE: $0.0214 per 1,000 tokens, about 48,600 tokens a second at 1080p
     bytedance/seedance-2.0/reference-to-video: {per_sec: 0.68}   # ESTIMATE: $0.014 per 1,000 tokens, about 48,600 tokens a second at 1080p
     motion: {cost_usd: 0.02}
@@ -355,6 +356,10 @@ sing_models:
       image_param: image_url
       audio_param: audio_url
       aspect_param: aspect_ratio
+    fal-ai/creatify/aurora:              # still and line, for speaking or singing; 720p at most on fal
+      image_param: image_url
+      audio_param: audio_url
+      extra: {resolution: "720p"}
     # Seedance's partner filter refuses a photoreal face it reads as a real person (422,
     # content_policy_violation, nothing billed), so it suits a stylised character, not a photoreal one.
     bytedance/seedance-2.5/reference-to-video:   # as 2.0, with more references and up to 30 s: VERIFY lips
@@ -400,6 +405,9 @@ identity:
 #       command: [~/tools/syncnet-env/bin/python, src/kalainova/providers/runners/syncnet_run.py,
 #                 --repo, ~/tools/syncnet-src]
 #       rank_by: confidence
+#     - name: mouth          # Apache-2.0 (MediaPipe face landmarker): the mouth's opening against the
+#       command: [~/tools/mouth-env/bin/python,   # line's loudness; best correlation and its lag
+#                 src/kalainova/providers/runners/mouth_run.py, --model, ~/tools/face_landmarker.task]
 judges:
   song: []
   lipsync: []

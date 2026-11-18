@@ -218,3 +218,20 @@ def test_a_repainted_take_is_the_plain_clip_with_its_mouth_redrawn_to_the_line(
     assert res.cost == pytest.approx(0.95), "one take carries both calls' cost"
     assert res.model == "maker/o3+sync/v3" and res.seed == 7 and res.sent.start_frame is True
     assert provider == "painter"
+
+
+def test_a_sung_rows_tier_padding_and_first_frame_are_said(monkeypatch):
+    table = {
+        "sing_models": {
+            "fal": {
+                "pad/five": {"min_audio_sec": 5, "extra": {"resolution": "480P"}},
+                "refs/only": {"images_param": "reference_image_urls"},
+                "plain/one": {},
+            }
+        }
+    }
+    monkeypatch.setattr(config, "studio", lambda: table)
+    said = bench.settings("fal", "pad/five", 3.82)
+    assert said == ", at 480P, the line padded to 5 s and cut back"
+    assert bench.settings("fal", "refs/only", 3.82).endswith("not a fixed first frame")
+    assert bench.settings("fal", "plain/one", 3.82) == ""
