@@ -319,6 +319,8 @@ sing_models:
       image_param: image_url
       audio_param: audio_url
       aspect_param: aspect_ratio
+    # Seedance's partner filter refuses a photoreal face it reads as a real person (422,
+    # content_policy_violation, nothing billed), so it suits a stylised character, not a photoreal one.
     bytedance/seedance-2.5/reference-to-video:   # as 2.0, with more references and up to 30 s: VERIFY lips
       images_param: image_urls
       image_tag: "@Image{n}"
