@@ -446,6 +446,7 @@ def still_judge_refusal(job: Job, beat: Fields, still: Path) -> str | None:
     ask = JudgeRequest if router.available(job, "judge") else TextRequest
     bid = beat["id"]
     cue = f"Beat {bid}: {beat.get('text', '')}. Visual cue: {beat.get('visual_cue', '')}"
+    cue += ". This shot sings, so the mouth must be in full view" if beat.get("sings") else ""
     try:
         from .plan import extract_json
 
@@ -461,12 +462,8 @@ def still_judge_refusal(job: Job, beat: Fields, still: Path) -> str | None:
         print(f"{job.id}: still judge error on {bid}: {exc}", file=sys.stderr)
         return None
 
-    is_bad = (
-        data.get("passed") is False
-        or data.get("anatomy_ok") is False
-        or data.get("text_ok") is False
-        or data.get("cue_ok") is False
-    )
+    said_no = ("passed", "anatomy_ok", "text_ok", "cue_ok", "mouth_ok")  # a mouth hidden mismatches
+    is_bad = any(data.get(key) is False for key in said_no)
     has_region = bool(data.get("region"))
     if is_bad and has_region:
         note = str(data.get("note") or f"still {bid} flagged by judge")

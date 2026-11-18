@@ -283,3 +283,35 @@ def test_a_bench_rehearsal_names_its_shot_and_at_least_two_models():
         rehearse.bench_asked("s00", None)
     with pytest.raises(ContractError, match="at least two models"):
         rehearse.bench_asked("s00", "a")
+
+
+def test_a_singing_shot_starts_on_a_mouth_in_full_view_and_a_hidden_one_is_flagged(
+    tmp_path, monkeypatch
+):
+    import json as _json
+
+    from kalainova import preproduction, shots
+
+    sings = {"start_sec": 0.0, "end_sec": 3.8}
+    sung = {"id": "s00", "visual_cue": "front, chest up: she sings", "text": "", "sings": sings}
+    told = shotmake.picture_prompt(None, {"beats": [sung]}, sung, {"brief": {}})
+    assert told.endswith(shots.MOUTH_CLEAR)
+    plain = {"id": "s01", "visual_cue": "hands on the faders", "text": ""}
+    assert shots.MOUTH_CLEAR not in shotmake.picture_prompt(None, {"beats": [plain]}, plain, {})
+
+    asked: list[str] = []
+
+    def judged(_job, request, **_kw):
+        asked.append(request.prompt)
+        said = {"passed": True, "mouth_ok": False, "region": [0.3, 0.4, 0.5, 0.6],
+                "note": "a microphone covers her mouth"}  # fmt: skip
+        return None, type("Reply", (), {"text": _json.dumps(said)})()
+
+    job = make_job(tmp_path)
+    monkeypatch.setattr(preproduction.router, "available", lambda *_: True)
+    monkeypatch.setattr(preproduction.router, "generate", judged)
+    refusal = preproduction.still_judge_refusal(
+        job, {**sung, "visual_kind": "video"}, tmp_path / "s00.png"
+    )
+    assert refusal and "microphone covers her mouth" in refusal
+    assert "This shot sings, so the mouth must be in full view" in asked[0]

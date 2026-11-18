@@ -73,10 +73,13 @@ def style(job: Fields) -> str:
 
 
 def picture_prompt(resolved: Any, packet: Fields, beat: Fields, data: Fields) -> str:
-    """What a shot's first frame shows. A stream job's kits say it, otherwise the script does."""
+    """What a shot's first frame shows. A stream job's kits say it, otherwise the script does. A
+    shot that sings starts on a mouth in full view, since the voice has to move it."""
     if resolved:
-        return str(consistency.shot_prompt(resolved, beat, style(data)))
-    return str(shots.still_prompt(packet, beat, style(data)))
+        said = consistency.shot_prompt(resolved, beat, style(data))
+    else:
+        said = shots.still_prompt(packet, beat, style(data))
+    return f"{said} {shots.MOUTH_CLEAR}" if beat.get("sings") else str(said)
 
 
 def shot_kw(
