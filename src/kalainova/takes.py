@@ -90,8 +90,12 @@ def _score(take: Take) -> float:
 
 
 def _best(takes: list[Take]) -> int:
+    return int(best(takes)["n"])
+
+
+def best(takes: list[Take]) -> Take:
     """Of the takes that pass, the one a judge ranks highest, else the first; when none passes,
-    the one closest to passing.
+    the one closest to passing. The same rule chooses between the takes of several jobs.
 
     Passing is a floor, not a ranking: more motion is not a better shot, so the readings never
     pick between takes that both pass. A learned judge (bar/judges.py) can, and its score is kept
@@ -101,8 +105,8 @@ def _best(takes: list[Take]) -> int:
     takes = [t for t in takes if not t.get("bench")] or takes
     passing = [t for t in takes if t["ok"]]
     if passing:
-        return int(min(passing, key=lambda t: (-_rank(t), t["n"]))["n"])
-    return int(max(takes, key=_score)["n"])
+        return min(passing, key=lambda t: (-_rank(t), t["n"]))
+    return max(takes, key=_score)
 
 
 def _rank(take: Take) -> float:

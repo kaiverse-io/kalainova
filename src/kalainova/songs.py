@@ -8,7 +8,6 @@ person's choice stands.
 
 from __future__ import annotations
 
-import difflib
 import json
 import re
 import sys
@@ -21,6 +20,8 @@ from . import captions, config, media, render, takes, writers
 from .bar import judges
 from .bar import song as musicbar
 from .bar.readings import summarise
+from .editor.singing import sounding_span
+from .editor.singing import timed_lines as timed_lines
 from .jobfs import ContractError, Job
 from .providers import router
 from .providers.contract import Pin, SeparateRequest, SongRequest, TranscribeRequest
@@ -40,8 +41,6 @@ IMITATION = re.compile(
 )
 FADE_SEC = 3.0
 CAPTION_RATE = 24.0
-INTRO_GUARD_SEC = 0.5
-LEAST_LINE_SEC = 0.8
 SECTION_NAMES = {"pre-chorus": "Pre-Chorus"}
 
 
@@ -74,9 +73,9 @@ def problems(song: Song) -> list[str]:
     return found
 
 
-def _heard(job: Job, path: Path) -> list[dict[str, Any]] | None:
+def _heard(job: Job, path: Path, saved: Path | None = None) -> list[dict[str, Any]] | None:
     """What a listener would pick out, kept with the take. None when nothing can transcribe here."""
-    saved = path.with_suffix(".heard.json")
+    saved = saved or path.with_suffix(".heard.json")
     if saved.exists():
         return list(json.loads(saved.read_text()))
     if not router.available(job, "transcribe"):
@@ -125,112 +124,13 @@ def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
         return router.generate(job, take, note="song", only=[pin.provider] if pin else None)
 
     def assess(path: Path) -> tuple[dict[str, Any], bool]:
-        report = musicbar.measure(path, song, _heard(job, path))
-        misses = [r["id"] for r in report["readings"] if not r["ok"]]
-        return {
-            "score": musicbar.score(report),
-            "misses": misses,
-            "readings": report["readings"],
-            **judges.of_take("song", path),  # ranks takes that pass; never blocks
-        }, not misses
+        found, ok = musicbar.assessed(path, song, _heard(job, path))
+        return {**found, **judges.of_take("song", path)}, ok  # a judge ranks; it never blocks
 
     counts = {**SAFE_TAKES, **{k: brief[k] for k in SAFE_TAKES if k in brief}}
     return takes.make_until_good(
         job, SHOT, counts, suffix=".wav", make=make, assess=assess, prompt=f"{style}\n{lyrics}"
     )
-
-
-def _sounding_span(path: Path) -> tuple[float, float]:
-    """Where the sound starts and stops, leaving out silence at either end."""
-    left, right, sr = media.decode_stereo(path)
-    level = np.abs((left + right) / 2)
-    found = np.flatnonzero(level > media.SOUND_FLOOR)
-    if not found.size:
-        return 0.0, float(level.size / max(sr, 1))
-    return float(found[0] / sr), float(found[-1] / sr)
-
-
-def _estimated_cues(lines: list[str], start: float, end: float) -> list[Cue]:
-    """No transcript: spread the lines through the track by how many words each has."""
-    weights = [max(len(line.split()), 1) for line in lines]
-    span = max(end - start - INTRO_GUARD_SEC, LEAST_LINE_SEC * len(lines))
-    at = start + INTRO_GUARD_SEC
-    cues = []
-    for line, weight in zip(lines, weights, strict=True):
-        length = span * weight / sum(weights)
-        cues.append({"start_sec": round(at, 3), "end_sec": round(at + length, 3), "text": line})
-        at += length
-    return cues
-
-
-def _tokens_by_line(lines: list[str]) -> tuple[list[str], list[int]]:
-    tokens, owners = [], []
-    for n, line in enumerate(lines):
-        for token in re.findall(r"[a-z0-9']+", line.lower()):
-            tokens.append(token)
-            owners.append(n)
-    return tokens, owners
-
-
-def _matched_times(
-    lines: list[str], heard: list[dict[str, Any]]
-) -> dict[int, list[tuple[float, float]]]:
-    """Each line's words, matched in order against what was heard."""
-    tokens, owners = _tokens_by_line(lines)
-    spoken = [re.sub(r"[^a-z0-9']", "", str(w.get("text", "")).lower()) for w in heard]
-    matcher = difflib.SequenceMatcher(a=tokens, b=spoken, autojunk=False)
-    times: dict[int, list[tuple[float, float]]] = {}
-    for block in matcher.get_matching_blocks():
-        for k in range(block.size):
-            word = heard[block.b + k]
-            spot = (float(word["start_sec"]), float(word["end_sec"]))
-            times.setdefault(owners[block.a + k], []).append(spot)
-    return times
-
-
-def _fill_unheard(cues: list[Cue | None], lines: list[str], start: float, end: float) -> list[Cue]:
-    """A line the transcript missed sits between its heard neighbours."""
-    out: list[Cue] = []
-    for n, cue in enumerate(cues):
-        if cue:
-            out.append(cue)
-            continue
-        before = out[-1]["end_sec"] if out else start
-        after = next((c["start_sec"] for c in cues[n + 1 :] if c), end)
-        out.append(
-            {
-                "start_sec": round(float(before), 3),
-                "end_sec": round(float(max(after, before + LEAST_LINE_SEC)), 3),
-                "text": lines[n],
-            }
-        )
-    return out
-
-
-def timed_lines(
-    path: Path, song: Song, heard: list[dict[str, Any]] | None
-) -> tuple[list[Cue], str]:
-    """Each lyric line with its time, and whether that time was heard or estimated."""
-    lines = musicbar.lyric_lines(song)
-    start, end = _sounding_span(path)
-    if not lines:
-        return [], "none"
-    if not heard:
-        return _estimated_cues(lines, start, end), "estimated"
-    times = _matched_times(lines, heard)
-    if not times:
-        return _estimated_cues(lines, start, end), "estimated"
-    cues: list[Cue | None] = [
-        {
-            "start_sec": round(times[n][0][0], 3),
-            "end_sec": round(times[n][-1][1], 3),
-            "text": lines[n],
-        }
-        if n in times
-        else None
-        for n in range(len(lines))
-    ]
-    return _fill_unheard(cues, lines, start, end), "heard"
 
 
 def _lrc_stamp(seconds: float) -> str:
@@ -257,7 +157,7 @@ def _finish(job: Job, take_file: Path, song: Song) -> Path:
     prof = config.profile("song")
     target = float(prof.get("target_lufs", -14))
     ceiling = float(prof.get("true_peak_dbtp_max", -1))
-    _, end = _sounding_span(take_file)
+    _, end = sounding_span(take_file)
     grid_path = take_file.with_suffix(".grid.json")
     if grid_path.exists():
         grid = json.loads(grid_path.read_text())
@@ -350,6 +250,8 @@ def run(job: Job) -> Path:
     cues, timing = timed_lines(final, song, _heard(job, take_file))
     _write_lyric_files(job, song, cues)
     stems = _stems(job, final)
+    if stems:
+        _sung_words(job, job.work / stems["vocals"], take_file)
     released = release.for_job(job, song, lyrics_text(song))
     job.write(
         "asset_manifest",
@@ -423,6 +325,17 @@ def checks(job: Job) -> tuple[list[dict[str, str]], dict[str, Any]]:
         }
         for r in readings
     ]
+    take = takes.chosen(job, SHOT)
+    off_stem = (
+        take is not None and (job.work / take["file"]).with_suffix(musicbar.STEM_HEARD).exists()
+    )
+    out.append(
+        {
+            "id": "song.lyrics_heard_from",
+            "status": "pass" if off_stem else "warn",
+            "detail": "the vocal stem" if off_stem else "the full mix; the vocal stem hears more",
+        }
+    )
     out.append(
         {
             "id": "song.taste",
@@ -433,12 +346,21 @@ def checks(job: Job) -> tuple[list[dict[str, str]], dict[str, Any]]:
     return out, summarise(readings)
 
 
+def _sung_words(job: Job, stem: Path, take_file: Path) -> None:
+    """The lyrics heard again off the voice alone: a transcriber hears far more of a song without
+    its band, so the finished song's lyric readings are read from this when there is one."""
+    try:
+        _heard(job, stem, take_file.with_suffix(musicbar.STEM_HEARD))
+    except ContractError as exc:  # a paid call no one signed off: the mix's transcript stands
+        print(f"{job.id}: the lyrics were not heard off the vocal stem: {exc}", file=sys.stderr)
+
+
 def _heard_of_chosen(job: Job) -> list[dict[str, Any]] | None:
+    """What was heard of the chosen take, off its vocal stem when that was transcribed."""
     take = takes.chosen(job, SHOT)
     if not take:
         return None
-    saved = (job.work / take["file"]).with_suffix(".heard.json")
-    return list(json.loads(saved.read_text())) if saved.exists() else None
+    return musicbar.saved_heard(job.work / take["file"])
 
 
 # ------------------------------------------------------------------ a video for it
@@ -446,7 +368,7 @@ def video_job(
     job: Job,
     new_id: str,
     *,
-    profile: str = "landscape",
+    profile: str | None = None,
     still_only: bool = False,
     excerpt: dict[str, Any] | None = None,
     phrase_bars: int | None = None,
@@ -465,9 +387,10 @@ def video_job(
     if not final.exists():
         raise ContractError(f"{job.id}: make the song first")
     manifest = job.read("asset_manifest")
+    heard = _heard_of_chosen(job)
     cues = [
         {"start_sec": c["start_sec"], "end_sec": c["end_sec"], "text": c["text"]}
-        for c in timed_lines(final, song, _heard_of_chosen(job))[0]
+        for c in timed_lines(final, song, heard)[0]
     ]
     return musicvideo.build(
         job,
@@ -477,11 +400,12 @@ def video_job(
         words=list(manifest.get("words") or []),
         final=final,
         manifest=manifest,
-        profile=profile,
+        profile=profile or ("short-9x16" if excerpt else "landscape"),  # an excerpt is a short
         still_only=still_only,
         excerpt=excerpt,
         phrase_bars=phrase_bars,
         stream=stream,
         cast=cast,
         shot_list=musicvideo.read_shots(shots) if shots else None,
+        sung_words=heard,
     )

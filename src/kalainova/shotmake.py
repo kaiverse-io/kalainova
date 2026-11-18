@@ -16,6 +16,7 @@ from typing import Any
 
 from . import config, consistency, media, shots, takes, trace
 from .blobstore import sha256_file
+from .editor import singing
 from .jobfs import ContractError, Job
 from .providers import base, router
 from .providers.contract import (
@@ -269,8 +270,9 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
     sync is kept beside the synced one. A shot that sings takes its line from the song's vocal stem,
     over the span the shot is on screen."""
     line = job.work / "beats" / f"{beat['id']}.voice.wav"
-    if beat.get("sings"):
-        sung_line(job, beat, line)
+    if beat.get("sings") and sung_line(job, beat, line) < singing.SUNG_MIN:
+        print(f"{job.id}: {beat['id']}: no singing in its span, so no lip sync is paid for")
+        return {"lipsync_skipped": "no singing in the vocal stem over its span"}
     length = media.duration(clip)
     padded = line.with_suffix(".padded.wav")
     media.run(["-i", str(line), "-af", "apad", "-t", f"{length:.3f}", str(padded)])
@@ -282,14 +284,15 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
     return {"lipsync_model": res.model, "presync_path": f"beats/{before.name}"}
 
 
-def sung_line(job: Job, beat: Fields, dst: Path) -> None:
+def sung_line(job: Job, beat: Fields, dst: Path) -> float:
     """A singing shot's line: the vocal stem from where the shot starts on the piece's clock, so
-    the mouth moves with what is heard over it."""
+    the mouth moves with what is heard over it. Returns how much of the span has a voice."""
     stem = job.work / "vocals.wav"
     if not stem.is_file():
         raise ContractError(f"{job.id}: {beat['id']} sings, and the job has no vocal stem")
     start, end = float(beat["sings"]["start_sec"]), float(beat["sings"]["end_sec"])
     media.run(["-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(stem), str(dst)])
+    return singing.share(singing.voiced(stem), start, end)
 
 
 def clip_ambience(

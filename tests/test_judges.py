@@ -117,6 +117,7 @@ def test_song_takes_already_made_are_judged_together_and_kept(tmp_path, studio, 
     kept = takes.load(Job(jobs[1].folder))["shots"]["song"]["takes"][0]["readings"]
     assert kept["judged"]["first.mi"] == kept["rank"] >= 4.0
     assert "misses" in told[0]
+    assert told[-1].startswith("pick: "), "the engine names its pick between the jobs"
 
 
 def test_judging_with_no_judge_set_says_how_to_set_one(tmp_path, studio, monkeypatch):

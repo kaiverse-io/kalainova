@@ -332,6 +332,7 @@ bar:
   song_tempo_tolerance: 0.10       # how far the detected tempo may sit from the one asked for
   song_tempo_drift_max: 0.06
   song_words_found_min: 0.70       # lyric error rate is not used: it ran against reviewed verdicts
+  song_chorus_heard_min: 0.50      # share of the chorus lines a listener picks out at least half of
   song_range_lu_min: 2.0           # less than this has no shape between sections
   song_length_tolerance: 0.25
 
