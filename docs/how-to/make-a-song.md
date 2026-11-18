@@ -77,7 +77,7 @@ This opens a job with a shot for each lyric line, starting on the beat, the trac
 
 A track with few or no lyric lines is cut to its music instead. Bars are four beats. A phrase is 8 bars, or 4 where the energy is high (`--phrase-bars N` fixes it), a section that names its `bars` in `song.json` starts a shot, and the biggest rise in energy gets a cut where the drop lands. If the detector finds no steady pulse, the command says so and stops; it never cuts on a guess. With no clear energy peak it still cuts on phrases and says there is no drop.
 
-Whether the cut follows the lyrics or the music, a shot with a character in it is split into whole bars from another angle (wide, close, medium), so it never runs past `character_shot_max_sec`.
+Whether the cut follows the lyrics or the music, no shot is shorter than about a bar unless the whole piece is: a lyric line heard in passing, or a sliver at an excerpt's edge, joins the shot before it. A shot with a character in it is then split into whole bars from another angle (wide, close, medium), so it never runs past `character_shot_max_sec`.
 
 Without a shot list, each shot's picture comes from the `visual` of its section in `song.json`, or else from the song's style. That describes the music, not a shot. To direct the shots, write a shot list and pass it with `--shots <file>`:
 

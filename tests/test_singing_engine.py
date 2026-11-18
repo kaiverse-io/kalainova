@@ -253,3 +253,33 @@ def test_a_sung_take_is_judged_with_its_own_line_laid_on_its_picture(tmp_path, m
     monkeypatch.setitem(config.studio(), "judges", {"lipsync": []})
     plain = shotmake.judged_sung(lambda p: ({}, True), line)
     assert plain(clip) == ({}, True), "with no judge set, nothing is judged"
+
+
+def test_no_shot_is_cut_shorter_than_a_bar_unless_the_whole_piece_is():
+    from kalainova.editor import musiccuts as mc
+
+    found = {"beats": [0.48 * n for n in range(40)]}  # a bar is 1.92 s
+
+    def spans(*lengths: float) -> list[dict]:
+        out, at = [], 0.0
+        for n, length in enumerate(lengths):
+            out.append({"start": at, "end": at + length, "text": f"line {n}", "strong": False})
+            at += length
+        return out
+
+    slivers = mc.merge_short(spans(0.96, 0.94, 0.96, 0.48, 0.48), found)
+    assert [(s["start"], s["end"]) for s in slivers] == [(0.0, pytest.approx(3.82))]
+    assert slivers[0]["text"] == "line 0 / line 1 / line 2 / line 3 / line 4"
+    kept = mc.merge_short(spans(4.0, 1.0, 4.0), found)
+    assert [round(s["end"] - s["start"], 2) for s in kept] == [5.0, 4.0], "it joins the one before"
+
+
+def test_a_bench_rehearsal_names_its_shot_and_at_least_two_models():
+    from kalainova import rehearse
+
+    assert rehearse.bench_asked(None, None) is None, "the job's own run"
+    assert rehearse.bench_asked("s00", "a,b") == ("s00", ["a", "b"])
+    with pytest.raises(ContractError, match="--bench takes a shot"):
+        rehearse.bench_asked("s00", None)
+    with pytest.raises(ContractError, match="at least two models"):
+        rehearse.bench_asked("s00", "a")

@@ -206,6 +206,24 @@ def split_for_ceiling(spans: list[Span], found: Analysis, ceiling: float | None)
     return out
 
 
+def merge_short(spans: list[Span], found: Analysis, bars: float = 0.9) -> list[Span]:
+    """A shot shorter than about a bar joins its neighbour, so a lyric line heard in passing, or a
+    sliver left at an excerpt's edge, never gets a cut of its own: no shot is shorter than a bar
+    unless the whole piece is."""
+    beats = found["beats"]
+    if len(beats) < 2:
+        return spans
+    least = float(np.median(np.diff(beats))) * BAR_BEATS * bars
+    out: list[Span] = []
+    for span in spans:
+        if out and min(span["end"] - span["start"], out[-1]["end"] - out[-1]["start"]) < least:
+            text = " / ".join(t for t in (out[-1].get("text"), span.get("text")) if t)
+            out[-1] = {**out[-1], "end": span["end"], "text": text}
+        else:
+            out.append(dict(span))
+    return out
+
+
 def clip_to_window(spans: list[Span], a: float, b: float) -> list[Span]:
     out = [
         {**s, "start": round(max(s["start"], a) - a, 3), "end": round(min(s["end"], b) - a, 3)}

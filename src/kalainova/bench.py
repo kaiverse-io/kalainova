@@ -83,13 +83,14 @@ def _setup(job: Job, shot: str) -> _Setup:
     if beat.get("visual_kind") != "video":
         raise ContractError(f"{job.id}: {shot} is a still, so there is nothing to bench")
     still = job.work / "beats" / f"{shot}.still.png"
-    if not still.exists() or not job.has("asset_manifest"):
+    if not still.exists():
         raise ContractError(
-            f"{job.id}: {shot} has no start frame yet. Make the stills first (run assets with "
-            "brief.max_video_beats set to 0), so every model starts from the same picture"
+            f"{job.id}: {shot} has no start frame yet. Make the stills first (the stills package, "
+            "or assets with brief.max_video_beats set to 0), so every model starts from it"
         )
-    manifest = job.read("asset_manifest")
-    span = next(s["end_sec"] - s["start_sec"] for s in manifest["timeline"] if s["beat_id"] == shot)
+    timeline = job.read("asset_manifest")["timeline"] if job.has("asset_manifest") else []
+    placed = [s["end_sec"] - s["start_sec"] for s in timeline if s["beat_id"] == shot]
+    span = placed[0] if placed else float(beat.get("duration_sec") or 0)  # the stills alone: plan
     locked = consistency.for_job(job)
     resolved, lock = locked if locked else (None, {})
     kw = shotmake.shot_kw(resolved, lock, "video", beat, start=still)

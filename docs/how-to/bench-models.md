@@ -40,3 +40,5 @@ kalainova verdict <job> accept|fix|reject --reviewer NAME --shot <shot> --take <
 The motion reading says whether the clip moves, not whether it is good. Running the assets stage again with `--force` starts `takes.json` over, so judge and choose first. The sheet and clips stay on disk, and the ledger keeps every charge.
 
 A shot that sings (`Sings:` in a song video's shot list) is benched on the models under `sing_models`: each gets the shot's still and the same line of the vocal stem, and with `judges.lipsync` set each take is also scored on how its lips follow that line (ADR 0025).
+
+To see every request and its price first, with nothing sent: `kalainova rehearse <job> --bench <shot> --models model-a,model-b`. It rehearses the stills too, and checks each request against the model's published schema. A bench can run as soon as the shot's still exists, from the stills package alone; the shot's length then comes from its plan.

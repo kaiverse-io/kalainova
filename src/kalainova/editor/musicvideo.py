@@ -348,7 +348,6 @@ def build(
     ceiling = (
         shots.character_ceiling({"profile": profile, "brief": brief_in}) if stream_id else None
     )
-    spans = mc.split_for_ceiling(spans, found, ceiling)  # lyric lines too: a face drifts either way
     notes = list(found["notes"])
     stem = job.work / VOCALS
     listed = bool(shot_list) and any(singing.sings(line) for line in shot_list or [])
@@ -357,6 +356,8 @@ def build(
     a, b = _stretch(found, length, excerpt, song, sung, sung_words or [], say)
     if excerpt:
         spans = mc.clip_to_window(spans, a, b)
+    spans = mc.merge_short(spans, found)  # no cut inside a bar, then no face past the ceiling
+    spans = mc.split_for_ceiling(spans, found, ceiling)  # lyric lines too: a face drifts either way
     grid = [round(t - a, 3) for t in found["beats"] if a - 1e-6 <= t <= b + 1e-6]
     full = not excerpt and length > FULL_LENGTH_SEC
     moving = FULL_LENGTH_MOVING if full and not still_only else None

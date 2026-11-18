@@ -19,7 +19,7 @@ from .bar import judges
 from .blobstore import sha256_file
 from .editor import singing
 from .jobfs import ContractError, Job
-from .providers import base, router
+from .providers import base, rehearsal, router
 from .providers.contract import (
     Card,
     GraphicsRequest,
@@ -303,8 +303,8 @@ def lip_sync(job: Job, beat: Fields, clip: Path, span: float, gen: Gen) -> Field
 def judged_sung(assess: takes.Assess, line: Path) -> takes.Assess:
     """A sung take is also judged on how its lips follow its line (judges.lipsync), with the line
     itself laid on its picture, so what is scored is the vocal the piece plays over it."""
-    if not judges.configured("lipsync"):
-        return assess
+    if not judges.configured("lipsync") or rehearsal.active() is not None:
+        return assess  # a rehearsal's stand-in is a test pattern, with no lips to judge
 
     def judged(path: Path) -> tuple[Fields, bool]:
         readings, ok = assess(path)
