@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import config, consistency, media, shots, takes, trace
+from . import config, consistency, knowledge, media, shots, takes, trace
 from .blobstore import sha256_file
 from .editor import singing
 from .jobfs import ContractError, Job
@@ -65,11 +65,9 @@ def made(res: Any, extra: Fields | None = None) -> Fields | None:
 
 
 def style(job: Fields) -> str:
+    """The look a still is made in: the brief's, else the studio's (`visual_style` in config)."""
     brief = job.get("brief") or {}
-    return (
-        brief.get("visual_style")
-        or "cinematic, high contrast, shallow depth of field, rich color, vertical composition"
-    )
+    return str(brief.get("visual_style") or config.studio().get("visual_style") or "")
 
 
 def picture_prompt(resolved: Any, packet: Fields, beat: Fields, data: Fields) -> str:
@@ -227,6 +225,8 @@ def take_clip(
     if beat.get("sings") and not sung:
         print(f"{job.id}: {beat['id']}: no singing in its span, so it is made as a plain clip")
     assess = judged_on_camera(judged_sung(assess, line) if sung else assess, beat)
+    inputs = {"still": sha256_file(still)} | ({"line": sha256_file(line)} if sung else {})
+    made_with = knowledge.stamp(beat, inputs)
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
         if sung:  # the voice moves the face and the body in the same call, so nothing syncs after
@@ -267,6 +267,7 @@ def take_clip(
             prompt=prompt,
             note=note,
             extra={"retake": True},
+            made_with=made_with,
         )
     else:
         takes.make_until_good(
@@ -277,6 +278,7 @@ def take_clip(
             make=make,
             assess=assess,
             prompt=prompt,
+            made_with=made_with,
         )
     taken = takes.place(job, beat["id"], clip)
     if (beat.get("shot") or {}).get("last_frame"):

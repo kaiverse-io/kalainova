@@ -15,7 +15,19 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from . import benchreport, config, consistency, media, shotmake, shots, takejudges, takes, timeline
+from . import (
+    benchreport,
+    config,
+    consistency,
+    knowledge,
+    media,
+    shotmake,
+    shots,
+    takejudges,
+    takes,
+    timeline,
+)
+from .blobstore import sha256_file
 from .editor import singing
 from .jobfs import ContractError, Job
 from .providers import base, router
@@ -97,6 +109,12 @@ class _Setup:
     @property
     def capability(self) -> str:
         return "sing" if self.line else "video"
+
+
+def _inputs(setup: _Setup) -> dict[str, str]:
+    """The hashes of what every model on the bench was given: the still, and the line it sings."""
+    found = {"still": sha256_file(setup.still)}
+    return found | ({"line": sha256_file(setup.line)} if setup.line else {})
 
 
 def _setup(job: Job, shot: str) -> _Setup:
@@ -354,6 +372,7 @@ def run(
                     ),
                     prompt=setup.prompt,
                     seed=takes.seed_for(setup.prompt, i),
+                    made_with=knowledge.stamp(setup.beat, _inputs(setup)),
                     extra={
                         "bench": True,
                         "conditioning": conditioning(

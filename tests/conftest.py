@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Generator
 
 # A shell that sourced a lab's settings must not reach the tests. This runs before any test module
@@ -17,6 +18,9 @@ LAB_SETTINGS = (
 )
 for _name in LAB_SETTINGS:
     os.environ.pop(_name, None)
+# Unset, the studio folder is this user's own data folder (ADR 0027). A test run must never write
+# there, so every test starts in a throwaway one unless it names its own.
+os.environ["KALAINOVA_HOME"] = tempfile.mkdtemp(prefix="kalainova-test-home-")
 
 import pytest  # noqa: E402 - after the lab's settings are cleared, on purpose
 from fakes import studio  # noqa: E402 - after the lab's settings are cleared, on purpose

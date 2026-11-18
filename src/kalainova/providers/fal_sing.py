@@ -14,7 +14,8 @@ import math
 from pathlib import Path
 from typing import Any
 
-from .. import media
+from .. import knowledge, media
+from ..jobfs import ContractError
 from .contract import Reference, SingRequest
 
 Fields = dict[str, Any]
@@ -77,6 +78,13 @@ def payload(
         body[spec.get("image_param", "image_url")] = still
         body[spec.get("audio_param", "audio_url")] = line
     field = spec.get("prompt_param", "prompt")
+    claim = knowledge.limit(spec, "prompt_chars")
+    most = int(claim["max"]) if claim else 0
+    if field and most and len(text) > most:  # refused upstream, or cut there without a word
+        raise ContractError(
+            f"the prompt is {len(text)} characters and this model reads at most {most}: "
+            "shorten the shot's cue"
+        )
     if field:
         body[field] = text
     if spec.get("durations"):

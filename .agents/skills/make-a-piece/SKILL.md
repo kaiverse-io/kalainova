@@ -44,6 +44,12 @@ The operator says what to make. Everything else is yours until the gate. Ask at 
 ## 5. Make the picture and the sound
 
 - Drawn shots: the `draw-shots` skill. Generated shots: `docs/how-to/direct-a-shot.md`.
+- A first take should already follow every lesson. Before a package:
+  - **Reuse first.** Start a shot from a still or a take that already shows its framing. Make one picture for two identical shots. Say why each new still is needed.
+  - **Leave the performance to the engine.** A sung shot's cue holds framing, action and setting only. The engine adds the performance (`perform.sing` in `prompts/directions.yaml`; `kalainova guide sing` prints it), and the voice moves the mouth. Never describe mouth shapes, and never close the eyes.
+  - **One request per model, with every direction in it.** Test at the lowest resolution the model offers, and upscale later.
+  - **Singing is one voice-driven call.** A lip repaint on a finished clip flattened a sung mouth.
+  - **Keep judges local** unless the operator says otherwise.
 - Sound, in order of preference within the cap:
   - a narrator, if a voice key exists and the piece speaks;
   - generated music;
@@ -72,7 +78,7 @@ You never approve, never raise a cap or a retake limit, and never edit a kit. Fi
 
 1. Write the breakdown with the `break-down-a-piece` skill.
 2. Give the operator the final path, the contact sheet, what the bar and QA said, what you could not check (listening, taste), the money spent, and two or three specific questions.
-3. Stop. Never run `approve` or `publish`, and never write `approval.json`. Record their answer with `uv run kalainova verdict`, naming them.
+3. Stop. Never run `approve` or `publish`, and never write `approval.json`. Record their answer with `uv run kalainova verdict`, naming them. If they say what is wrong, run the `learn-from-feedback` skill before the next paid call.
 4. Save what the next run should know, in the right place:
    - The operator's decisions, keys, budget, and anything about their pieces go to their private agent memory, outside this repo.
    - A lesson about the engine that any operator would hit goes to `.agents/memory/`, written without the piece's subject. This repo is public.

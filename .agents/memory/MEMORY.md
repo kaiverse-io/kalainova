@@ -21,3 +21,6 @@
 - [A call on a clip just bought cannot be keyed by its bytes](a-call-on-a-clip-just-bought-cannot-be-keyed-by-its-bytes.md) — packages match inputs by bytes; a lip sync on a fresh clip would be refused after the video was paid; sign it as a counted allowance on the billed length
 - [A test that runs a studio command needs its own home](a-test-that-runs-a-studio-command-needs-its-own-home.md) — `kalainova limits` in a test with no KALAINOVA_HOME wrote limits.json into the public repo on every CI run
 - [Whole-frame motion is not a performance](whole-frame-motion-is-not-a-performance.md) — 0.09 read as static on the take whose head turned most; judge the person apart from the frame, rank only what preferences confirm
+- [Direct the performance, not the mouth](direct-the-performance-not-the-mouth.md) — sung shots get the engine's versioned direction; cues keep to framing; a model's prompt limit is in config
+- [A lip repaint flattens a sung mouth](a-lip-repaint-flattens-a-sung-mouth.md) — singing is one voice-driven call; a repaint kept 30% of the movement
+- [Reuse before generating](reuse-before-generating.md) — say which stills and takes can serve each shot before a package; one pass on a take before a new take

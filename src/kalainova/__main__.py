@@ -48,8 +48,19 @@ import sys
 import time
 from pathlib import Path
 
-from . import assets, edit, plan, production_cli, qa, qachecks, render, studio_cli, trace
-from .jobfs import REPO, ContractError, home, open_job
+from . import (
+    assets,
+    edit,
+    plan,
+    production_cli,
+    qa,
+    qachecks,
+    render,
+    resources,
+    studio_cli,
+    trace,
+)
+from .jobfs import ContractError, home, open_job
 
 
 def _new(a) -> int:
@@ -59,7 +70,7 @@ def _new(a) -> int:
     if dst.exists():
         print(f"{dst} exists", file=sys.stderr)
         return 1
-    shutil.copytree(REPO / "jobs" / "_template", dst)
+    shutil.copytree(resources.path("jobs", "_template"), dst)
     (dst / "README.md").unlink(missing_ok=True)
     data = json.loads((dst / "job.json").read_text())
     data.update(

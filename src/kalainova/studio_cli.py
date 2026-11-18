@@ -15,12 +15,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import consistency, kits, lookdev, signoff_cli, streams
+from . import consistency, kits, knowledge_cli, lookdev, signoff_cli, streams
 from .jobfs import ContractError, home
 
 
 def add_parsers(sub: Any) -> None:
     signoff_cli.add_parsers(sub)  # what must be true before money leaves
+    knowledge_cli.add_parsers(sub)  # what the engine knows: directions, and what models take
     kit = sub.add_parser("kit").add_subparsers(dest="action", required=True)
     new = kit.add_parser("new")
     new.add_argument("kit")
@@ -215,9 +216,10 @@ def _look(a: argparse.Namespace, root: Path) -> int:
 
 def dispatch(a: argparse.Namespace) -> int | None:
     """Run a command from this module, or None if it belongs to another."""
-    signed = signoff_cli.dispatch(a)
-    if signed is not None:
-        return signed
+    for run in (signoff_cli.dispatch, knowledge_cli.dispatch):
+        done: int | None = run(a)
+        if done is not None:
+            return done
     root = home()
     handler = {"kit": _kit, "stream": _stream, "look": _look}.get(a.cmd)
     if handler is not None:

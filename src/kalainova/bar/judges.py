@@ -16,6 +16,7 @@ goes on.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -25,6 +26,11 @@ from typing import Any
 from .. import config, opentools
 
 TIMEOUT_SEC = 1800  # a model loads once per run, then scores every file
+# The runner scripts ship in the package. A command names one as `{runners}/<script>.py`, so the
+# same config works wherever the engine is installed (ADR 0027); the judge's own environment and
+# weights stay outside the package, named by the studio.
+RUNNERS = Path(__file__).resolve().parents[1] / "providers" / "runners"
+KINDS = ("song", "lipsync", "performance")
 
 
 @dataclass(frozen=True)
@@ -40,12 +46,31 @@ def configured(kind: str) -> list[Judge]:
     return [
         Judge(
             name=str(row["name"]),
-            command=tuple(str(Path(part).expanduser()) for part in row["command"]),
+            command=tuple(part(str(arg)) for arg in row["command"]),
             rank_by=row.get("rank_by"),
         )
         for row in rows
         if row.get("command")
     ]
+
+
+def part(text: str) -> str:
+    """One argument of a judge's command: `{runners}` named, `~` expanded."""
+    return str(Path(text.replace("{runners}", str(RUNNERS))).expanduser())
+
+
+def missing(judge: Judge) -> list[str]:
+    """What this machine lacks to run a judge: its interpreter, its script, or a file it names.
+    Empty means it is ready. Nothing is run, so this costs nothing and loads no model."""
+    first, *rest = judge.command
+    found = Path(first).exists() if Path(first).is_absolute() else bool(shutil.which(first))
+    out = [] if found else [f"{first} is not installed"]
+    for arg in rest:  # a file named by its full path; a model's name such as org/model is not one
+        if not Path(arg).is_absolute():
+            continue
+        if not Path(arg).exists():
+            out.append(f"{arg} is missing")
+    return out
 
 
 def _run(judge: Judge, wanted: list[str]) -> dict[str, Any]:

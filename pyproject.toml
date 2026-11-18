@@ -14,6 +14,7 @@ dependencies = [
     "numpy>=1.26",
     "reportlab>=4.2",
     "fonttools>=4.50",
+    "platformdirs>=4.2",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kalainova"]
+
+# The engine's own files ship inside the package (ADR 0027), so an installed copy runs on any
+# machine with no checkout. resources.py reads them from here, or from a checkout's root.
+[tool.hatch.build.targets.wheel.force-include]
+"prompts" = "kalainova/_data/prompts"
+"config/studio.yaml" = "kalainova/_data/config/studio.yaml"
+"schemas" = "kalainova/_data/schemas"
+"fonts" = "kalainova/_data/fonts"
+"jobs/_template" = "kalainova/_data/jobs/_template"
 
 [dependency-groups]
 dev = [

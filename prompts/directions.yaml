@@ -1,0 +1,15 @@
+# How a person on camera is directed, by kind of shot (ADR 0027). shots.motion_prompt adds a shot's
+# direction to its prompt, so every first take is directed the way verdicts have taught. Each has an
+# id and a version. A new text is a new version: directions.lock pins every released one, and a test
+# fails if a text changes under an old version. A studio overrides one under `directions` in its own
+# config, with its own version. A direction describes the performance and never mouth shapes: the
+# voice moves the mouth.
+
+perform.sing:
+  version: 1
+  text: "The singer performs with a natural, relaxed expression: eyes open and alive, glancing out and back to the camera, head and shoulders moving gently with the rhythm."
+  why: >-
+    "Eyes half closed" in a sung cue left the eyes lifeless. Asking for open, glancing eyes and a
+    moving head brought them alive (eye travel x3, head turn 4 to 14 degrees). Hand-written mouth
+    wording then gave a mouth "too big and wide"; the model's prompt guides say to describe breath
+    and movement and let the audio drive the lips.

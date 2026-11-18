@@ -9,6 +9,8 @@ kalainova signals                                which readings predict a person
 kalainova agreement                              which readings, and the engine's picks, follow
                                                  a person's preferences, aspect by aspect
 kalainova review-set                             every verdict beside its readings
+kalainova judges                                 which judges are ready on this machine, and why
+                                                 the others are not
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import benchreport, verdicts
+from .bar import judges
 from .jobfs import ContractError, Job, home, open_job
 
 
@@ -52,6 +55,7 @@ def add_parsers(sub: Any) -> None:
     sub.add_parser("signals")
     sub.add_parser("agreement")
     sub.add_parser("review-set")
+    sub.add_parser("judges")
 
 
 def _numbers(text: str | None) -> list[int] | None:
@@ -166,6 +170,25 @@ def _review_set(a: argparse.Namespace) -> int:
     return 0
 
 
+def _judges(a: argparse.Namespace) -> int:
+    for line in judges_on_this_machine():
+        print(line)
+    return 0
+
+
+def judges_on_this_machine() -> list[str]:
+    """One line per judge in the config: ready, or what this machine lacks."""
+    lines = []
+    for kind in judges.KINDS:
+        found = judges.configured(kind)
+        if not found:
+            lines.append(f"{kind}: none configured")
+        for judge in found:
+            lacks = judges.missing(judge)
+            lines.append(f"{kind} {judge.name}: " + ("ready" if not lacks else "; ".join(lacks)))
+    return lines
+
+
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "bench": _bench,
     "bench-report": _bench_report,
@@ -173,6 +196,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "signals": _signals,
     "agreement": _agreement,
     "review-set": _review_set,
+    "judges": _judges,
 }
 
 

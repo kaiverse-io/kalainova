@@ -8,7 +8,7 @@ default:
 
 # ── CI gates (called by .github/workflows/ci.yaml) ───────────────────────────
 
-ci: ci-contract ci-lint ci-test ci-docs ci-arch
+ci: ci-contract ci-lint ci-test ci-docs ci-arch ci-wheel
 
 # Engine contract: no media blobs, every job, kit, and stream honours the contract, and the
 # fixtures under evals/contract pass or fail as they say.
@@ -44,6 +44,11 @@ ci-lint:
 
 ci-test:
     uv run pytest
+
+# The built wheel, installed alone in a fresh environment in an empty folder, runs with no checkout
+# and no studio settings: an installed copy must know everything a checkout knows (ADR 0027).
+ci-wheel:
+    uv run python scripts/check_wheel.py
 
 # Engine docs stay subject-free, and every relative link in the repo's Markdown resolves.
 # lychee --offline checks local files only, so it cannot flake on someone else's site. It is

@@ -101,3 +101,6 @@ jobs:
 
       - name: Architecture coverage
         run: just ci-arch
+
+      - name: Installed wheel
+        run: just ci-wheel

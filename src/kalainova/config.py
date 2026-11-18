@@ -13,7 +13,9 @@ from pathlib import Path
 
 import yaml
 
-REPO = Path(__file__).resolve().parents[2]
+from . import resources
+
+REPO = resources.root()  # the engine's own files: a checkout's root, or the package's data
 
 
 def overlay(base: dict, over: dict) -> dict:

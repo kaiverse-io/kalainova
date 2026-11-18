@@ -31,6 +31,8 @@ Finding = dict[str, Any]
 FIXES = {
     "character_shot_length": "cut it into shorter angles in script_packet.json",
     "motion_stated": "say what moves in its shot's camera, action or environment",
+    "performance_words": "keep its cue to framing, action and setting: the engine directs the "
+    "performance (perform.sing in prompts/directions.yaml) and the voice moves the mouth",
     "still_words": "write its visual_cue as motion",
     "prompt_length": "cut its words to what the model reads",
     "repetition": "make the two shots differ, or merge them",

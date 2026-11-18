@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .jobfs import REPO
+from . import resources
 
 
 def load(name: str) -> str:
-    return (REPO / "prompts" / f"{name}.md").read_text()
+    return resources.path("prompts", f"{name}.md").read_text()

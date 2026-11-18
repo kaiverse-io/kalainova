@@ -8,6 +8,11 @@
 | Feature | Entry point | Code | Tests |
 |---|---|---|---|
 | Make a generated piece | `kalainova make` | `assets.py`, `edit.py`, `render/` | `tests/test_engine.py` |
+| Run anywhere: the engine's own files in the package, a per-user studio folder | `pip install`, `just ci-wheel` | `resources.py`, `jobfs.py`, `pyproject.toml` (force-include) | `tests/test_knowledge.py`, `scripts/check_wheel.py` |
+| How a person on camera is directed, by version | `kalainova guide [kind]` | `knowledge.py`, `prompts/directions.yaml`, `shots.py` | `tests/test_knowledge.py`, `tests/test_performance_direction.py` |
+| What a model takes, and its limits with sources | `kalainova guide <model>`, `kalainova models refresh` | `knowledge.py`, `knowledge_cli.py`, `providers/fal_catalog.py`, `providers/fal_sing.py` | `tests/test_knowledge.py` |
+| Which judges this machine can run | `kalainova judges` | `bar/judges.py`, `judging_cli.py` | `tests/test_knowledge.py` |
+| What made each take | `made_with` in `takes.json` | `knowledge.stamp`, `takes.py`, `shotmake.py`, `bench.py` | `tests/test_knowledge.py` |
 | Free the disk a render used | `kalainova clean [--dry-run]` | `render/cache.py` | `tests/test_rendercache.py` |
 | Rough cut before video is paid for, and a gate on video | `kalainova animatic`, `verdict --animatic`, `brief.animatic_gate` | `preproduction.py`, `assets.py`, `verdicts.py`, `publish/__init__.py` | `tests/test_preproduction.py` |
 | Look sheet for a kit's candidate references | `kalainova look` | `lookdev.py`, `studio_cli.py` | `tests/test_preproduction.py` |

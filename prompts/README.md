@@ -19,3 +19,12 @@ Inline prompt literals hide in diffs, can't be independently reviewed by a domai
 make it hard to answer "what prompt produced this behavior" during an audit. Treating prompts as
 code (own them, version them, diff them) is one of the build/rent calls 12-factor-agents makes
 explicit (F2/F3/F5/F8/F12 = BUILD, never delegated to the rented runtime).
+
+## Directions
+
+`directions.yaml` holds how a person on camera is directed, by kind of shot, each with an id and a
+version (ADR 0027). A new text is a new version: `directions.lock` pins the sha256 of every text
+released under each version, and a test fails when a text changes under an old one. Bump the
+version, then add the new version's hash to the lock. `kalainova guide` prints them.
+
+Every file here ships inside the package, so an installed copy reads the same prompts as a checkout.
