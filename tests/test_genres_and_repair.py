@@ -259,3 +259,31 @@ def test_a_song_pinned_to_a_provider_alone_keeps_no_other_vendors_model(
 
     brief = Job(job.folder).job["brief"]
     assert "song_model" not in brief and brief["takes"] == 1
+
+
+def test_the_song_file_is_written_alone_before_anything_is_made(tmp_path, studio, monkeypatch):
+    from kalainova.__main__ import main
+
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    job = make_job(tmp_path, media=["song"])
+    studio.replies = ['{"title": "T", "style": "pads", "bpm": 123, "sections": [{"kind": "verse",'
+                      ' "lines": ["a line"]}]}']  # fmt: skip
+    assert main(["song", job.id, "--write"]) == 0
+    assert job.read("song")["title"] == "T"
+    assert not [c for c in studio.calls if c["capability"] == "song"], "nothing was made"
+
+
+def test_a_songs_writer_gets_the_artists_voice_and_not_a_scripts_rules(root, studio, genre):
+    from kalainova.jobfs import Job
+
+    make_character(root)
+    make_stream(root)
+    job = streams.request(root, "chan", "a night drive", media=["song"], genre=genre)
+    job.write("job", {**job.job, "providers": {"llm": ["fake"]}})
+    studio.replies = [
+        '{"title": "T", "style": "pads", "bpm": 123, "key": "A minor", '
+        '"vocal_gender": "female", "sections": [{"kind": "verse", "lines": ["a"]}]}'
+    ]
+    writers.ensure(Job(job.folder), "song")
+    asked = next(c for c in studio.calls if c["capability"] == "llm")["prompt"]
+    assert "never_say" in asked and "three hooks" not in asked

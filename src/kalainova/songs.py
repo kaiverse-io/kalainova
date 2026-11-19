@@ -265,11 +265,18 @@ def _stems(job: Job, final: Path) -> dict[str, str]:
     return {"vocals": vocals.name, "instrumental": rest.name}
 
 
+def write(job: Job) -> Song:
+    """The song file, written from the brief inside its genre when there is none yet. Each draft is
+    held to the song's rules and its genre, and a faulted one is written again."""
+    profile = genres.for_brief(job.job.get("brief") or {})
+    writers.ensure(job, "song", check=lambda d: problems(d) + genres.problems(d, profile))
+    return dict(job.read("song"))
+
+
 def run(job: Job) -> Path:
     brief = job.job.get("brief") or {}
     profile = genres.for_brief(brief)
-    writers.ensure(job, "song", check=lambda d: problems(d) + genres.problems(d, profile))
-    song = job.read("song")
+    song = write(job)
     refused = problems(song) + genres.problems(song, profile)
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))

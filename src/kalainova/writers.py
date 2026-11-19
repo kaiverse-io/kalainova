@@ -35,11 +35,14 @@ def _facts(job: Job) -> str:
     )
 
 
-def _fixed(job: Job) -> str:
+def _fixed(job: Job, kind: str) -> str:
+    """What the stream's kits fix, for the writer: a script's rules for a script, and for a song
+    the artist's voice and canon only, since a song has no hooks, cast or shots."""
     locked = consistency.for_job(job)
     if not locked:
         return ""
-    return "\n\n" + prompts.load("plan_kit").format(
+    name = "song_kit" if kind == "song" else "plan_kit"
+    return "\n\n" + prompts.load(name).format(
         context=consistency.planner_context(locked[0], locked[1]["cast"])
     )
 
@@ -77,7 +80,7 @@ def ensure(job: Job, kind: str, check: Check | None = None) -> None:
             if last_error
             else ""
         )
-        ask = TextRequest(prompt=text + _fixed(job) + retry, max_tokens=8000)
+        ask = TextRequest(prompt=text + _fixed(job, kind) + retry, max_tokens=8000)
         _, res = router.generate(job, ask, note=f"write {kind}")
         try:
             draft: dict[str, Any] = extract_json(res.text)

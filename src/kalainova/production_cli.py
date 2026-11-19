@@ -12,7 +12,7 @@ kalainova filmstrip <file> <start> <end>         frames over a waveform
 kalainova cutcheck <job>                         a click or a flash at any cut
 kalainova export <job> [--to fcpxml|otio|edl]    the cut for an editing system
 kalainova timeline-import <job> <file>  an edit saved in FCPXML, EDL or OTIO, read back
-kalainova song <job>                             lyrics to takes to a master
+kalainova song <job> [--write]                   lyrics to takes to a master; --write: the song only
 kalainova song repair <job> [--take N] [--section S|--start S --end S] [--prompt P]
                                                   repaint one span of a take, beside it
 kalainova song master <job> [--take N] [--vocal-db=-3,0,3] [--reference FILE]... [--level song]
@@ -127,6 +127,7 @@ def _make_parsers(sub: Any) -> None:
         ("--level", {"default": "song", "help": "master: a profile, such as song or song-loud"}),
         ("--hear", {"action": "store_true", "help": "master: transcribe each option"}),
         ("--release", {"action": "store_true", "help": "master: release the master chosen"}),
+        ("--write", {"action": "store_true", "help": "write the song file, and make nothing"}),
     ]
     for opt, kw in song_args:
         song.add_argument(opt, **kw)
@@ -305,6 +306,11 @@ def _song(a: argparse.Namespace) -> int:
         return 0
     if a.job_or_action == "master":
         return _song_master(a)
+    if a.write:
+        song = songs.write(open_job(a.job_or_action))
+        print(f"{song['title']}: {song.get('bpm')} bpm, {song.get('key')}, "
+              f"{len(song['sections'])} sections; nothing was made")  # fmt: skip
+        return 0
     if a.repair_job is not None:
         raise ContractError("use `kalainova song repair <job>` for song repair")
     return _print_qa(open_job(a.job_or_action), songs.run(open_job(a.job_or_action)))

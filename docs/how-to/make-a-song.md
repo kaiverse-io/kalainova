@@ -58,7 +58,8 @@ To use one model of a provider rather than its default, pin it:
 (`kalainova pin <job> song mac`) uses that provider's own default and clears any other vendor's
 model the brief or its genre pinned. The router sends the
 song there and nowhere else. `kalainova rehearse <job>` then writes down each take's request,
-with its fields and price, and sends nothing. Choose by listening, not by a model's reputation: open one job per
+with its fields and price, and sends nothing. `kalainova song <job> --write` writes the song file
+alone, inside its genre, so it can be read and rehearsed before anything is made. Choose by listening, not by a model's reputation: open one job per
 model with the same `song.json`, then hear them blind (below).
 
 ### Start from a free draft
