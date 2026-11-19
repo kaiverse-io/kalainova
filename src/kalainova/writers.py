@@ -75,6 +75,8 @@ def ensure(job: Job, kind: str) -> None:
             draft: dict[str, Any] = extract_json(res.text)
             draft["schema_version"] = "0.1"
             draft["job_id"] = job.id
+            if contract == "song":
+                draft["words_by"] = "model"  # a release's AI disclosure reads who wrote them
             job.write(contract, draft)
             return
         except (ValueError, ContractError) as exc:

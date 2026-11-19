@@ -44,6 +44,13 @@
       "type": "string",
       "description": "BCP 47 tag of the lyrics."
     },
+    "vocal_gender": {
+      "enum": [
+        "female",
+        "male"
+      ],
+      "description": "The lead voice, for a model that takes it as its own setting (Mureka's gender) rather than reading it from the style."
+    },
     "duration_sec": {
       "type": "number",
       "exclusiveMinimum": 0
@@ -54,6 +61,14 @@
     "byline": {
       "type": "string",
       "description": "The artist name on release files."
+    },
+    "words_by": {
+      "enum": [
+        "person",
+        "model",
+        "person_edited_model"
+      ],
+      "description": "Who wrote the words: a person, a model (or an agent), or a person editing a model's draft. A release's AI disclosure is read from it."
     },
     "release": {
       "type": "object",

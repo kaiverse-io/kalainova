@@ -46,3 +46,17 @@ def test_takes_are_heard_blind_at_one_loudness_and_ranked_once(tmp_path, studio)
 def test_one_job_cannot_be_heard_blind_against_nothing(tmp_path, studio):
     with pytest.raises(ContractError, match="no song takes"):
         reviewpage.blind([_job(tmp_path, job_id="empty")])
+
+
+def test_letters_a_listener_cannot_tell_apart_share_a_place(tmp_path, studio):
+    folder = reviewpage.blind(_two_song_jobs(tmp_path)).parent
+    names = sorted(
+        k["letter"] for k in json.loads(reviewpage._key_path(folder).read_text())["takes"]
+    )
+    first, second, *rest = names
+    told = reviewpage.rank(folder, f"{first}={second}," + "=".join(rest), "the operator")
+    ranked = json.loads((folder / reviewpage.RANKING).read_text())["ranked"]
+    places = {r["letter"]: (r["place"], r["tied"]) for r in ranked}
+    assert places[first] == places[second] == (1, True)
+    assert {places[x] for x in rest} == {(3, len(rest) > 1)}
+    assert told.splitlines()[0].startswith("1= ")

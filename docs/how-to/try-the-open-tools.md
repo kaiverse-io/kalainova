@@ -72,3 +72,44 @@ Words, `whisper-cli` with `ggml-base.en` on a 62 s narration (180 words) and a r
   word before it, so a word's end can run late across a pause. The first word is short
   (10 ms) because the leading empty entry takes its start. Treat ends as soft, starts as good.
 - Singing and rapping are heard as words. Music markers such as `(soft music)` are dropped.
+
+## Stems and reference matching for master options
+
+Two more tools serve `kalainova song master` (ADR 0029). Both cost nothing and run on the machine.
+
+```sh
+# python-audio-separator: stems on Apple Silicon's GPU (MPS) or the CPU
+uv venv --python 3.12 ~/tools/separator-env
+uv pip install --python ~/tools/separator-env/bin/python "audio-separator[cpu]" audioread
+
+# Matchering 2.0: matches a mix to a reference track
+uv venv --python 3.12 ~/tools/matchering-env
+uv pip install --python ~/tools/matchering-env/bin/python matchering
+```
+
+`audioread` is not a declared dependency of `audio-separator` 0.48, and without it the command
+fails at import. The first split downloads the checkpoint named by `models.separator.separate`.
+
+```yaml
+# $KALAINOVA_CONFIG
+preference:
+  separate: [separator]
+adapters:
+  reference_master: {use: matchering, python: /Users/you/tools/matchering-env/bin/python}
+```
+
+```sh
+export KALAINOVA_AUDIO_SEPARATOR=~/tools/separator-env/bin/audio-separator
+export KALAINOVA_SEPARATOR_MODELS=~/tools/separator-models   # where checkpoints are kept
+```
+
+What was measured on a 184 s generated dance track (macOS, M5 Pro, 2026-11-19):
+
+- The Mel-RoFormer vocal model split it in 28 s on MPS. The first run also downloaded the model.
+- Asked for nothing, the tool resamples to 44.1 kHz. The provider passes the source's own rate, so a
+  stem lies on its mix sample for sample.
+- The model's vocal and "other" stems do not add back to the mix: what is left is 16 to 18 dB under
+  it. That is why a vocal move is added to the mix as a change, and stems are never summed back.
+- Matchering took 5 s. Its output is 32-bit float at 44.1 kHz with its limiter off, and peaked at
+  +1.5 dBFS; the engine's limiter then sets the level. It warns (code 3003) when it resamples the
+  target, which it always does to a 48 kHz take.

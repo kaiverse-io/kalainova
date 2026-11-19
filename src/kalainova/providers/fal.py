@@ -404,11 +404,15 @@ class Fal(Provider):
             raise ValueError(f"{model} takes at most {most} style characters, not {len(req.style)}")
         if req.duration and spec.get("takes_duration", True):
             payload["duration"] = int(req.duration)
+        if req.vocal_gender and spec.get("gender_field") and not req.instrumental:
+            payload[str(spec["gender_field"])] = req.vocal_gender
         reply = self._send(model, payload, ctx)
         row = price_for("fal", "song", model)
         cost = float(row.get("per_track", 0)) + (req.duration or 0) * float(row.get("per_sec", 0))
         self._fetch_audio(reply, req.dst, cost)
-        return Result(path=req.dst, cost=cost, model=model, seed=_seed(reply, req.seed))
+        # the vendor's own id for the take, so a later edit of it needs no upload
+        kept = {"song_id": str(reply.get("song_id"))} if reply.get("song_id") else {}
+        return Result(path=req.dst, cost=cost, model=model, seed=_seed(reply, req.seed), meta=kept)
 
     def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Vocals, and everything else mixed back together from the model's other stems."""

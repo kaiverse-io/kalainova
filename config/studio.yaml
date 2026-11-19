@@ -16,7 +16,7 @@ preference:
   lipsync: [fal]
   sing: [fal]                     # a Sings: shot, made in one call from its still and its line
   motion: [fal, mac, local]
-  separate: []                     # stems cost money, so a job opts in: providers: {separate: [fal]}. "mac" can too
+  separate: []                     # a job opts in: providers: {separate: [separator]} runs here for nothing; [fal] costs money; "mac" can too
   graphics: [hyperframes]
   search: [exa, wikipedia, openalex]
 
@@ -26,6 +26,7 @@ adapters:
   beats: {use: inhouse}            # beat_this: {use: beat_this, command: beat_this}. Gives downbeats too
   speech_cuts: {use: inhouse}      # auto_editor: {use: auto_editor, command: auto-editor, margin: 0.2s}. Cuts by loudness
   timeline: {use: inhouse}         # otio: {use: otio, command: otioconvert}. OpenTimelineIO writes FCPXML and EDL and reads an edit back
+  reference_master: {use: none}    # matchering: {use: matchering, python: <its environment's python>}. Matches a master to an owned reference (song_master.py)
 
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:
@@ -45,6 +46,10 @@ deadlines_sec:
   search: 60
 
 models:
+  separator:                       # python-audio-separator on this machine; KALAINOVA_AUDIO_SEPARATOR names its command
+    # Multisong vocal SDR 10.98 (ZFTurbo's table, Nov 2026); BS-RoFormer viperx 1297
+    # (model_bs_roformer_ep_317_sdr_12.9755.ckpt) reads 10.87 there. Compare them on your own takes.
+    separate: vocals_mel_band_roformer.ckpt
   anthropic:
     llm: claude-opus-5-5
     judge: claude-haiku-4-5
@@ -203,6 +208,8 @@ licences:
     "*": {name: Apache-2.0, commercial: true, retention: "none: renders on this machine"}
   whispercpp:
     "*": {name: MIT (whisper.cpp; the model file has its own terms), commercial: true, retention: "none: runs on this machine"}
+  separator:
+    "*": {name: MIT (python-audio-separator; each checkpoint has its own terms), commercial: true, retention: "none: runs on this machine", obligations: ["Many open separation checkpoints were trained on MUSDB18-HQ, which is for educational use: list the checkpoint for a release's legal review"]}
 
 # What a song model states about itself. max_sec refuses a longer ask before any spend; a model with
 # no row is not checked. style_field and instrumental_lyrics are the adapter's field names. VERIFY each
@@ -211,7 +218,7 @@ audio_models:
   fal:
     fal-ai/ace-step: {max_sec: 240, style_field: tags, instrumental_lyrics: "[inst]"}   # fal's page: 5 to 240 s
     minimax/music-3: {max_sec: 300, style_field: prompt}   # fal's schema: duration up to 300 s
-    mureka/v9.5/generate/song: {max_sec: 300, style_field: prompt, style_max_chars: 1024}   # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+    mureka/v9.5/generate/song: {max_sec: 300, style_field: prompt, style_max_chars: 1024, gender_field: gender}   # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
     fal-ai/lyria3/pro: {max_sec: 184, style_field: prompt, lyrics_in_prompt: true, takes_duration: false}   # one prompt carries style and lyrics; no length field. VERIFY the longest track
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
@@ -481,6 +488,7 @@ bar:
   shot_motion_min: 0.05            # share of a generated clip that moves, with the camera's pan and zoom taken out
   duplicate_share_max: 0.0
   master_lufs_tolerance: 1.0       # how far a master's integrated loudness may sit from its profile's target
+  master_encoded_true_peak_max: -0.1  # a song master's true peak once encoded as AAC and MP3 and decoded: past 0 it clips
   cambi_peak_max: 8.0              # the CAMBI banding index; about 5 reads as slightly annoying
   # Songs. Candidates until enough songs carry a human verdict, so they warn and never block.
   song_tempo_tolerance: 0.10       # how far the detected tempo may sit from the one asked for
@@ -504,7 +512,16 @@ profiles:
   landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
   song: {aspect: "audio-only", target_lufs: -14, true_peak_dbtp_max: -1}
+  song-loud: {aspect: "audio-only", target_lufs: -9, true_peak_dbtp_max: -2}   # Spotify: below -2 dBTP when louder than -14 LUFS
   story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
   film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
   film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
+
+# song_master: a song take's master as options a person hears blind (song_master.py, ADR 0029).
+#   vocal_db_most: the furthest a separated vocal is moved; past about 3 dB its artefacts are heard
+#   (practitioner guidance, 2026; no published listening test sets it).
+#   vocal_db: the vocal moves offered when none are asked for; as made, unless a studio sets more.
+song_master:
+  vocal_db_most: 3.0
+  vocal_db: [0]

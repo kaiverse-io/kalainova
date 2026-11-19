@@ -39,6 +39,9 @@ IMITATION = re.compile(
     r"\b(?:in the style of|sounds? (?:just )?like|voice of|cover of|like (?:a )?(?:young|early) )",
     re.I,
 )
+# A sound named after "no" is still named: a style is read for what it mentions (vendor prompt
+# guides ask for positive descriptors), so what to keep out goes in `avoid`.
+NEGATION = re.compile(r"\b(?:no|not|without|never|avoid|don't|zero)\s+[a-z][\w-]*", re.I)
 FADE_SEC = 3.0
 CAPTION_RATE = 24.0
 SECTION_NAMES = {"pre-chorus": "Pre-Chorus"}
@@ -68,6 +71,12 @@ def problems(song: Song) -> list[str]:
     for text in (song["style"], song.get("avoid") or ""):
         if IMITATION.search(str(text)):
             found.append(f"the style asks to imitate someone ({text[:60]!r}); describe the sound")
+    said = NEGATION.search(str(song["style"]))
+    if said:
+        found.append(
+            f"the style says {said.group(0)!r}: a song model reads every word of its style, so a "
+            "sound named there is asked for. Name what you want, and put what to keep out in avoid"
+        )
     if not song.get("instrumental") and not musicbar.lyric_lines(song):
         found.append("a song with a voice needs lines; set instrumental if it has none")
     return found
@@ -100,34 +109,57 @@ def _song_pin(brief: dict[str, Any]) -> Pin | None:
     return Pin(provider=str(asked["provider"]), model=str(asked["model"]))
 
 
+def song_request(song: Song, brief: dict[str, Any], seed: int, dst: Path) -> SongRequest:
+    """One take's request, as the run sends it and a rehearsal writes it down."""
+    return SongRequest(
+        lyrics=lyrics_text(song),
+        dst=dst,
+        style=style_text(song),
+        duration=float(song.get("duration_sec") or brief.get("duration_sec") or 120),
+        seed=seed,
+        sections=song["sections"],
+        avoid=song.get("avoid") or "",
+        bpm=song.get("bpm"),
+        musical_key=song.get("key"),
+        language=song.get("language"),
+        vocal_gender=song.get("vocal_gender"),
+        instrumental=bool(song.get("instrumental")),
+        pin=_song_pin(brief),  # the pinned provider only: a take never comes from another vendor
+    )
+
+
+def planned_takes(brief: dict[str, Any]) -> dict[str, int]:
+    return {**SAFE_TAKES, **{k: brief[k] for k in SAFE_TAKES if k in brief}}
+
+
+def rehearse_takes(job: Job) -> None:
+    """Every take a paid song model would be asked for, under an open rehearsal: the requests are
+    written down and nothing is sent. Refused first, as the run refuses, when the song cannot go."""
+    song = job.read("song")
+    refused = problems(song)
+    if refused:
+        raise ContractError(f"{job.id}: " + "; ".join(refused))
+    brief = job.job.get("brief") or {}
+    prompt = f"{style_text(song)}\n{lyrics_text(song)}"
+    for n in range(planned_takes(brief)["takes"]):
+        req = song_request(song, brief, takes.seed_for(prompt, n), job.work / f"rehearsed-{n}.wav")
+        router.generate(job, req, note="song", only=[req.pin.provider] if req.pin else None)
+
+
 def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
     lyrics = lyrics_text(song)
     style = style_text(song)
-    seconds = float(song.get("duration_sec") or brief.get("duration_sec") or 120)
-    pin = _song_pin(brief)  # the pinned provider only: a take never comes from another vendor
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
-        take = SongRequest(
-            lyrics=lyrics,
-            dst=dst,
-            style=style,
-            duration=seconds,
-            seed=seed,
-            sections=song["sections"],
-            avoid=song.get("avoid") or "",
-            bpm=song.get("bpm"),
-            musical_key=song.get("key"),
-            language=song.get("language"),
-            instrumental=bool(song.get("instrumental")),
-            pin=pin,
-        )
-        return router.generate(job, take, note="song", only=[pin.provider] if pin else None)
+        take = song_request(song, brief, seed, dst)
+        only = [take.pin.provider] if take.pin else None
+        return router.generate(job, take, note="song", only=only)
 
     def assess(path: Path) -> tuple[dict[str, Any], bool]:
         found, ok = musicbar.assessed(path, song, _heard(job, path))
         return {**found, **judges.of_take("song", path)}, ok  # a judge ranks; it never blocks
 
-    counts = {**SAFE_TAKES, **{k: brief[k] for k in SAFE_TAKES if k in brief}}
+    counts = planned_takes(brief)
     return takes.make_until_good(
         job, SHOT, counts, suffix=".wav", make=make, assess=assess, prompt=f"{style}\n{lyrics}"
     )
@@ -157,6 +189,22 @@ def _finish(job: Job, take_file: Path, song: Song) -> Path:
     prof = config.profile("song")
     target = float(prof.get("target_lufs", -14))
     ceiling = float(prof.get("true_peak_dbtp_max", -1))
+    cleaned = clean(take_file, job.work / "song.clean.wav")
+    final = job.work / "final.wav"
+    media.master_loudness(cleaned, final, target, ceiling)
+    tags = [
+        "-metadata",
+        f"title={song['title']}",
+        "-metadata",
+        "comment=contains AI-generated media",
+    ]
+    media.run(["-i", str(final), "-c:a", "aac", "-b:a", "256k", *tags, str(job.work / "final.m4a")])
+    return final
+
+
+def clean(take_file: Path, cleaned: Path) -> Path:
+    """A take with its rumble out and a clean end: cut after its last full bar, faded over two
+    bars, at 48 kHz and 24 bits. Its level is left as it was, for a master to set."""
     _, end = sounding_span(take_file)
     grid_path = take_file.with_suffix(".grid.json")
     if grid_path.exists():
@@ -177,7 +225,6 @@ def _finish(job: Job, take_file: Path, song: Song) -> Path:
         cut_at = end
         fade = min(FADE_SEC, end / 4)
     fade_start = max(cut_at - fade, 0.0)
-    cleaned = job.work / "song.clean.wav"
     media.run(
         [
             "-i",
@@ -195,16 +242,7 @@ def _finish(job: Job, take_file: Path, song: Song) -> Path:
             str(cleaned),
         ]
     )  # fmt: skip
-    final = job.work / "final.wav"
-    media.master_loudness(cleaned, final, target, ceiling)
-    tags = [
-        "-metadata",
-        f"title={song['title']}",
-        "-metadata",
-        "comment=contains AI-generated media",
-    ]
-    media.run(["-i", str(final), "-c:a", "aac", "-b:a", "256k", *tags, str(job.work / "final.m4a")])
-    return final
+    return cleaned
 
 
 def _stems(job: Job, final: Path) -> dict[str, str]:
@@ -252,7 +290,9 @@ def run(job: Job) -> Path:
     stems = _stems(job, final)
     if stems:
         _sung_words(job, job.work / stems["vocals"], take_file)
-    released = release.for_job(job, song, lyrics_text(song))
+    released = release.for_job(
+        job, song, lyrics_text(song), made_by=f"{take['provider']}: {take['model']}"
+    )
     job.write(
         "asset_manifest",
         {

@@ -340,6 +340,7 @@ class SongRequest(Request):
     bpm: float | None = None
     musical_key: str | None = None
     language: str | None = None
+    vocal_gender: str | None = None  # "female" or "male", for a model with its own setting
     instrumental: bool = False
     repaint: Repaint | None = None
 
@@ -364,6 +365,8 @@ class SongRequest(Request):
                 language=self.language,
                 instrumental=self.instrumental,
             )
+            if self.vocal_gender:
+                kw["vocal_gender"] = self.vocal_gender
         return [self.lyrics], kw
 
 

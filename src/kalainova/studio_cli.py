@@ -6,6 +6,7 @@ kalainova stream new|show|canon <stream> ...
 kalainova look <kit> [--stills --cost-cap N --image PROVIDER:MODEL]  a sheet to choose a look from
 kalainova schedule <stream> <date> "<brief>" [--cast a,b]
 kalainova request <stream> "<brief>" [--cast a,b] [--slot DATE] [--amplify NOTE]
+kalainova pin <job> <capability> <provider>[:<model>] [--takes N]  which model makes a job's part
 """
 
 from __future__ import annotations
@@ -101,6 +102,14 @@ def add_parsers(sub: Any) -> None:
     req.add_argument("--slot")
     req.add_argument("--amplify", default="")
     req.add_argument("--duration", type=int)
+
+    pin = sub.add_parser("pin", help="which provider, and model, makes one part of a job")
+    pin.add_argument("job")
+    pin.add_argument("capability", help="such as song, transcribe or separate")
+    pin.add_argument(
+        "provider", help="PROVIDER or PROVIDER:MODEL, such as fal:mureka/v9.5/generate/song"
+    )
+    pin.add_argument("--takes", type=int, help="song: how many takes are made, and no more")
 
     sc = sub.add_parser("scorecards", help="rate providers and models from operational traces")
     sc.add_argument("capability", nargs="?", help="optional capability to filter by")
@@ -214,6 +223,34 @@ def _look(a: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _pin_job(a: argparse.Namespace, root: Path) -> int:
+    """Set which provider makes one part of a job, and for a song which model and how many takes,
+    so job.json is never edited by hand. A paid call still needs a signed package."""
+    from .jobfs import open_job
+    from .providers import base
+
+    job = open_job(a.job)
+    provider, _, model = a.provider.partition(":")
+    if provider not in base.names():
+        raise ContractError(f"no provider {provider!r}; there are {', '.join(base.names())}")
+    if a.capability not in base.get(provider).capabilities:
+        raise ContractError(f"{provider} cannot make {a.capability}")
+    data = job.job
+    data.setdefault("providers", {})[a.capability] = [provider]
+    brief = data.setdefault("brief", {})
+    if a.capability == "song" and model:
+        brief["song_model"] = {"provider": provider, "model": model}
+    elif model:
+        raise ContractError("only a song takes a model pin here; set the others in config")
+    if a.takes is not None:
+        if a.capability != "song" or a.takes < 1:
+            raise ContractError("--takes is a song's number of takes, one or more")
+        brief["takes"] = brief["max_takes"] = a.takes
+    job.write("job", data)
+    print(f"{job.id}: {a.capability} by {a.provider}" + (f", {a.takes} takes" if a.takes else ""))
+    return 0
+
+
 def dispatch(a: argparse.Namespace) -> int | None:
     """Run a command from this module, or None if it belongs to another."""
     for run in (signoff_cli.dispatch, knowledge_cli.dispatch):
@@ -221,7 +258,7 @@ def dispatch(a: argparse.Namespace) -> int | None:
         if done is not None:
             return done
     root = home()
-    handler = {"kit": _kit, "stream": _stream, "look": _look}.get(a.cmd)
+    handler = {"kit": _kit, "stream": _stream, "look": _look, "pin": _pin_job}.get(a.cmd)
     if handler is not None:
         return handler(a, root)
     if a.cmd == "schedule":

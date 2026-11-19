@@ -122,13 +122,18 @@ def run(
                 try:
                     from . import bench as benching
 
-                    if not (bench and benching.ready(copy, bench[0])):  # else it has its start
+                    if "song" in (copy.job.get("media") or []) and not bench:
+                        from . import songs
+
+                        dry.phase = "song"  # each take the song model would be asked for
+                        songs.rehearse_takes(copy)
+                    elif not (bench and benching.ready(copy, bench[0])):  # else it has its start
                         dry.phase = "stills"  # what the animatic pays for
                         assets.run(copy, animatic=True)
                     if bench:
                         dry.phase = "bench"
                         benching.run(copy, bench[0], bench[1], say=lambda _: None, again=again)
-                    else:
+                    elif "song" not in (copy.job.get("media") or []):
                         dry.phase = "motion"  # what the full run pays for once it is accepted
                         assets.run(copy, force=copy.has("asset_manifest"))
                 except ContractError as exc:
@@ -157,12 +162,18 @@ def run(
     return report
 
 
+def _field(name: str, value: Any) -> str:
+    """A field as the operator reads it: a short value whole, a long one by its length."""
+    said = str(value)
+    return f"{name}={said}" if len(said) <= 40 else f"{name} ({len(said)} chars)"
+
+
 def lines(report: dict[str, Any]) -> list[str]:
     """The report as the operator reads it: one line per paid request, then the sum and the cap."""
     out = []
     for call in report["calls"]:
         for req in call["requests"]:
-            fields = ", ".join(sorted(req.get("payload") or {}))
+            fields = ", ".join(_field(k, v) for k, v in sorted((req.get("payload") or {}).items()))
             schema = req.get("schema")
             said = "" if schema is None else "  schema ok" if schema == "ok" else "  SCHEMA REFUSES"
             out.append(
