@@ -48,7 +48,7 @@ SECTION_NAMES = {"pre-chorus": "Pre-Chorus"}
 
 
 def style_text(song: Song) -> str:
-    parts = [str(song["style"])]
+    parts = [str(song["style"]).strip().rstrip(".,; ")]  # one clean join, not "pads., 122 bpm"
     if song.get("bpm"):
         parts.append(f"{song['bpm']:g} bpm")
     if song.get("key"):

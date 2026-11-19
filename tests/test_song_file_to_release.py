@@ -168,3 +168,8 @@ def test_a_master_of_another_song_take_is_refused_until_that_take_stands(tmp_pat
     takes.choose(job, "master", made["n"])
     with pytest.raises(ContractError, match="the song stands on take"):
         song_master.release(job)
+
+
+def test_the_style_joins_its_tempo_and_key_cleanly():
+    said = songs.style_text(_song(style="warm pads. The outro thins out.", key="A minor"))
+    assert said == "warm pads. The outro thins out, 120 bpm, A minor"
