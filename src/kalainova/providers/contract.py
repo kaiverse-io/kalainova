@@ -83,6 +83,24 @@ class Repaint:
     end_sec: float
 
 
+GUIDE_USES = ("reference", "remix")
+
+
+@dataclass(frozen=True, kw_only=True)
+class Guide:
+    """A track a song model follows, made before anything is paid for (ADR 0016's free draft).
+
+    `reference`: a clip whose sound and groove the new song takes up. `remix`: the whole track,
+    sung and produced again from the words and the style, keeping its arrangement."""
+
+    source: Path
+    use: str
+
+    def __post_init__(self) -> None:
+        if self.use not in GUIDE_USES:
+            raise ValueError(f"a guide is used as {' or '.join(GUIDE_USES)}, not {self.use!r}")
+
+
 @dataclass(frozen=True, kw_only=True)
 class Billable:
     """What a call is priced on, so a quote needs no file and no prompt."""
@@ -92,6 +110,7 @@ class Billable:
     chars: int = 0
     image: bool = False  # a clip from a first frame
     references: bool = False  # a clip held to references
+    guided: bool = False  # a song that follows a track, which the vendor may charge to take in
 
 
 # ------------------------------------------------------------------ requests
@@ -178,7 +197,7 @@ class Request:
 def _described(value: Any) -> Any:
     if isinstance(value, Path):
         return {"file": value.name, "sha256": sha256_file(value)} if value.is_file() else value.name
-    if isinstance(value, Reference | Pin | Card | Repaint):
+    if isinstance(value, Reference | Pin | Card | Repaint | Guide):
         return {f.name: _described(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, Mapping):
         return {k: _described(v) for k, v in value.items()}
@@ -343,9 +362,12 @@ class SongRequest(Request):
     vocal_gender: str | None = None  # "female" or "male", for a model with its own setting
     instrumental: bool = False
     repaint: Repaint | None = None
+    guide: Guide | None = None
 
     def billable(self) -> Billable:
-        return Billable(capability="song", duration=float(self.duration or 0.0))
+        return Billable(
+            capability="song", duration=float(self.duration or 0.0), guided=self.guide is not None
+        )
 
     def _shape(self) -> tuple[list[Any], dict[str, Any]]:
         kw: dict[str, Any] = {"style": self.style, "duration": self.duration, "seed": self.seed}
@@ -367,6 +389,8 @@ class SongRequest(Request):
             )
             if self.vocal_gender:
                 kw["vocal_gender"] = self.vocal_gender
+        if self.guide is not None:  # only when set, so a take paid for before guides keeps its key
+            kw["guide"] = {"source": self.guide.source, "use": self.guide.use}
         return [self.lyrics], kw
 
 

@@ -39,6 +39,9 @@ def add_parsers(sub: Any) -> None:
     bench.add_argument("--models", required=True)
     bench.add_argument("--takes", type=int, default=1)
     report.add_argument("--only", help="the takes to show, in this order: 5,7,10")
+    report.add_argument(
+        "--reveal", action="store_true", help="show the readings and pick before a verdict"
+    )
     verdict = sub.add_parser("verdict")
     verdict.add_argument("job")
     verdict.add_argument("verdict", choices=verdicts.CHOICES)
@@ -81,10 +84,13 @@ def _bench(a: argparse.Namespace) -> int:
 
 def _bench_report(a: argparse.Namespace) -> int:
     job = open_job(a.job)
-    report = benchreport.write(job, a.shot, _numbers(a.only), again=a.again)
+    report = benchreport.write(job, a.shot, _numbers(a.only), again=a.again, reveal=a.reveal)
     print(f"watch them: {report['video']}")
     print(job.work / "bench" / f"{a.shot}.report.md")
-    print(f"{report['status']}: {report['reason']}")
+    if report["shown"]:
+        print(f"{report['status']}: {report['reason']}")
+    else:
+        print("the readings and the pick are kept until you give a verdict on these takes")
     return 0
 
 

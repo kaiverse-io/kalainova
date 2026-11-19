@@ -114,6 +114,11 @@ def record(
         ),
         **({"aspect": aspect} if aspect else {}),
         **({"note": note} if note else {}),
+        **(
+            {"saw_engine_pick": True}
+            if shot and (job.work / "bench" / f"{shot}.revealed").exists()
+            else {}
+        ),  # fmt: skip
     }
     with open(job.folder / VERDICTS_FILE, "a") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -414,6 +419,8 @@ def preferences(jobs_root: Path) -> list[dict[str, Any]]:
     ):
         for entry in load(folder):
             if entry.get("preferred") is None or not entry.get("shot"):
+                continue
+            if entry.get("saw_engine_pick"):  # given after the engine's pick was shown: anchored
                 continue
             won, lost = _pair(folder, entry)
             if won and lost:

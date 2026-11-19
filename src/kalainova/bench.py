@@ -402,7 +402,8 @@ def run(
     report = benchreport.write(job, shot) if benched else None
     if report:
         say(f"watch them: {report['video']}")
-        say(f"{report['status']}: {report['reason']}")
+        hidden = "the readings and the pick are kept until a person gives a verdict on these takes"
+        say(f"{report['status']}: {report['reason']}" if report["shown"] else hidden)
     return {"takes": made, "failed": failed, "sheet": sheet, "report": report}
 
 

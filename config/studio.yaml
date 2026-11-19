@@ -133,6 +133,8 @@ prices:
     song: {per_track: 0.15}        # ESTIMATE
     minimax/music-3: {per_track: 0.36, checked: "fal lists $0.002/s; 0.36 is three minutes at that rate, per track until billed units confirm"}
     mureka/v9.5/generate/song: {per_track: 0.15, checked: "fal's model page: $0.15 a song with lyrics; $0.50 from a prompt alone"}
+    mureka/v9.5/song/remix: {per_track: 0.50, checked: "fal's model page 2026-11-18: $0.50 a remixed song"}
+    mureka/api/files/upload: {per_call: 0.01, checked: "fal's model page 2026-11-18: $0.01 an upload"}
     fal-ai/lyria3/pro: {per_track: 0.08, checked: "fal's model page: $0.08 a track"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
@@ -218,7 +220,25 @@ audio_models:
   fal:
     fal-ai/ace-step: {max_sec: 240, style_field: tags, instrumental_lyrics: "[inst]"}   # fal's page: 5 to 240 s
     minimax/music-3: {max_sec: 300, style_field: prompt}   # fal's schema: duration up to 300 s
-    mureka/v9.5/generate/song: {max_sec: 300, style_field: prompt, style_max_chars: 1024, gender_field: gender}   # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+    # guide: how a model follows a track (brief.song_guide). The track goes up to `upload` first, for
+    # an id that goes in `field`. clip_sec is the clip it takes; none: the whole track.
+    mureka/v9.5/generate/song:     # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+      max_sec: 300
+      style_field: prompt
+      style_max_chars: 1024
+      gender_field: gender         # fal's schema: female or male, for lyrics-to-song
+      guide:                       # Mureka's upload docs: a reference is 30 s of mp3 or m4a, the rest trimmed.
+        # fal 422, 2026-11-18: "prompt and reference_id cannot be combined in lyrics-to-song mode",
+        # so with a reference no style is sent: the clip carries the sound
+        reference: {upload: mureka/api/files/upload, purpose: reference, field: reference_id, clip_sec: 30, style: false}
+    mureka/v9.5/song/remix:        # fal's schema 2026-11-18: lyrics and a prompt required, no length field; the source is 10 to 480 s
+      max_sec: 480
+      style_field: prompt
+      style_max_chars: 1024
+      takes_duration: false
+      needs_guide: remix
+      guide:
+        remix: {upload: mureka/api/files/upload, purpose: remix, field: upload_audio_id}
     fal-ai/lyria3/pro: {max_sec: 184, style_field: prompt, lyrics_in_prompt: true, takes_duration: false}   # one prompt carries style and lyrics; no length field. VERIFY the longest track
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
@@ -436,10 +456,21 @@ identity:
 #                 "{runners}/perform_run.py",  # background, and the camera
 #                 --face-model, ~/tools/face_landmarker.task,
 #                 --person-model, ~/tools/selfie_segmenter.tflite]
+#   look:                    # a bench's takes compared at once, ranked aspect by aspect (picture,
+#     - name: codex          # depth, physics, eyes, body, overall) by a frontier vision model on a
+#       command: [python, src/kalainova/providers/runners/look_run.py,  # subscription the studio
+#                 --cli, codex, --bin, codex, --model, <model>,         # has (codex or claude);
+#                 --prompt, prompts/judge_takes.md]                     # frames leave the machine
+#   song (a third judge):    # songs compared in pairs by a local model that listens (MLX)
+#     - name: listen
+#       command: [~/models/.venv/bin/python, src/kalainova/providers/runners/listen_run.py,
+#                 --model, mlx-community/gemma-4-e4b-it-4bit, --revision, <commit>,
+#                 --prompt, prompts/judge_song.md]
 judges:
   song: []
   lipsync: []
   performance: []
+  look: []
 
 # rank: the readings that order a bench's takes of one shot against each other (benchreport.py,
 #   ADR 0026), by capability. Each is scaled within the takes compared, never held to a fixed mark,

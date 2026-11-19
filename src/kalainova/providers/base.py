@@ -163,6 +163,10 @@ class Provider:
             end_frame=bool(plain.get("end_image_param") or refs.get("end_image_param")),
             seed=bool(plain.get("takes_seed", refs.get("takes_seed", capability != "sing"))),
             longest_sec=float(most) if most else None,
+            guides={
+                use: float(how.get("clip_sec") or 0)
+                for use, how in (sound.get("guide") or {}).items()
+            },
         )
 
     def models(self, capability: str) -> list[str]:

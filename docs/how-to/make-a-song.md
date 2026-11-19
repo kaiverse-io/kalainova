@@ -43,6 +43,28 @@ song there and nowhere else. `kalainova rehearse <job>` then writes down each ta
 with its fields and price, and sends nothing. Choose by listening, not by a model's reputation: open one job per
 model with the same `song.json`, then hear them blind (below).
 
+### Start from a free draft
+
+A song can be drafted on a free model first, and a rented one asked to follow it. Make the draft as
+its own job (ACE-Step on `mac`, say), then open the paid job with the same `song.json` and name the
+draft in its brief:
+
+```json
+"song_model": {"provider": "fal", "model": "mureka/v9.5/generate/song"},
+"song_guide": {"job": "<draft job>", "use": "reference"}
+```
+
+- `reference` sends a clip of the draft, cut on a bar where the most words are sung. The model
+  takes up its sound and groove. Mureka takes 30 s, and the upload costs a cent. Mureka takes no
+  style text with a reference, so the clip alone sets the sound.
+- `remix` sends the whole draft, to be sung and produced again from the words and the style
+  (`mureka/v9.5/song/remix`).
+
+The engine refuses before spending when the model takes no such track, the draft has no finished
+song, or the draft is not `owned` or `licensed`. Both files are kept by their hash in the song's
+provenance. Evidence so far: a reference steers melody and drums, and has not been shown to raise
+overall quality (ADR 0028).
+
 ## Make it
 
 ```bash

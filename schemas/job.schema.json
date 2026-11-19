@@ -165,6 +165,16 @@
           "properties": {"provider": {"type": "string"}, "model": {"type": "string"}},
           "description": "The one song model this job uses, so jobs that differ only in it can be heard side by side."
         },
+        "song_guide": {
+          "type": "object",
+          "required": ["job", "use"],
+          "additionalProperties": false,
+          "properties": {
+            "job": {"type": "string", "description": "A finished song job of this studio, owned or licensed."},
+            "use": {"enum": ["reference", "remix"], "description": "reference: a clip of its track steers the sound and groove; remix: the whole track is sung and produced again."}
+          },
+          "description": "A track the song's model follows, made before anything is paid for. Needs song_model, on a model that takes that use."
+        },
         "cover_at_sec": {
           "type": "number",
           "minimum": 0,

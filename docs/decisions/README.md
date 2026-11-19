@@ -31,4 +31,5 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0025](0025-a-singing-shot-is-sung-in-the-call-that-makes-it.md) | A singing shot is sung in the call that makes it, from its still and its line, and nothing is synced afterwards |
 | [0026](0026-a-bench-ranks-within-itself-and-is-held-to-preferences.md) | A bench ranks its takes within itself, and is held to a person's preferences by aspect |
 | [0027](0027-the-engine-learns-from-verdicts-and-its-knowledge-ships-with-it.md) | The engine learns from verdicts, and its knowledge ships with it |
+| [0028](0028-a-paid-song-can-follow-a-free-draft.md) | A paid song can follow a free draft: a clip of it as a reference, or the whole track remixed (built; unused, since the vendor's guided routes failed) |
 | [0029](0029-a-songs-master-is-chosen-among-options-heard-blind.md) | A song's master is chosen by a person, among options the engine renders and hears blind |

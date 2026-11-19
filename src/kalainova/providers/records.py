@@ -69,7 +69,10 @@ def audit(
     row (attempt), to the vendor's bill (request_id), and to the part of the line (labels)."""
     billed = {k: v for k, v in (meta or {}).items() if k.startswith("billed_") or k in PRICED}
     rid = receipt.request_id
-    return {**trace.labels(), "attempt": aid, "model": model, "request_id": rid, **billed}
+    found = {**trace.labels(), "attempt": aid, "model": model, "request_id": rid, **billed}
+    if receipt.steps:  # each paid step before the call, with its own request id on the bill
+        found["steps"] = [dict(s) for s in receipt.steps]
+    return found
 
 
 def record(

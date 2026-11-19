@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from . import captions, config, media, render, takes, writers
+from . import captions, config, media, render, song_guide, takes, writers
 from .bar import judges
 from .bar import song as musicbar
 from .bar.readings import summarise
@@ -24,7 +24,7 @@ from .editor.singing import sounding_span
 from .editor.singing import timed_lines as timed_lines
 from .jobfs import ContractError, Job
 from .providers import router
-from .providers.contract import Pin, SeparateRequest, SongRequest, TranscribeRequest
+from .providers.contract import Guide, Pin, SeparateRequest, SongRequest, TranscribeRequest
 from .render import release
 from .song_repair import repair_take as repair_take
 
@@ -109,7 +109,9 @@ def _song_pin(brief: dict[str, Any]) -> Pin | None:
     return Pin(provider=str(asked["provider"]), model=str(asked["model"]))
 
 
-def song_request(song: Song, brief: dict[str, Any], seed: int, dst: Path) -> SongRequest:
+def song_request(
+    song: Song, brief: dict[str, Any], seed: int, dst: Path, guide: Guide | None = None
+) -> SongRequest:
     """One take's request, as the run sends it and a rehearsal writes it down."""
     return SongRequest(
         lyrics=lyrics_text(song),
@@ -125,6 +127,7 @@ def song_request(song: Song, brief: dict[str, Any], seed: int, dst: Path) -> Son
         vocal_gender=song.get("vocal_gender"),
         instrumental=bool(song.get("instrumental")),
         pin=_song_pin(brief),  # the pinned provider only: a take never comes from another vendor
+        guide=guide,
     )
 
 
@@ -140,18 +143,21 @@ def rehearse_takes(job: Job) -> None:
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))
     brief = job.job.get("brief") or {}
+    guide, _ = song_guide.follow(job, brief, _song_pin(brief))
     prompt = f"{style_text(song)}\n{lyrics_text(song)}"
     for n in range(planned_takes(brief)["takes"]):
-        req = song_request(song, brief, takes.seed_for(prompt, n), job.work / f"rehearsed-{n}.wav")
+        dst = job.work / f"rehearsed-{n}.wav"
+        req = song_request(song, brief, takes.seed_for(prompt, n), dst, guide)
         router.generate(job, req, note="song", only=[req.pin.provider] if req.pin else None)
 
 
-def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
+def _generate(job: Job, song: Song, brief: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     lyrics = lyrics_text(song)
     style = style_text(song)
+    guide, guided = song_guide.follow(job, brief, _song_pin(brief))
 
     def make(seed: int, dst: Path) -> tuple[Any, Any]:
-        take = song_request(song, brief, seed, dst)
+        take = song_request(song, brief, seed, dst, guide)
         only = [take.pin.provider] if take.pin else None
         return router.generate(job, take, note="song", only=only)
 
@@ -160,9 +166,10 @@ def _generate(job: Job, song: Song, brief: dict[str, Any]) -> dict[str, Any]:
         return {**found, **judges.of_take("song", path)}, ok  # a judge ranks; it never blocks
 
     counts = planned_takes(brief)
-    return takes.make_until_good(
+    made = takes.make_until_good(
         job, SHOT, counts, suffix=".wav", make=make, assess=assess, prompt=f"{style}\n{lyrics}"
     )
+    return made, guided
 
 
 def _lrc_stamp(seconds: float) -> str:
@@ -268,7 +275,7 @@ def run(job: Job) -> Path:
     router.refuse_too_long(
         job, "song", float(song.get("duration_sec") or brief.get("duration_sec") or 120)
     )
-    take = _generate(job, song, brief)
+    take, guided = _generate(job, song, brief)
     take_file = job.work / take["file"]
     from .editor import musiccuts
 
@@ -316,6 +323,7 @@ def run(job: Job) -> Path:
                         **takes.provider_meta(take),
                         "lyric_timing": timing,
                         **({"stems": stems} if stems else {}),
+                        **({"guide": guided} if guided else {}),
                         "release": released,
                     },
                 }

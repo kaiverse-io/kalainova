@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any
@@ -318,6 +319,51 @@ def rejudge(job: Job, shot: str, only: list[int] | None = None, fresh: bool = Tr
     job.write("takes", data)
 
 
+def look(job: Job, shot: str, again: bool = False) -> None:
+    """The comparing judges (`judges.look`) over every bench take of the shot at once. They score
+    takes against each other, so they run again whenever the set of takes changes, and their
+    scores mean nothing for a take judged in another set."""
+    made = benched(job, shot)
+    if not judges.configured("look") or len(made) < 2:
+        return
+    record = job.work / "bench" / f"{shot}.look.json"
+    names = [t["n"] for t in made]
+    if not again and record.exists() and json.loads(record.read_text()).get("takes") == names:
+        return
+    paths = [job.work / t["file"] for t in made]
+    scores, notes = judges.score("look", paths)
+    for note in notes:
+        print(f"{job.id} {shot}: {note}", file=sys.stderr)
+    data = takes.load(job)
+    by_n = {t["n"]: t for t in data["shots"][shot]["takes"]}
+    stale = tuple(f"{j.name}." for j in judges.configured("look"))
+    for n, path in zip(names, paths, strict=True):
+        found = by_n[n].setdefault("readings", {})
+        kept = {k: v for k, v in (found.get("judged") or {}).items() if not k.startswith(stale)}
+        found["judged"] = {**kept, **scores[path]}
+    job.write("takes", data)
+    record.parent.mkdir(exist_ok=True)
+    record.write_text(json.dumps({"takes": names}) + "\n")
+
+
+def judged_by_person(job: Job, shot: str, made: list[Take]) -> bool:
+    """Whether a person has given a verdict on any of these takes. Until then the engine's
+    readings and pick are kept from them, so its pick cannot steer the verdict it is held to."""
+    from . import verdicts
+
+    shown = {t["n"] for t in made}
+    for entry in verdicts.load(job.folder):
+        named = {entry.get("take"), entry.get("preferred"), entry.get("over")} - {None}
+        if entry.get("shot") == shot and named & shown:
+            return True
+    return False
+
+
+def revealed_mark(job: Job, shot: str) -> Path:
+    """Written when a person asks to see the engine's pick before giving a verdict."""
+    return job.work / "bench" / f"{shot}.revealed"
+
+
 def _cell(value: Any) -> str:
     return f"{value:.3g}" if isinstance(value, float) else str(value)
 
@@ -349,13 +395,16 @@ def table(made: list[Take], ranking: list[dict[str, Any]], found: dict[str, Any]
 
 
 def write(
-    job: Job, shot: str, only: list[int] | None = None, again: bool = False
+    job: Job, shot: str, only: list[int] | None = None, again: bool = False, reveal: bool = False
 ) -> dict[str, Any]:
     """Judge what is missing (or everything, with `again`), then write the labelled side by side,
-    the table, and the pick with its reason beside the bench's takes."""
+    the table, and the pick with its reason beside the bench's takes. The readings and the pick
+    go in the report a person reads only once they have given a verdict on these takes, or ask
+    to see them (`reveal`, which is marked, so a verdict given after it is known to be seen)."""
     beat = _beat(job, shot)
     line = _line(job, beat)
     rejudge(job, shot, only, fresh=again)
+    look(job, shot, again)
     made = benched(job, shot, only)
     if not made:
         raise ContractError(f"{job.id}: {shot} has no bench takes to report on")
@@ -380,10 +429,20 @@ def write(
         "unsure": "no pick",
         "none": "no pick",
     }[found["status"]]
-    text = (
-        f"# Bench {shot}\n\nPanels left to right: "
-        f"{', '.join(f'take {n}' for n in report['panels'])}."
-        f"\n\n{said}. {found['reason']}.\n\n{table(made, ranking, found)}\n"
-    )
+    panels = ", ".join(f"take {t['n']} ({short(str(t.get('model')))})" for t in made)
+    shown = reveal or judged_by_person(job, shot, made)
+    if reveal and not judged_by_person(job, shot, made):
+        revealed_mark(job, shot).write_text(json.dumps({"takes": report["panels"]}) + "\n")
+    report["shown"] = shown
+    if shown:
+        body = f"{said}. {found['reason']}.\n\n{table(made, ranking, found)}"
+    else:
+        body = (
+            "The engine's readings and pick are kept from you until you give a verdict on these "
+            "takes, so they cannot steer it: `kalainova verdict <job> accept --reviewer NAME "
+            f"--shot {shot} --best N --among {','.join(map(str, report['panels']))} --aspect "
+            "overall`. Then run `kalainova bench-report` again, or pass --reveal to see them now."
+        )
+    text = f"# Bench {shot}\n\nPanels left to right: {panels}.\n\n{body}\n"
     (folder / f"{shot}.report.md").write_text(text)
     return report
