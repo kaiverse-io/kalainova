@@ -266,10 +266,11 @@ def _stems(job: Job, final: Path) -> dict[str, str]:
 
 
 def run(job: Job) -> Path:
-    writers.ensure(job, "song")
-    song = job.read("song")
     brief = job.job.get("brief") or {}
-    refused = problems(song) + genres.problems(song, genres.for_brief(brief))
+    profile = genres.for_brief(brief)
+    writers.ensure(job, "song", check=lambda d: problems(d) + genres.problems(d, profile))
+    song = job.read("song")
+    refused = problems(song) + genres.problems(song, profile)
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))
     router.refuse_too_long(

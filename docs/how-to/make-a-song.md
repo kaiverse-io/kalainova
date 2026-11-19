@@ -2,7 +2,7 @@
 
 ## Write it
 
-Make a job with `"media": ["song"]`. A model writes `song.json` from the brief when one is listed: an API key's (`anthropic`), or a subscription's command line (`cli`: set `KALAINOVA_LLM_CLI` to Claude Code's `claude` or to `codex`, and list `cli` under `preference.llm`; what it is asked leaves the machine for that vendor). Otherwise write it yourself:
+Make a job with `"media": ["song"]`. A model writes `song.json` from the brief when one is listed: an API key's (`anthropic`), or a subscription's command line (`cli`: set `KALAINOVA_LLM_CLI` to Claude Code's `claude`, to `codex`, or to both separated by `:` so one at its limit passes to the other, and list `cli` under `preference.llm`; what it is asked leaves the machine for that vendor). Otherwise write it yourself:
 
 ```json
 {
@@ -34,7 +34,8 @@ kalainova new <id> --identity <id> --subject "<brief>" --media song --genre <gen
 kalainova request <stream> "<brief>" --media song --genre <genre>
 ```
 
-The writer is handed the profile and writes inside it. The engine pins the profile's model and
+The writer is handed the profile and writes inside it. A draft that breaks the song's rules (a
+"no ..." style) or leaves the genre is told what is wrong and written again, up to three times. The engine pins the profile's model and
 takes unless the brief already does, and refuses before spend a song file outside the profile's
 tempo, keys or voice. A stream that makes audio can be asked for a song.
 
@@ -53,7 +54,9 @@ Pin one in the job's `providers`, for example `{"song": ["mac"], "transcribe": [
 
 To use one model of a provider rather than its default, pin it:
 `kalainova pin <job> song fal:mureka/v9.5/generate/song --takes 3`. That sets the brief's
-`song_model`, the job's song provider and how many takes are made. The router sends the
+`song_model`, the job's song provider and how many takes are made. A provider with no model
+(`kalainova pin <job> song mac`) uses that provider's own default and clears any other vendor's
+model the brief or its genre pinned. The router sends the
 song there and nowhere else. `kalainova rehearse <job>` then writes down each take's request,
 with its fields and price, and sends nothing. Choose by listening, not by a model's reputation: open one job per
 model with the same `song.json`, then hear them blind (below).

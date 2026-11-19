@@ -7,6 +7,8 @@ With no model, the agent driving the session writes the file instead, and this s
 from __future__ import annotations
 
 import json
+import sys
+from collections.abc import Callable
 from typing import Any
 
 from . import consistency, genres, prompts
@@ -42,8 +44,13 @@ def _fixed(job: Job) -> str:
     )
 
 
-def ensure(job: Job, kind: str) -> None:
-    """Make sure this piece has its script, writing one from the brief if it can."""
+Check = Callable[[dict[str, Any]], list[str]]
+
+
+def ensure(job: Job, kind: str, check: Check | None = None) -> None:
+    """Make sure this piece has its script, writing one from the brief if it can. `check` says
+    what a draft must not have (a song's rules, its genre); a draft it faults is told, and written
+    again."""
     contract, prompt_name = WRITERS[kind]
     if job.has(contract):
         return
@@ -78,8 +85,13 @@ def ensure(job: Job, kind: str) -> None:
             draft["job_id"] = job.id
             if contract == "song":
                 draft["words_by"] = "model"  # a release's AI disclosure reads who wrote them
+            faults = check(draft) if check else []
+            if faults:
+                raise ValueError("; ".join(faults))
             job.write(contract, draft)
             return
         except (ValueError, ContractError) as exc:
             last_error = str(exc)[:1500]
+            said = f"{job.id}: the writer's draft was refused, and is asked again"
+            print(f"{said}: {last_error[:300]}", file=sys.stderr)
     raise ContractError(f"{job.id}: the writer failed validation {ATTEMPTS} times: {last_error}")

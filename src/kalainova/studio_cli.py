@@ -243,6 +243,8 @@ def _pin_job(a: argparse.Namespace, root: Path) -> int:
     brief = data.setdefault("brief", {})
     if a.capability == "song" and model:
         brief["song_model"] = {"provider": provider, "model": model}
+    elif a.capability == "song":  # the provider's own default: no other vendor's model stays pinned
+        brief.pop("song_model", None)
     elif model:
         raise ContractError("only a song takes a model pin here; set the others in config")
     if a.takes is not None:

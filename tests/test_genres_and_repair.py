@@ -206,3 +206,56 @@ def test_a_subscription_command_line_writes_text_from_an_empty_folder(tmp_path, 
     assert cli_llm.argv("claude", "c", "", tmp_path)[:4] == ["c", "-p", "--output-format", "text"]
     assert "--allowedTools" in cli_llm.argv("claude", "c", "", tmp_path), "no tools: text only"
     assert cli_llm.argv("codex", "x", "m", tmp_path)[-3:] == ["-m", "m", "-"]
+
+
+def test_a_subscription_at_its_limit_passes_the_question_to_the_next(tmp_path, monkeypatch):
+    from kalainova.providers import base, cli_llm
+    from kalainova.providers.contract import TextRequest
+
+    spent = tmp_path / "limited" / "claude"
+    spent.parent.mkdir()
+    spent.write_text('#!/bin/sh\necho "You\'ve hit your session limit" >&2; exit 1\n')
+    spent.chmod(0o755)
+    other = tmp_path / "other"
+    other.mkdir()
+    codex = other / "codex"
+    codex.write_text('#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done\n'
+                     'echo written > "$out"\n')  # fmt: skip
+    codex.chmod(0o755)
+    monkeypatch.setenv(cli_llm.COMMAND_ENV, f"{spent}:{codex}")
+    res = base.get("cli").llm(TextRequest(prompt="write"), context())
+    assert res.text == "written" and res.model == "codex:default"
+    monkeypatch.setenv(cli_llm.COMMAND_ENV, str(spent))
+    with pytest.raises(RuntimeError, match="session limit"):
+        base.get("cli").llm(TextRequest(prompt="write"), context())
+
+
+def test_a_draft_that_breaks_the_songs_rules_is_told_and_written_again(tmp_path, studio, genre):
+    job = make_job(tmp_path, media=["song"])
+    job.write("job", {**job.job, "brief": {**job.job["brief"], "genre": genre}})
+    off = (
+        '{"title": "T", "style": "pads, no autotune", "bpm": 140, "key": "A minor", '
+        '"vocal_gender": "female", "sections": [{"kind": "verse", "lines": ["a line"]}]}'
+    )
+    good = off.replace(", no autotune", "").replace("140", "123")
+    studio.replies = [off, good]
+    writers.ensure(job, "song", check=lambda d: songs.problems(d) + genres.problems(d, PROFILE))
+    asks = [c for c in studio.calls if c["capability"] == "llm"]
+    assert len(asks) == 2 and "tempo" in asks[1]["prompt"] and "avoid" in asks[1]["prompt"]
+    assert job.read("song")["bpm"] == 123
+
+
+def test_a_song_pinned_to_a_provider_alone_keeps_no_other_vendors_model(
+    tmp_path, studio, monkeypatch
+):
+    from kalainova.__main__ import main
+
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    job = make_job(tmp_path, media=["song"])
+    pinned = {"provider": "fal", "model": MUREKA}
+    job.write("job", {**job.job, "brief": {**job.job["brief"], "song_model": pinned}})
+    assert main(["pin", job.id, "song", "mac", "--takes", "1"]) == 0
+    from kalainova.jobfs import Job
+
+    brief = Job(job.folder).job["brief"]
+    assert "song_model" not in brief and brief["takes"] == 1

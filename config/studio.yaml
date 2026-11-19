@@ -46,9 +46,9 @@ deadlines_sec:
   search: 60
 
 models:
-  cli:                             # a subscription's command line (providers/cli_llm.py); KALAINOVA_LLM_CLI names it
-    kind: claude                   # claude (Claude Code, `claude -p`) or codex (`codex exec`)
-    llm: ""                        # the model to ask; empty: the command's own default
+  cli:                             # subscriptions' command lines (providers/cli_llm.py); KALAINOVA_LLM_CLI names them, ":" apart, tried in order
+    claude: ""                     # the model Claude Code is asked for; empty: its own default
+    codex: ""                      # the model Codex is asked for; empty: its own default
   separator:                       # python-audio-separator on this machine; KALAINOVA_AUDIO_SEPARATOR names its command
     # Multisong vocal SDR 10.98 (ZFTurbo's table, Nov 2026); BS-RoFormer viperx 1297
     # (model_bs_roformer_ep_317_sdr_12.9755.ckpt) reads 10.87 there. Compare them on your own takes.
