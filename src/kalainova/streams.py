@@ -178,6 +178,18 @@ def _job_record(
     return record
 
 
+def _check_asked(stream: Stream, media: list[str] | None, genre: str | None) -> None:
+    """Refuse a part the stream does not make; a song counts as the audio a stream makes."""
+    makes = set(stream["media"]) | ({"song"} if "audio" in stream["media"] else set())
+    unasked = sorted(set(media or []) - makes)
+    if unasked:
+        raise ContractError(
+            f"{stream['stream_id']} makes {', '.join(stream['media'])}, not {unasked}"
+        )
+    if genre and "song" not in (media or stream["media"]):
+        raise ContractError("a genre profile is for a song: ask for --media song")
+
+
 def request(
     root: Path,
     stream_id: str,
@@ -187,10 +199,16 @@ def request(
     slot: str | None = None,
     amplify: str = "",
     duration: int | None = None,
+    media: list[str] | None = None,
+    genre: str | None = None,
 ) -> Job:
     """Turn 'this channel, this brief' into a locked job. The engine works out everything else, and
-    refuses before any money is spent if the channel cannot keep what it promises consistent."""
+    refuses before any money is spent if the channel cannot keep what it promises consistent.
+
+    `media` asks for part of what the stream makes; a song counts as the audio a stream makes.
+    `genre` names the studio's profile a song is written and made inside (genres.py)."""
     stream = load(root, stream_id)
+    _check_asked(stream, media, genre)
     if slot:
         if brief:
             raise ContractError("a slot already carries its brief; pass one or the other")
@@ -212,6 +230,12 @@ def request(
         record["brief"]["amplification"] = amplify
     if duration:
         record["brief"]["duration_sec"] = duration
+    if media:
+        record["media"] = list(media)
+    if genre:
+        from . import genres
+
+        genres.apply(record["brief"], genre)
     folder = root / "jobs" / job_id
     folder.mkdir(parents=True)
     job = Job(folder)

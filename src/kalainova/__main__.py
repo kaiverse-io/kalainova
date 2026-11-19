@@ -51,6 +51,7 @@ from pathlib import Path
 from . import (
     assets,
     edit,
+    genres,
     plan,
     production_cli,
     qa,
@@ -91,6 +92,8 @@ def _new(a) -> int:
             "fingerprint": fingerprint.fingerprint(),
         }
     )
+    if a.genre:
+        genres.apply(data["brief"], a.genre)
     (dst / "job.json").write_text(json.dumps(data, indent=2) + "\n")
     print(dst)
     return 0
@@ -252,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--rights", default="owned")
     n.add_argument("--duration", type=int, default=35)
     n.add_argument("--cost-cap", type=float, default=5.0)
+    n.add_argument("--genre", help="a song's genre profile, from genres in the studio config")
     m = sub.add_parser("make")
     m.add_argument("job")
     m.add_argument("--force", action="store_true")

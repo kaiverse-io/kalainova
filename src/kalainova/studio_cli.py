@@ -6,6 +6,7 @@ kalainova stream new|show|canon <stream> ...
 kalainova look <kit> [--stills --cost-cap N --image PROVIDER:MODEL]  a sheet to choose a look from
 kalainova schedule <stream> <date> "<brief>" [--cast a,b]
 kalainova request <stream> "<brief>" [--cast a,b] [--slot DATE] [--amplify NOTE]
+                  [--media song --genre G]         a song in one of the studio's genre profiles
 kalainova pin <job> <capability> <provider>[:<model>] [--takes N]  which model makes a job's part
 """
 
@@ -102,6 +103,8 @@ def add_parsers(sub: Any) -> None:
     req.add_argument("--slot")
     req.add_argument("--amplify", default="")
     req.add_argument("--duration", type=int)
+    req.add_argument("--media", help="part of what the stream makes, such as song")
+    req.add_argument("--genre", help="a song's genre profile, from genres in the studio config")
 
     pin = sub.add_parser("pin", help="which provider, and model, makes one part of a job")
     pin.add_argument("job")
@@ -273,9 +276,12 @@ def dispatch(a: argparse.Namespace) -> int | None:
             slot=a.slot,
             amplify=a.amplify,
             duration=a.duration,
+            media=[m.strip() for m in a.media.split(",") if m.strip()] if a.media else None,
+            genre=a.genre,
         )
         print(job.folder)
-        print(f"next: kalainova make {job.folder}")
+        song = "song" in job.job["media"]
+        print(f"next: kalainova {'song' if song else 'make'} {job.folder if not song else job.id}")
         return 0
     if a.cmd == "scorecards":
         from . import scorecard

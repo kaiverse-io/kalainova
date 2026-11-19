@@ -81,6 +81,8 @@ class Repaint:
     source: Path
     start_sec: float
     end_sec: float
+    lyrics: str = ""  # the words sung in the span, for a model that edits by replacing them
+    vendor_id: str | None = None  # the vendor's own id of the take, when it made it
 
 
 GUIDE_USES = ("reference", "remix")

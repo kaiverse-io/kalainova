@@ -5,6 +5,8 @@ Brief (JSON):
 
 {facts}
 
+{genre}
+
 Rules:
 - The words are entirely your own. Never reuse real lyrics, and never name a real artist, song, or band.
 - "style" describes the sound in plain words: genre, instruments, tempo feel, mood, and the kind of voice. Never "in the style of" anyone. Use only words for what you want: a model hears every sound the style names, so "no autotune" asks for autotune. What to keep out goes in "avoid".

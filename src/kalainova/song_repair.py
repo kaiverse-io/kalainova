@@ -9,17 +9,26 @@ from . import config, media, takes
 from .bar import song as musicbar
 from .jobfs import ContractError, Job
 from .providers import base, router
-from .providers.contract import Repaint, SongRequest
+from .providers.contract import Pin, Repaint, SongRequest
 
 SHOT = "song"
 
 
-def _repainter(job: Job) -> str:
-    """The first ready song provider that can repaint a span. Refused before any work if none can.
+def _repainter(job: Job) -> tuple[str, Pin | None]:
+    """The provider that repaints a span, and the model it is pinned to. The job's own song model
+    comes first when its row names an edit route (`edit_with`): the repair is pinned to that route,
+    so what is signed, billed and recorded is the edit model. Otherwise the first ready song
+    provider that can repaint. Refused before any work if none can.
 
     A repair never falls back to copying the take: a copy would be recorded as a repaired take
     that changed nothing.
     """
+    asked = (job.job.get("brief") or {}).get("song_model") or {}
+    if asked.get("provider") in base.names():
+        p = base.get(str(asked["provider"]))
+        route = config.audio_spec(p.name, str(asked.get("model"))).get("edit_with")
+        if route and p.available("song"):
+            return p.name, Pin(provider=p.name, model=str(route))
     tried = []
     for name in config.preference("song", job.job):
         try:
@@ -29,13 +38,23 @@ def _repainter(job: Job) -> str:
         if "song" not in p.capabilities or not p.available("song"):
             continue
         if p.inputs("song").repaint:
-            return name
+            return name, None
         tried.append(name)
     raise ContractError(
         f"{job.id}: no ready song provider can repaint a section "
         f"(ready: {', '.join(tried) or 'none'}). The local ACE-Step route can: "
         "set models.mac.song to ace-step and put mac in the song preference."
     )
+
+
+def _span_words(song: dict[str, Any], section_name: str | None) -> str:
+    """The words of the named section, tagged as a song model reads them; none for a bare span."""
+    if not section_name:
+        return ""
+    for item in song.get("sections", []):
+        if item.get("kind", "").casefold() == section_name.casefold():
+            return "\n".join([f"[{str(item['kind']).title()}]", *(item.get("lines") or [])])
+    return ""
 
 
 def _repair_span(
@@ -96,7 +115,7 @@ def repair_take(
     original = job.work / target["file"]
     if not original.is_file():
         raise ContractError(f"{job.id}: missing audio for song take {target['n']}: {original}")
-    painter = _repainter(job)
+    painter, pin = _repainter(job)
     new_n = max(t["n"] for t in existing) + 1
     dst = takes.take_path(job, SHOT, new_n, "-repaired.wav")
     style = prompt or style_text(song)
@@ -108,7 +127,17 @@ def repair_take(
         style=style,
         duration=seconds,
         seed=seed,
-        repaint=Repaint(source=original, start_sec=start, end_sec=end),
+        repaint=Repaint(
+            source=original,
+            start_sec=start,
+            end_sec=end,
+            lyrics=_span_words(song, section),
+            # a take this vendor made goes by its own id, so nothing is uploaded again
+            vendor_id=(target.get("meta") or {}).get("song_id")
+            if target.get("provider") == painter
+            else None,
+        ),
+        pin=pin,
     )
     provider, result = router.generate(job, repaired, only=[painter], note="song repair")
     # measured like any take, so the person compares two takes on the same readings
@@ -131,6 +160,7 @@ def repair_take(
         "repaired_from": target["n"],
         "repair_section": section,
         "repair_span": [start, end],
+        **({"meta": dict(result.meta)} if result.meta else {}),
     }
     takes.record(job, SHOT, new_take)
     return new_take

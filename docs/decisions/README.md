@@ -33,3 +33,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0027](0027-the-engine-learns-from-verdicts-and-its-knowledge-ships-with-it.md) | The engine learns from verdicts, and its knowledge ships with it |
 | [0028](0028-a-paid-song-can-follow-a-free-draft.md) | A paid song can follow a free draft: a clip of it as a reference, or the whole track remixed (built; unused, since the vendor's guided routes failed) |
 | [0029](0029-a-songs-master-is-chosen-among-options-heard-blind.md) | A song's master is chosen by a person, among options the engine renders and hears blind |
+| [0030](0030-a-song-is-made-inside-its-genres-profile.md) | A song is written and made inside its genre's profile, which the studio sets |

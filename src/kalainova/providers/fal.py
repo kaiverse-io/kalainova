@@ -408,10 +408,16 @@ class Fal(Provider):
     def song(self, req: SongRequest, ctx: Context) -> Result:
         """A song sent as fal_song says for the model's row; a guide goes up first, for its id."""
         model = ctx.model or model_for("fal", "song")
-        payload, how = fal_song.payload(model, req)
         taken = 0.0
-        if req.guide and how:
-            payload[str(how["field"])], taken = self._vendor_file(req.guide.source, how, ctx)
+        if req.repaint is not None:  # one span sung again, on a row that edits
+            payload, how = fal_song.edit_payload(model, req)
+            if how:
+                upload = fal_song.upload_copy(req.repaint.source)
+                payload[str(how["field"])], taken = self._vendor_file(upload, how, ctx)
+        else:
+            payload, how = fal_song.payload(model, req)
+            if req.guide and how:
+                payload[str(how["field"])], taken = self._vendor_file(req.guide.source, how, ctx)
         reply = self._send(model, payload, ctx)
         cost = taken + fal_song.cost(model, req)
         self._fetch_audio(reply, req.dst, cost)

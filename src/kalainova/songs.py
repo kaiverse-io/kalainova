@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from . import captions, config, media, render, song_guide, takes, writers
+from . import captions, config, genres, media, render, song_guide, takes, writers
 from .bar import judges
 from .bar import song as musicbar
 from .bar.readings import summarise
@@ -139,10 +139,10 @@ def rehearse_takes(job: Job) -> None:
     """Every take a paid song model would be asked for, under an open rehearsal: the requests are
     written down and nothing is sent. Refused first, as the run refuses, when the song cannot go."""
     song = job.read("song")
-    refused = problems(song)
+    brief = job.job.get("brief") or {}
+    refused = problems(song) + genres.problems(song, genres.for_brief(brief))
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))
-    brief = job.job.get("brief") or {}
     guide, _ = song_guide.follow(job, brief, _song_pin(brief))
     prompt = f"{style_text(song)}\n{lyrics_text(song)}"
     for n in range(planned_takes(brief)["takes"]):
@@ -268,10 +268,10 @@ def _stems(job: Job, final: Path) -> dict[str, str]:
 def run(job: Job) -> Path:
     writers.ensure(job, "song")
     song = job.read("song")
-    refused = problems(song)
+    brief = job.job.get("brief") or {}
+    refused = problems(song) + genres.problems(song, genres.for_brief(brief))
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))
-    brief = job.job.get("brief") or {}
     router.refuse_too_long(
         job, "song", float(song.get("duration_sec") or brief.get("duration_sec") or 120)
     )

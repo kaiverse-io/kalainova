@@ -2,7 +2,7 @@
 
 ## Write it
 
-Make a job with `"media": ["song"]`. A model writes `song.json` from the brief when one is listed. Otherwise write it yourself:
+Make a job with `"media": ["song"]`. A model writes `song.json` from the brief when one is listed: an API key's (`anthropic`), or a subscription's command line (`cli`: set `KALAINOVA_LLM_CLI` to Claude Code's `claude` or to `codex`, and list `cli` under `preference.llm`; what it is asked leaves the machine for that vendor). Otherwise write it yourself:
 
 ```json
 {
@@ -22,6 +22,21 @@ Make a job with `"media": ["song"]`. A model writes `song.json` from the brief w
 Describe a sound. A style asking to imitate a named person is refused before it reaches a model. Words are original, and no real person's voice is ever used.
 
 Name only what you want in `style`: a model hears every sound the style names, so "no autotune" asks for autotune, and a style that says "no", "without" or "never" is refused before spend. What to keep out goes in `avoid`. Many models read nothing about the arrangement but the style, so say there how the track moves, section to section; two takes of a style that fixes one groove "throughout" come back with the same beat. `vocal_gender` (`female` or `male`) goes to a model that takes it as its own setting (Mureka). `words_by` says who wrote the words (`person`, `model`, or `person_edited_model`): the release's AI record is read from it, and the engine's writer sets `model`.
+
+## Choose a genre
+
+What a song is made inside is the studio's decision, set once per genre and kept in the private
+config under `genres:`: a tempo range, keys, a structure with bar counts, base style words, what to
+keep out, the voice, the song model and how many takes. Name one when the job is opened:
+
+```sh
+kalainova new <id> --identity <id> --subject "<brief>" --media song --genre <genre>
+kalainova request <stream> "<brief>" --media song --genre <genre>
+```
+
+The writer is handed the profile and writes inside it. The engine pins the profile's model and
+takes unless the brief already does, and refuses before spend a song file outside the profile's
+tempo, keys or voice. A stream that makes audio can be asked for a song.
 
 ## Choose an engine
 
@@ -112,6 +127,10 @@ kalainova take <job> master 4                                        # the one y
 - A reference is a released track you bought. It is analysed only, never copied into the song,
   and its name and hash are kept with the option.
 - Each option is read again once encoded as AAC and MP3, because true peak rises in a codec.
+- `kalainova song repair <job> --section chorus` sings one section again. On a model whose row
+  names an edit route (Mureka on fal), it goes to that route with the section's words, by the
+  take's own id when the vendor made it, at $0.10 an edit. A paid repair needs a package like any
+  paid call.
 - `kalainova song master <job> --release` makes the master you chose the song's `final.wav` and
   its release folder, and moves the render stamp to it. A master the readings picked is not
   released, and nor is a master of a song take the song does not stand on.

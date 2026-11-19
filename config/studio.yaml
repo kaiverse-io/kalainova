@@ -46,6 +46,9 @@ deadlines_sec:
   search: 60
 
 models:
+  cli:                             # a subscription's command line (providers/cli_llm.py); KALAINOVA_LLM_CLI names it
+    kind: claude                   # claude (Claude Code, `claude -p`) or codex (`codex exec`)
+    llm: ""                        # the model to ask; empty: the command's own default
   separator:                       # python-audio-separator on this machine; KALAINOVA_AUDIO_SEPARATOR names its command
     # Multisong vocal SDR 10.98 (ZFTurbo's table, Nov 2026); BS-RoFormer viperx 1297
     # (model_bs_roformer_ep_317_sdr_12.9755.ckpt) reads 10.87 there. Compare them on your own takes.
@@ -135,6 +138,7 @@ prices:
     mureka/v9.5/generate/song: {per_track: 0.15, checked: "fal's model page: $0.15 a song with lyrics; $0.50 from a prompt alone"}
     mureka/v9.5/song/remix: {per_track: 0.50, checked: "fal's model page 2026-11-18: $0.50 a remixed song"}
     mureka/api/files/upload: {per_call: 0.01, checked: "fal's model page 2026-11-18: $0.01 an upload"}
+    mureka/api/song/edit: {per_track: 0.10, checked: "fal's model page 2026-11-19: $0.10 an edited region"}
     fal-ai/lyria3/pro: {per_track: 0.08, checked: "fal's model page: $0.08 a track"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
@@ -210,6 +214,8 @@ licences:
     "*": {name: Apache-2.0, commercial: true, retention: "none: renders on this machine"}
   whispercpp:
     "*": {name: MIT (whisper.cpp; the model file has its own terms), commercial: true, retention: "none: runs on this machine"}
+  cli:
+    "*": {name: the subscription's own terms, commercial: true, retention: "the vendor's: what is asked leaves this machine for it"}
   separator:
     "*": {name: MIT (python-audio-separator; each checkpoint has its own terms), commercial: true, retention: "none: runs on this machine", obligations: ["Many open separation checkpoints were trained on MUSDB18-HQ, which is for educational use: list the checkpoint for a release's legal review"]}
 
@@ -227,10 +233,16 @@ audio_models:
       style_field: prompt
       style_max_chars: 1024
       gender_field: gender         # fal's schema: female or male, for lyrics-to-song
+      edit_with: mureka/api/song/edit   # a span of a take sung again (song_repair)
       guide:                       # Mureka's upload docs: a reference is 30 s of mp3 or m4a, the rest trimmed.
         # fal 422, 2026-11-18: "prompt and reference_id cannot be combined in lyrics-to-song mode",
         # so with a reference no style is sent: the clip carries the sound
         reference: {upload: mureka/api/files/upload, purpose: reference, field: reference_id, clip_sec: 30, style: false}
+    mureka/api/song/edit:          # fal's schema 2026-11-19: song_id or upload_audio_id, lyrics, edit_start and edit_end in ms, at least 3 s
+      edits: true
+      min_region_sec: 3
+      upload: mureka/api/files/upload
+      purpose: audio
     mureka/v9.5/song/remix:        # fal's schema 2026-11-18: lyrics and a prompt required, no length field; the source is 10 to 480 s
       max_sec: 480
       style_field: prompt
@@ -548,6 +560,13 @@ profiles:
   # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
   film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
   film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
+
+# genres: the studio's genre profiles (genres.py). A job names one in brief.genre; its song is
+#   written inside it, made on its song model, and refused before spend outside its tempo, keys or
+#   voice. The repo names no genre: each studio sets its own in its private config, as
+#   <genre-id>: {label, bpm: [low, high], keys: [...], duration_sec, vocal_gender, style, avoid,
+#                structure: [{kind, bars}], song_model: {provider, model}, takes}
+genres: {}
 
 # song_master: a song take's master as options a person hears blind (song_master.py, ADR 0029).
 #   vocal_db_most: the furthest a separated vocal is moved; past about 3 dB its artefacts are heard

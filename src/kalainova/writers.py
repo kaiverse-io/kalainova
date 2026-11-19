@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import consistency, prompts
+from . import consistency, genres, prompts
 from .jobfs import ContractError, Job
 from .providers import router
 from .providers.contract import TextRequest
@@ -63,6 +63,7 @@ def ensure(job: Job, kind: str) -> None:
             brief=json.dumps(brief, indent=2, ensure_ascii=False),
             job_id=job.id,
             facts=_facts(job),
+            genre=genres.writer_text(brief) if kind == "song" else "",
         )
         retry = (
             f"\n\nYour previous output failed validation:\n{last_error}\nFix it."
