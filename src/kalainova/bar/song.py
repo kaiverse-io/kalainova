@@ -39,6 +39,11 @@ LOW_BPM, HIGH_BPM = 70.0, 180.0
 SHORT_WORD = 3  # "the", "of", and "me" are heard anywhere and prove nothing
 STEM_HEARD = ".vocals.heard.json"  # beside a take: what was heard of its vocal stem alone
 MIX_HEARD = ".heard.json"  # beside a take: what was heard of the take itself
+# What one window's tempo can be mistaken for: half or double time, and the 3:2 and 4:3 of dotted
+# and triplet figures, which dance percussion can put in more than half the windows of a steady
+# take (a 126 bpm take read 83.8 in 27 of 44 windows, and 169.8 in 3).
+METRIC_FOLDS = (0.5, 2 / 3, 0.75, 1.0, 4 / 3, 1.5, 2.0)
+MAD_TO_SD = 1.4826  # the median absolute deviation of a normal spread, as its standard deviation
 
 
 def tempo_miss(detected: float, asked: float) -> float:
@@ -53,22 +58,36 @@ def _window_tempo(env: np.ndarray, fps: float) -> float | None:
         return None
     corr = np.correlate(env, env, mode="full")[env.size - 1 :]
     low, high = int(fps * 60 / HIGH_BPM), int(fps * 60 / LOW_BPM)
-    if high <= low or corr.size <= high:
+    if high <= low or corr.size <= high + 1:
         return None
-    lag = low + int(np.argmax(corr[low:high]))
+    lag = float(low + int(np.argmax(corr[low:high])))
+    # between frames: a whole-frame lag at 43 frames a second reads 126 bpm only as 123 or 129
+    a, b, c = corr[int(lag) - 1], corr[int(lag)], corr[int(lag) + 1]
+    bend = a - 2 * b + c
+    if bend < 0:
+        lag += float(np.clip(0.5 * (a - c) / bend, -0.5, 0.5))
     return 60.0 * fps / lag if lag else None
 
 
-def tempo_drift(env: np.ndarray, fps: float) -> float:
-    """How much the tempo wanders across a track, as a share of itself. Near zero holds steady."""
+def tempo_drift(env: np.ndarray, fps: float, base: float | None = None) -> float:
+    """How much the tempo wanders across a track, as a share of itself. Near zero holds steady.
+
+    Each window's tempo is read as the metric relation nearest `base` (the tempo asked for, when
+    there is one), so a window that locks onto a 3:2 figure is not counted as drift. The spread is
+    robust (from the median absolute deviation), so a few misread windows cannot pass for drift,
+    while a tempo that really wanders moves most windows and still reads."""
     size, hop = int(WINDOW_SEC * fps), int(HOP_SEC * fps)
     found = [_window_tempo(env[i : i + size], fps) for i in range(0, max(env.size - size, 1), hop)]
     tempi = np.array([t for t in found if t], dtype=np.float64)
     if tempi.size < 2:
         return 0.0
-    base = float(np.median(tempi))
-    folded = np.array([min((t, t / 2, t * 2), key=lambda v: abs(v - base)) for t in tempi])
-    return float(folded.std() / max(folded.mean(), 1e-6))
+    anchor = float(base) if base else float(np.median(tempi))
+    folded = np.array(
+        [min((t * f for f in METRIC_FOLDS), key=lambda v: abs(v - anchor)) for t in tempi]
+    )
+    centre = float(np.median(folded))
+    spread = MAD_TO_SD * float(np.median(np.abs(folded - centre)))
+    return spread / max(centre, 1e-6)
 
 
 def _tokens(text: str) -> list[str]:
@@ -134,7 +153,8 @@ def _sound_readings(path: Path) -> list[Reading]:
 def _tempo_readings(path: Path, song: Song) -> list[Reading]:
     env = beats.onset_envelope(beats._pcm(path))
     fps = beats.SR / beats.HOP
-    out = [at_most("song.tempo_drift", tempo_drift(env, fps), "song_tempo_drift_max")]
+    asked = float(song.get("bpm") or 0) or None
+    out = [at_most("song.tempo_drift", tempo_drift(env, fps, asked), "song_tempo_drift_max")]
     if song.get("bpm"):
         detected = float(beats.beat_grid(path)["bpm"])
         miss = tempo_miss(detected, float(song["bpm"]))
