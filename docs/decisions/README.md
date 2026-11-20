@@ -38,3 +38,4 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0032](0032-the-writer-leads-a-songs-creative-choices.md) | The writer leads a song's creative choices, and a genre profile is ground to lead from, held only where the studio says |
 | [0033](0033-a-take-that-opens-at-full-level-is-read-and-a-plan-leads-with-each-sections-own-direction.md) | A take that opens at full level is read as such, and a plan leads each chunk with its section's own direction |
 | [0034](0034-a-song-take-is-read-against-its-own-plan.md) | A song take is read against its own plan, and what it missed becomes a card with a time and a fix |
+| [0035](0035-a-song-request-is-the-same-on-every-host-and-a-dead-route-is-refused-before-spend.md) | A song request is the same on every host, a dead route is refused before spend, and the writer weighs what studies of listeners found |
