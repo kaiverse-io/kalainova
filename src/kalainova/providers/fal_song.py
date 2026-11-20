@@ -67,7 +67,9 @@ def payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
 def _plan_payload(model: str, req: SongRequest) -> Fields:
     if req.guide:
         raise ValueError(f"{model} takes no guide track here")
-    chunks = song_text.plan(req.sections, req.style, req.avoid, req.bpm, req.duration or 120)
+    chunks = song_text.plan(
+        req.sections, req.style, req.avoid, req.bpm, req.duration or 120, req.pronounce
+    )
     sent: Fields = {"composition_plan": {"chunks": chunks}, "output_format": "mp3_48000_320"}
     if req.seed is not None:
         sent["seed"] = int(req.seed)

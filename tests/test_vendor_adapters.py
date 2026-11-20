@@ -92,17 +92,44 @@ def test_a_song_goes_as_a_chunked_composition_plan(eleven, tmp_path):
     assert body["model_id"] == "music_v2_5" and "prompt" not in body
     chunks = body["composition_plan"]["chunks"]
     assert chunks[0]["text"] == "[Verse]\nOne\nTwo"
-    assert chunks[0]["positive_styles"] == ["pop", "soft"] and chunks[1]["negative_styles"] == [
+    # the same plan fal sends this model: each section's own note leads, the style once, first
+    assert chunks[0]["positive_styles"] == ["soft", "pop"] and chunks[1]["negative_styles"] == [
         "dark"
     ]
+    assert chunks[1]["positive_styles"] == ["pop"], "a section with no note keeps the style"
     assert chunks[1]["duration_ms"] == 2 * chunks[0]["duration_ms"], "time follows the lines"
 
 
-def test_a_song_plan_stays_inside_the_apis_limits():
+def test_a_song_goes_to_elevenlabs_as_the_plan_fal_sends_it(eleven, tmp_path):
+    """One builder for a model family: the host decides how the request travels, never what the
+    model is asked."""
+    from kalainova.providers import song_text
+
+    provider, sent, replies, _ = eleven
+    replies.append(Reply(content=b"pcm"))
+    sections = [
+        {"kind": "intro", "bars": 8, "style": "pads alone", "avoid": "kick"},
+        {"kind": "pre-chorus", "bars": 4, "lines": ["Juntos, one breath in"]},
+    ]
+    said = {"juntos": "HOON-tohs"}
+    asked = SongRequest(lyrics="", dst=tmp_path / "s.wav", style="house", duration=180, bpm=120,
+                        sections=sections, avoid="rap", seed=9, pronounce=said)  # fmt: skip
+    res = provider.song(asked, context())
+    body = sent[0]["json"]
+    assert body["composition_plan"]["chunks"] == song_text.plan(
+        sections, "house", "rap", 120, 180, {"juntos": "HOON-tohs"}
+    )
+    assert body["seed"] == 9
+    assert res.cost == pytest.approx(24 / 60 * 0.80)  # priced on the 24 s the plan runs
+
+
+def test_a_song_plan_past_the_apis_limits_is_refused_before_sending(eleven, tmp_path):
+    provider, sent, _, _ = eleven
     many = [{"kind": "verse", "lines": ["x"]} for _ in range(50)]
-    chunks = remote.song_chunks(many, "pop", 10)
-    assert len(chunks) == remote.SONG_MOST_CHUNKS
-    assert all(c["duration_ms"] >= remote.SONG_LEAST_CHUNK_MS for c in chunks)
+    asked = SongRequest(lyrics="", dst=tmp_path / "s.wav", style="pop", duration=600, sections=many)
+    with pytest.raises(ValueError, match="1 to 30 sections"):
+        provider.song(asked, context())
+    assert not sent
 
 
 def test_a_song_with_no_sections_goes_as_a_prompt(eleven, tmp_path):

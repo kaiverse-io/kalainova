@@ -314,3 +314,30 @@ def test_an_intro_played_at_full_level_reads_as_no_soft_start(tmp_path):
         musicbar.intro_rise(_noise_wav(tmp_path / "long.wav", [0.05, 0.05, 0.4, 0.4]), unplaced)
         < -10
     )
+
+
+def test_an_uncommon_word_is_said_on_the_chunk_that_sings_it(mureka):
+    """The hint rode only in the song's style, which a plan sends on its first chunk, so a word
+    sung in the pre-chorus was sung as an English one (2026-11-20)."""
+    provider, wire, tmp = mureka
+    sections = [
+        {"kind": "intro", "bars": 8, "style": "pads alone"},
+        {"kind": "pre-chorus", "bars": 4, "lines": ["Juntos, one breath in"], "style": "rising"},
+        {"kind": "chorus", "bars": 8, "lines": ["Hold the light"]},
+    ]
+    style = 'house, pronounce "juntos" as "HOON-tohs"'
+    req = SongRequest(lyrics="", dst=tmp / "s.wav", style=style, duration=180, bpm=120,
+                      sections=sections, pronounce={"juntos": "HOON-tohs"})  # fmt: skip
+    provider.song(req, context(model="elevenlabs/music/v2.5"))
+    intro, pre, chorus = wire.sent[-1]["payload"]["composition_plan"]["chunks"]
+    assert pre["positive_styles"] == ["rising", 'pronounce "juntos" as "HOON-tohs"']
+    assert intro["positive_styles"] == ["pads alone", 'house, pronounce "juntos" as "HOON-tohs"']
+    # a section with no note of its own keeps the style, and sings no uncommon word
+    assert chorus["positive_styles"] == ['house, pronounce "juntos" as "HOON-tohs"']
+
+
+def test_a_hint_is_keyed_into_the_request_only_when_a_song_has_one(tmp_path):
+    plain = SongRequest(lyrics="w", dst=tmp_path / "s.wav", style="house")
+    said = SongRequest(lyrics="w", dst=tmp_path / "s.wav", style="house", pronounce={"a": "b"})
+    assert "pronounce" not in plain._shape()[1]
+    assert plain.key() != said.key()

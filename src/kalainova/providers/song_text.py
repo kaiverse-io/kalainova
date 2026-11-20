@@ -9,6 +9,7 @@ that sings it (ADR 0029).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -66,13 +67,36 @@ def section_ms(sections: Sequence[Section], bpm: float | None, seconds: float) -
     return [round(seconds * 1000 * w / sum(weights)) for w in weights]
 
 
-def plan(sections: Sequence[Section], style: str, avoid: str, bpm: float | None,
-         seconds: float) -> list[dict[str, Any]]:  # fmt: skip
+WORD = re.compile(r"[\w']+")
+
+
+def sung_here(section: Section, pronounce: Mapping[str, str] | None) -> list[tuple[str, str]]:
+    """Each uncommon word this section sings, and how it is said, as a direction for its own
+    chunk: a hint sent only with the song's style reached the first chunk, and the word sung four
+    sections later was sung as an English one (2026-11-20)."""
+    sung = {w.casefold() for line in section.get("lines") or [] for w in WORD.findall(str(line))}
+    return [
+        (str(word), f'pronounce "{word}" as "{said}"')
+        for word, said in (pronounce or {}).items()
+        if {w.casefold() for w in WORD.findall(str(word))} <= sung
+    ]
+
+
+def plan(
+    sections: Sequence[Section],
+    style: str,
+    avoid: str,
+    bpm: float | None,
+    seconds: float,
+    pronounce: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
     """A composition plan, one chunk per section: its words under its tag, its length, and its
     note as the direction for it, first. The first chunk sets the whole song's tone, so it carries
     the style too, after its own note: a style put first there made a take's quiet intro its
-    loudest section (2026-11-20). What to keep out is held on every chunk, with what each section
-    keeps out of itself (`avoid` on a section). Refused where a chunk cannot be made."""
+    loudest section (2026-11-20). How each uncommon word is said goes on the chunk that sings it.
+    What to keep out is held on every chunk, with what each section keeps out of itself (`avoid`
+    on a section). Refused where a chunk cannot be made. Every host of a model that takes a plan
+    builds it here, so a change of host never changes what the model is asked."""
     if not sections or len(sections) > CHUNKS_MOST:
         raise ValueError(f"a composition plan takes 1 to {CHUNKS_MOST} sections")
 
@@ -89,7 +113,9 @@ def plan(sections: Sequence[Section], style: str, avoid: str, bpm: float | None,
             raise ValueError(f"{name(section)} runs {ms / 1000:g} s; a chunk is 3 to 120 s")
         if len(lines) > CHUNK_LINES_MOST or any(len(line) > LINE_CHARS_MOST for line in lines):
             raise ValueError(f"{name(section)} has more lines, or longer ones, than a chunk takes")
-        styles = [s for s in (note(section), (style if n == 0 else "")) if s] or [style]
+        lead = style if n == 0 else ""
+        styles = [s for s in (note(section), lead) if s] or [style]
+        styles += [hint for word, hint in sung_here(section, pronounce) if f'"{word}"' not in lead]
         chunks.append({"text": "\n".join([f"[{name(section)}]", *lines]), "duration_ms": ms,
                        "positive_styles": styles, "negative_styles": keep_out(section),
                        "context_adherence": "high"})  # fmt: skip

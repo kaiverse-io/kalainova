@@ -142,6 +142,7 @@ def song_request(
         language=song.get("language"),
         vocal_gender=song.get("vocal_gender"),
         instrumental=bool(song.get("instrumental")),
+        pronounce=dict(song.get("pronounce") or {}) or None,
         pin=_song_pin(brief),  # the pinned provider only: a take never comes from another vendor
         guide=guide,
     )
