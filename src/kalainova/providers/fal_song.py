@@ -34,11 +34,12 @@ from .contract import SongRequest
 Fields = dict[str, Any]
 
 
-def payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
-    """The payload without the guide's id, and how the guide goes up (None with no guide)."""
+def payload(model: str, req: SongRequest, host: str = "fal") -> tuple[Fields, Fields | None]:
+    """The payload without the guide's id, and how the guide goes up (None with no guide). A
+    model's own host (Mureka's API) sends the same request as fal does, from its own row."""
     if req.repaint is not None:
-        raise ValueError("fal's song models cannot repaint a span of a take")
-    spec = audio_spec("fal", model)
+        raise ValueError(f"{host}'s song models cannot repaint a span of a take")
+    spec = audio_spec(host, model)
     if spec.get("composition_plan"):  # one chunk per section, each its own length and direction
         return _plan_payload(model, req), None
     how = (spec.get("guide") or {}).get(req.guide.use) if req.guide else None
@@ -100,9 +101,9 @@ def _plan_payload(model: str, req: SongRequest) -> Fields:
     return sent
 
 
-def _seconds(model: str, req: SongRequest) -> float:
+def _seconds(model: str, req: SongRequest, host: str = "fal") -> float:
     """How long the song asked for runs: a plan's chunks added up, else its length."""
-    if audio_spec("fal", model).get("composition_plan") and req.sections:
+    if audio_spec(host, model).get("composition_plan") and req.sections:
         return sum(song_text.section_ms(req.sections, req.bpm, req.duration or 120)) / 1000
     return float(req.duration or 0)
 
@@ -128,16 +129,18 @@ def _texts(model: str, spec: Fields, req: SongRequest) -> tuple[str, str]:
     return lyrics, style
 
 
-def edit_payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
+def edit_payload(model: str, req: SongRequest, host: str = "fal") -> tuple[Fields, Fields | None]:
     """A span of a take sung again with its words, for a model row that `edits`: by the vendor's
     own id of the take when it has one, else the take goes up first (the second value says how)."""
-    spec = audio_spec("fal", model)
+    spec = audio_spec(host, model)
     span = req.repaint
     if span is None or not spec.get("edits"):
         raise ValueError(f"{model} does not edit a span of a take")
-    least = float(spec.get("min_region_sec") or 0)
+    least, most = float(spec.get("min_region_sec") or 0), spec.get("max_region_sec")
     if span.end_sec - span.start_sec < least:
         raise ValueError(f"{model} edits a span of at least {least:g} s")
+    if most and span.end_sec - span.start_sec > float(most):
+        raise ValueError(f"{model} edits a span of at most {float(most):g} s; repair a shorter one")
     if not span.lyrics.strip():
         raise ValueError(f"{model} sings new words over the span: name the section to edit")
     sent: Fields = {
@@ -172,7 +175,9 @@ def guide_cost(model: str) -> float:
     return upload_cost(str(hows[0]["upload"])) if hows else 0.0
 
 
-def cost(model: str, req: SongRequest) -> float:
+def cost(model: str, req: SongRequest, host: str = "fal") -> float:
     """The song itself, without the guide's upload."""
-    row = price_for("fal", "song", model)
-    return float(row.get("per_track", 0)) + _seconds(model, req) * float(row.get("per_sec", 0))
+    row = price_for(host, "song", model)
+    return float(row.get("per_track", 0)) + _seconds(model, req, host) * float(
+        row.get("per_sec", 0)
+    )

@@ -64,7 +64,8 @@ With no API keys, placeholder providers still run the line end to end, and `appr
 ```bash
 export ANTHROPIC_API_KEY=...   # script and vision QA
 export FAL_KEY=...             # image and video
-export ELEVENLABS_API_KEY=...  # voice, music, and effects
+export ELEVENLABS_API_KEY=...  # voice, music, songs, and effects
+export MUREKA_API_KEY=...      # songs on Mureka's own API (platform.mureka.ai)
 ```
 
 Keep your own work out of this repository by pointing the engine at a private directory:

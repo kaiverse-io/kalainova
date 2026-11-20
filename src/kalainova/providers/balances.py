@@ -9,6 +9,7 @@ billed.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 import urllib.request
@@ -34,7 +35,22 @@ def _fal() -> float | None:
         return None
 
 
-READERS: dict[str, Callable[[], float | None]] = {"fal": _fal}
+MUREKA_BILLING_URL = "https://api.mureka.ai/v1/account/billing"  # balance in cents
+
+
+def _mureka() -> float | None:
+    key = os.environ.get("MUREKA_API_KEY")
+    if not key:
+        return None
+    ask = urllib.request.Request(MUREKA_BILLING_URL, headers={"Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(ask, timeout=10) as reply:  # noqa: S310 - a fixed https URL
+            return float(json.loads(reply.read().decode())["balance"]) / 100
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+READERS: dict[str, Callable[[], float | None]] = {"fal": _fal, "mureka": _mureka}
 
 
 def of(provider: str, *, fresh: bool = False) -> float | None:

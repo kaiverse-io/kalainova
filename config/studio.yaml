@@ -12,7 +12,7 @@ preference:
   music: [elevenlabs, fal, local]
   sfx: [elevenlabs, local]
   transcribe: [fal]
-  song: [elevenlabs, fal, local]
+  song: [elevenlabs, mureka, fal, local]
   lipsync: [fal]
   sing: [fal]                     # a Sings: shot, made in one call from its still and its line
   motion: [fal, mac, local]
@@ -64,6 +64,8 @@ models:
     sfx: eleven_text_to_sound_v2      # the id the docs list. VERIFY before the first paid run
     # A premium master cannot be better than this. Falls back to mp3_44100_128 when a plan lacks it.
     output_format: pcm_48000
+  mureka:                          # Mureka's own API (providers/mureka.py)
+    song: mureka-9.5
   fal:
     # Slugs: confirm with the fal MCP search_models/get_model_schema before first paid run.
     image: google/nano-banana-2.1                   # checked on fal 2026-11-06; premium = GPT Image 2.5
@@ -116,6 +118,11 @@ prices:
     music: {per_min: 0.80}
     song: {per_min: 0.80}
     sfx: {per_min: 0.50}
+  mureka:                          # platform.mureka.ai/pricing, read 2026-11-20; a $10 recharge lasts 12 months
+    song: {per_track: 0.15}        # the default model's price, for a call that names none
+    mureka-9.5: {per_track: 0.15, checked: "Mureka's pricing page 2026-11-20: $0.15 a song from lyrics"}
+    mureka-9: {per_track: 0.045, checked: "Mureka's pricing page 2026-11-20: $0.045 a song (O2, V8, V9)"}
+    region-edit: {per_track: 0.10, checked: "Mureka's pricing page 2026-11-20: $0.10 an edited region, on V8"}
   fal:
     image: {per_image: 0.15}       # ESTIMATE: Nano Banana 2.1 bills by tokens and rises with resolution
     video: {per_sec: 0.28}         # Wan 3.0 Prime at 1080p
@@ -203,6 +210,14 @@ licences:
       terms: https://elevenlabs.io/music-terms
       read: 2026-11-20
       obligations: ["Streaming distribution needs the Creator plan or higher; Free and Starter may not stream (the English terms' table). Translated and archived pages read stricter: confirm in writing before a release", "High-quality downloads need Pro or higher"]
+  mureka:
+    "*":
+      name: Mureka API terms
+      commercial: true
+      retention: "the vendor's: uploads and voice samples may be kept (its privacy policy)"
+      terms: https://platform.mureka.ai/service_terms.pdf
+      read: 2026-11-20
+      obligations: ["Its FAQ grants commercial use of output from paid API calls; confirm streaming release in writing", "A region edit runs on V8, an older model than the V9.5 take it edits: hear the join"]
   fal:
     "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm the model's own terms on fal"]}
     elevenlabs/music/v2.5:
@@ -302,6 +317,31 @@ audio_models:
       takes_duration: false        # the length comes from the timed section markers
       section_notes: timestamps    # its guide: "[0:00-0:30] Intro: ..." / "[0:30-1:00] Verse: ..."
       languages: [en, de, es, fr, hi, ja, ko, pt]
+  mureka:                          # Mureka's own API: SongGenerateReq and SongRegionEditReq in its docs, read 2026-11-20
+    mureka-9.5:
+      max_sec: 300
+      min_sec: 120
+      style_field: prompt
+      style_max_chars: 1024
+      lyrics_max_chars: 5000
+      section_notes: tags
+      gender_field: gender
+      edit_with: region-edit
+    mureka-9:
+      max_sec: 300                 # "Song length not exceeding 5m30s"; no duration field below V9.5
+      style_field: prompt
+      style_max_chars: 1024
+      lyrics_max_chars: 5000
+      section_notes: tags
+      gender_field: gender
+      takes_duration: false
+      edit_with: region-edit
+    region-edit:                   # song_id (made in the last month) or upload_audio_id; the region is 3 s or more
+      edits: true
+      min_region_sec: 3
+      max_region_sec: 30           # the pricing page: "edit windows of 10 to 30 seconds"
+      upload: files/upload
+      purpose: audio
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
 takes:

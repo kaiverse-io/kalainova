@@ -116,7 +116,8 @@ def _ask(capability: str, folder: Path, still: Path, clip: Path, wav: Path) -> R
         "motion": MotionRequest(character=still, driving=clip, dst=folder / "m.mp4"),
         "music": MusicRequest(prompt="a bed", dst=folder / "music.wav", duration=2.0),
         "sfx": SfxRequest(prompt="rain", dst=folder / "sfx.wav", duration=2.0),
-        "song": SongRequest(lyrics="la la", dst=folder / "song.wav", style="pop", duration=10.0),
+        # as long as the shortest song every listed song model makes (Mureka V9.5: 120 s)
+        "song": SongRequest(lyrics="la la", dst=folder / "song.wav", style="pop", duration=120.0),
         "transcribe": TranscribeRequest(src=wav),
         "lipsync": LipsyncRequest(video=clip, audio=wav, dst=folder / "synced.mp4"),
         "sing": SingRequest(
