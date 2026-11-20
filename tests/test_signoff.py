@@ -402,3 +402,19 @@ def test_a_balance_that_cannot_cover_the_spend_stops_it_before_any_call(tmp_path
     balances._seen.clear()
     router.generate(job, _ask(job))
     assert len(Wired.transport.sent) == 1
+
+
+def test_a_package_carries_the_terms_of_what_it_pays_as_read_when_it_was_built(tmp_path):
+    """The terms in force when a person signed stay on record with the spend: the page read, the
+    day, and what it asks; a vendor nobody has read says so."""
+    _job(tmp_path)
+    path = packages.allow(tmp_path, "r", capability="song", provider="elevenlabs",
+                          model="music_v2_5", calls=1, each=2.0, why="one song")  # fmt: skip
+    (terms,) = packages.load(path)["terms"]
+    assert terms["terms"] == "https://elevenlabs.io/music-terms" and terms["read"] == "2026-11-20"
+    assert any("Creator plan" in o for o in terms["obligations"])
+    shown = "\n".join(packages.lines(path))
+    assert "terms of elevenlabs music_v2_5: Eleven Music terms, read 2026-11-20" in shown
+    unread = packages.allow(tmp_path, "r", capability="llm", provider="flaky", model="*", calls=1,
+                            each=1.0, why="the script")  # fmt: skip
+    assert "nobody has read them" in "\n".join(packages.lines(unread))

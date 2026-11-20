@@ -32,6 +32,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from . import config
 from .jobfs import ContractError, Job
 from .providers import balances
 
@@ -113,6 +114,23 @@ def _allowances(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(found.values())
 
 
+def _terms(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """The terms of each provider and model the package pays, as the studio's licence table
+    holds them when it is built: the page a person read, when, and what it asks. Sealed with the
+    package, so the terms in force when a person signed are on record with the spend."""
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in [*data["requests"], *data["allowances"]]:
+        at = (str(item["provider"]), str(item["model"] or ""))
+        if at in seen:
+            continue
+        row = config.licence_for(*at)
+        kept = {k: row[k] for k in ("name", "terms", "commercial", "obligations") if k in row}
+        if row.get("read"):
+            kept["read"] = str(row["read"])  # a date in YAML, kept as written
+        seen[at] = {"provider": at[0], "model": at[1], **kept}
+    return list(seen.values())
+
+
 def _write(data: dict[str, Any], where: Path) -> Path:
     where.mkdir(parents=True, exist_ok=True)
     path = where / f"{data['stage']}-{data['nonce']}.json"
@@ -168,6 +186,7 @@ def build(job: Job, stage: str, report: dict[str, Any], review: Review) -> Path:
         + sum(a["calls"] * a["max_usd_each"] for a in data["allowances"]),
         6,
     )
+    data["terms"] = _terms(data)
     data["readiness"] = review(job, stage, calls) + _balance_findings(data)
     data["cost_cap"] = job.job.get("cost_cap")
     data["already_committed"] = round(job.committed(), 6)
@@ -205,6 +224,7 @@ def allow(
          "max_usd_each": round(each, 6), "why": why},
     ]  # fmt: skip
     data["total_max_usd"] = round(calls * each, 6)
+    data["terms"] = _terms(data)
     data["readiness"] = _balance_findings(data)
     return _write(data, folder(root, job_id))
 
@@ -303,6 +323,12 @@ def lines(path: Path) -> list[str]:
             f"  up to {a['calls']} x {a['capability']} on {a['provider']} {model}"
             f" at most ${a['max_usd_each']:.3f} each: {a['why']}"
         )
+    for t in data.get("terms") or []:
+        read = f", read {t['read']}" if t.get("read") else ", nobody has read them"
+        page = f" at {t['terms']}" if t.get("terms") else ""
+        who = f"{t['provider']} {t['model'] or '(default)'}"
+        out.append(f"  terms of {who}: {t.get('name', 'unknown')}{read}{page}")
+        out += [f"    - {o}" for o in t.get("obligations") or []]
     out.append(f"total at most ${data['total_max_usd']:.2f}")
     return out
 

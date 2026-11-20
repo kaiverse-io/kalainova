@@ -208,7 +208,7 @@ licences:
       commercial: true
       retention: unknown
       terms: https://elevenlabs.io/music-terms
-      read: 2026-11-20
+      read: "2026-11-20"
       obligations: ["Streaming distribution needs the Creator plan or higher; Free and Starter may not stream (the English terms' table). Translated and archived pages read stricter: confirm in writing before a release", "High-quality downloads need Pro or higher"]
   mureka:
     "*":
@@ -216,7 +216,7 @@ licences:
       commercial: true
       retention: "the vendor's: uploads and voice samples may be kept (its privacy policy)"
       terms: https://platform.mureka.ai/service_terms.pdf
-      read: 2026-11-20
+      read: "2026-11-20"
       obligations: ["Its FAQ grants commercial use of output from paid API calls; confirm streaming release in writing", "A region edit runs on V8, an older model than the V9.5 take it edits: hear the join"]
   fal:
     "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm the model's own terms on fal"]}
@@ -224,14 +224,14 @@ licences:
       name: vendor terms via fal
       commercial: true
       retention: unknown
-      read: 2026-11-20
+      read: "2026-11-20"
       obligations: ["Whether ElevenLabs' music terms let a take made through fal be streamed is not documented: settle it before a release"]
     google/lyria-3.5:
       name: vendor terms via fal
       commercial: true
       retention: unknown
       terms: https://deepmind.google/models/model-cards/lyria-3-5/
-      read: 2026-11-20
+      read: "2026-11-20"
       obligations: ["fal marks it for commercial use; Google's model card defers to the service terms: confirm streaming release in writing", "It returns MP3 only, so a master made from it is lossy at its source"]
     fal-ai/ace-step:
       name: ACE-Step (VERIFY)
