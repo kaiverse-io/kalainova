@@ -26,3 +26,4 @@
 - [Reuse before generating](reuse-before-generating.md) — say which stills and takes can serve each shot before a package; one pass on a take before a new take
 - [A transcript of a sung mix is not a measurement](a-transcript-of-a-sung-mix-is-not-a-measurement.md) — one Whisper pass gave lyrics, invented text, or "We'll be right back" x7; same stem read 66% then 4.5%; separator resamples to 44.1k; stems add back only to 16-18 dB
 - [A plan's first chunk sets the whole song's tone](a-plans-first-chunk-sets-the-whole-songs-tone.md) — a plan take opened at full level and drifted key; lead each chunk with its note, read the take against its plan (`bar/plan.py`, `song-check`); fix unproved
+- [A host must not change the request](a-host-must-not-change-the-request.md) — one builder per model family, a hint on the chunk that sings its word, a 410 route refused before spend (ADR 0035)
