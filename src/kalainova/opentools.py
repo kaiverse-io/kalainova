@@ -16,7 +16,6 @@ Nothing here imports another engine module but `jobfs`.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -29,7 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .jobfs import ContractError, Job
+from .jobfs import ContractError, Job, sha256_file
 
 KEEP_CHARS = 2000  # of each stream, from its end, where a tool's error usually is
 LOG_NAME = "tool_runs.json"
@@ -158,11 +157,7 @@ def inside(path: Path, root: Path) -> Path:
 
 
 def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return sha256_file(path)
 
 
 def record(

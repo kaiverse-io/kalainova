@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import tempfile
 from collections.abc import Generator
 
@@ -22,7 +24,9 @@ for _name in LAB_SETTINGS:
     os.environ.pop(_name, None)
 # Unset, the studio folder is this user's own data folder (ADR 0027). A test run must never write
 # there, so every test starts in a throwaway one unless it names its own.
-os.environ["KALAINOVA_HOME"] = tempfile.mkdtemp(prefix="kalainova-test-home-")
+_test_home = tempfile.mkdtemp(prefix="kalainova-test-home-")
+os.environ["KALAINOVA_HOME"] = _test_home
+atexit.register(shutil.rmtree, _test_home, ignore_errors=True)
 
 import pytest  # noqa: E402 - after the lab's settings are cleared, on purpose
 from fakes import studio  # noqa: E402 - after the lab's settings are cleared, on purpose
@@ -31,6 +35,25 @@ from kit_fixtures import root  # noqa: E402 - after the lab's settings are clear
 from kalainova import gates  # noqa: E402 - after the lab's settings are cleared, on purpose
 
 __all__ = ["root", "studio"]
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int:
+    """Clamp workers to at most 8 on high-core machines, while respecting 2-vCPU CI."""
+    cpus = os.cpu_count() or 1
+    return min(8, cpus)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cap_subprocess_threads() -> None:
+    """Prevent nested thread contention across worker subprocesses and heavy libraries."""
+    for var in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        os.environ[var] = "1"
+
 
 PROVIDER_KEYS = (
     "FAL_KEY",

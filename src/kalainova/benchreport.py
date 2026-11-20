@@ -20,9 +20,8 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import config, media, takejudges, takes
+from . import config, media, resources, takejudges, takes
 from .bar import judges
-from .captions import FONTS
 from .editor import singing
 from .jobfs import ContractError, Job
 
@@ -167,10 +166,7 @@ def rank(
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    try:
-        return ImageFont.truetype(str(FONTS / LABEL_FONT), size)
-    except OSError:
-        return ImageFont.load_default()
+    return resources.label_font(LABEL_FONT, size)
 
 
 def labels(made: list[Take], dst: Path) -> Path:

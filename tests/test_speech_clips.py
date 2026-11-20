@@ -177,11 +177,11 @@ def test_a_clip_becomes_its_own_job_and_passes_the_same_gates(tmp_path, monkeypa
     job = cover_source(make_job(tmp_path))
     source = job.work / "talk.mp4"
     media.run(
-        ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=30:r=24", "-f", "lavfi", "-i",
-         "sine=f=220:d=30:r=48000", "-pix_fmt", "yuv420p", "-shortest", str(source)]
+        ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=4:r=24", "-f", "lavfi", "-i",
+         "sine=f=220:d=4:r=48000", "-pix_fmt", "yuv420p", "-shortest", str(source)]
     )  # fmt: skip
     studio.heard = _transcript_words()
-    clip = {"start_sec": 0.0, "end_sec": 20.0, "title": "The turn"}
+    clip = {"start_sec": 0.0, "end_sec": 3.0, "title": "The turn"}
     child = clips.open_job(job, source, clip, "p1-clip-00")
     assert child.job["parent_job_id"] == "p1" and child.job["profile"] == "short-9x16"
     em = child.read("edit_manifest")
@@ -216,11 +216,11 @@ def test_make_keeps_the_edit_a_clip_opened_with_instead_of_rebuilding_it(
     job = cover_source(make_job(tmp_path))
     source = job.work / "talk.mp4"
     media.run(
-        ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=30:r=24", "-f", "lavfi", "-i",
-         "sine=f=220:d=30:r=48000", "-pix_fmt", "yuv420p", "-shortest", str(source)]
+        ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=4:r=24", "-f", "lavfi", "-i",
+         "sine=f=220:d=4:r=48000", "-pix_fmt", "yuv420p", "-shortest", str(source)]
     )  # fmt: skip
     studio.heard = _transcript_words()
-    child = clips.open_job(job, source, {"start_sec": 0.0, "end_sec": 20.0, "title": "T"}, "p1-c")
+    child = clips.open_job(job, source, {"start_sec": 0.0, "end_sec": 3.0, "title": "T"}, "p1-c")
     opened = child.read("edit_manifest")
     assert edit.run(child) == opened, "a clip has no beat timeline to rebuild its edit from"
 

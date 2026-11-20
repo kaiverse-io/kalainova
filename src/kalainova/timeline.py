@@ -16,8 +16,7 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from . import bar, media
-from .captions import FONTS
+from . import bar, media, resources
 
 SHEET_LANDSCAPE_WIDTH = 480
 SHEET_PORTRAIT_WIDTH = 240
@@ -43,10 +42,7 @@ CUT_GAP = 14
 
 
 def _label_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    try:
-        return ImageFont.truetype(str(FONTS / LABEL_FONT), size)
-    except OSError:
-        return ImageFont.load_default()
+    return resources.label_font(LABEL_FONT, size)
 
 
 def _frame(path: Path, at: float, width: int) -> Image.Image | None:

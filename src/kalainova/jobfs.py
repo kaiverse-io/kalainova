@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import fcntl
+import hashlib
 import json
 import os
 import uuid
@@ -32,6 +33,15 @@ def write_atomic(path: Path, text: str) -> None:
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def sha256_file(path: Path) -> str:
+    """The SHA-256 digest of a file, read in 1 MB blocks."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def home() -> Path:

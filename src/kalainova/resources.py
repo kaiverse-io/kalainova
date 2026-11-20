@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from importlib.resources import files
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import ImageFont
 
 _CHECKOUT = Path(__file__).resolve().parents[2]
 
@@ -32,3 +36,15 @@ def path(*parts: str) -> Path:
 def in_checkout() -> bool:
     """Whether this engine runs from a source checkout, where git can say which commit it is."""
     return root() == _CHECKOUT and (_CHECKOUT / "pyproject.toml").is_file()
+
+
+def label_font(
+    name: str = "Inter-Medium.ttf", size: int = 12
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """A TrueType font from vendored fonts/ or Pillow's default if missing."""
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.truetype(str(path("fonts", name)), size)
+    except OSError:
+        return ImageFont.load_default()
