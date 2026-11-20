@@ -144,3 +144,5 @@ def test_a_take_is_read_against_its_plan_and_carded_by_command(tmp_path, studio,
     assert "song.energy_follows_plan" in ids and "song.key_match" in ids
     assert main(["song-check", job.id]) == 0
     assert (job.work / take["file"]).with_suffix(".cards.json").exists()
+    measured = json.loads((job.work / take["file"]).with_suffix(".groove.json").read_text())
+    assert "kick_enters_sec" in measured  # the groove is read beside the plan
