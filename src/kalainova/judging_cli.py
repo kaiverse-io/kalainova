@@ -56,6 +56,8 @@ def add_parsers(sub: Any) -> None:
     verdict.add_argument("--aspect", default="", help="what the preference is about: lips, eyes...")
     verdict.add_argument("--animatic", action="store_true")
     verdict.add_argument("--note", default="")
+    verdict.add_argument("--reason", default="", choices=("", *verdicts.REASONS),
+                         help="what the verdict is about, as one label")  # fmt: skip
     check = sub.add_parser("song-check", help="a song take against its own plan, as cards")
     check.add_argument("job")
     check.add_argument("--take", type=int, help="the take to read; the chosen one by default")
@@ -147,7 +149,8 @@ def _bench_report(a: argparse.Namespace) -> int:
 
 def _verdict(a: argparse.Namespace) -> int:
     job = open_job(a.job)
-    kw = {"reviewer": a.reviewer, "shot": a.shot, "note": a.note, "aspect": a.aspect}
+    kw = {"reviewer": a.reviewer, "shot": a.shot, "note": a.note, "aspect": a.aspect,
+          "reason": a.reason}  # fmt: skip
     if a.best is not None:
         among = _numbers(a.among)
         if not among or a.preferred is not None:

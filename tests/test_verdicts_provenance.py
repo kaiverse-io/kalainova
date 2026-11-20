@@ -30,6 +30,17 @@ def test_a_verdict_is_one_of_three_things(tmp_path, monkeypatch):
         verdicts.record(_job(tmp_path, monkeypatch), "maybe", reviewer="someone")
 
 
+def test_a_verdict_can_say_what_it_was_about_as_one_label(tmp_path, monkeypatch):
+    """The fit of models and verifiers against verdicts (#133) needs to know which part a person
+    meant: the plan, the groove, the vocal, the hook, the mix..."""
+    job = _job(tmp_path, monkeypatch)
+    entry = verdicts.record(job, "fix", reviewer="someone", note="no soft start", reason="plan")
+    assert entry["reason"] == "plan" and entry["note"] == "no soft start"
+    assert "reason" not in verdicts.record(job, "accept", reviewer="someone")
+    with pytest.raises(ContractError, match="a reason is one of"):
+        verdicts.record(job, "fix", reviewer="someone", reason="vibes")
+
+
 def test_a_verdict_is_not_an_approval(tmp_path, monkeypatch):
     job = _job(tmp_path, monkeypatch)
     verdicts.record(job, "accept", reviewer="someone")
