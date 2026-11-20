@@ -11,7 +11,7 @@ from PIL import Image
 
 from kalainova import media, trace
 from kalainova.jobfs import CostCapExceeded, Job
-from kalainova.providers import base, router
+from kalainova.providers import base, outputs, router
 from kalainova.providers.contract import (
     ImageRequest,
     InvalidRequestError,
@@ -325,7 +325,7 @@ def test_a_larger_image_of_the_right_shape_is_accepted(tmp_path):
     job = job_with(tmp_path, ["flaky"])
     assert image(job, width=32, height=32)[0].name == "flaky"
     smaller = ImageRequest(prompt="p", dst=job.work / "a.png", width=16, height=16)
-    assert router._check_output(smaller, job.work / "a.png") is None
+    assert outputs.check(smaller, job.work / "a.png") is None
 
 
 def test_a_capped_job_refuses_an_unpriced_provider_before_calling_it(tmp_path, monkeypatch):

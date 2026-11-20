@@ -36,15 +36,14 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from .. import config, gates, media, trace
+from .. import config, gates, trace
 from ..jobfs import ContractError, Job
-from . import base, prices, records, rehearsal, retired
+from . import base, outputs, prices, records, rehearsal, retired
 from .contract import (
     RECORDED,
     Billable,
     BilledError,
     Context,
-    ImageRequest,
     InvalidRequestError,
     MotionRequest,
     Pin,
@@ -59,10 +58,6 @@ from .contract import (
 PROVIDER_FAILURES = (OSError, RuntimeError, ValueError, KeyError, IndexError, RefusalError)
 DEFAULT_DEADLINE_SEC = 600.0
 GENERATIONS = records.GENERATIONS
-PICTURE_OUTPUTS = ("image", "video", "motion", "lipsync", "graphics")
-SOUND_OUTPUTS = ("song", "music")
-ASPECT_TOLERANCE = 0.03
-MIN_SCALE = 0.5  # the editor can upscale a large image, not rescue a thumbnail
 
 
 class ProviderError(ContractError):
@@ -242,29 +237,6 @@ def _call(fn: Callable[..., Result], args: tuple[Any, ...], deadline: float | No
     return result
 
 
-def _check_output(request: Request, path: Path) -> None:
-    """Refuse a file that is unreadable or not what was asked for. Raises ValueError or OSError."""
-    capability = request.capability
-    if isinstance(request, ImageRequest):
-        from PIL import Image
-
-        with Image.open(path) as im:
-            width, height = im.size
-            im.verify()
-        want_w, want_h = request.width, request.height
-        if want_w and want_h:
-            if abs(width / height - want_w / want_h) > ASPECT_TOLERANCE * (want_w / want_h):
-                raise ValueError(f"image is {width}x{height}, wrong shape for {want_w}x{want_h}")
-            if width < want_w * MIN_SCALE:
-                raise ValueError(f"image is {width}x{height}, too small for {want_w}x{want_h}")
-    elif media.duration(path) <= 0:
-        raise ValueError("file has no duration")
-    if capability in PICTURE_OUTPUTS and not media.has_picture(path):
-        raise ValueError("no picture: one flat tone throughout, the model's decode failed")
-    if capability in SOUND_OUTPUTS and not media.has_sound(path):
-        raise ValueError("no sound: the file is silent, the model's decode failed")
-
-
 def _settle(p: base.Provider, res: Result, ctx: Context) -> None:
     """The result's typed facts under the engine's names, then its price checked against the
     vendor's own figure. An adapter's meta never overrides a name the engine records."""
@@ -337,10 +309,7 @@ def _attempt(
 ) -> Result | None:
     """One provider's try. A result, or None to move on to the next; raises what must stop."""
     capability = request.capability
-    routed = request.model_for(p.name) or p.default_model(
-        capability, references=request.billable().references
-    )
-    gone = retired.why(p.name, routed)
+    gone = retired.refusal(p, request)
     if gone:  # the vendor said it is gone: nothing held, nothing asked of a person
         errors.append(f"{p.name}: {gone}")
         return None
@@ -493,7 +462,7 @@ class _Try:
         if not self.attempt.is_file():
             return "NoFile", "the provider returned no file", "no file", "returned no file"
         try:
-            _check_output(self.sent, self.attempt)
+            outputs.check(self.sent, self.attempt)
         except PROVIDER_FAILURES as exc:
             self.attempt.unlink(missing_ok=True)
             said = f"output rejected: {exc}"

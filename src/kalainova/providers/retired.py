@@ -22,6 +22,8 @@ from typing import Any
 
 from .. import config
 from ..jobfs import home
+from .base import Provider
+from .contract import Request
 
 FILE = "retired.json"
 
@@ -56,6 +58,14 @@ def why(provider: str, model: str | None) -> str | None:
         return None
     instead = row.get("instead")
     return f"{provider}:{model} is retired ({said})" + (f"; use {instead}" if instead else "")
+
+
+def refusal(p: Provider, request: Request) -> str | None:
+    """Why the route a request would take at this provider is retired, or None."""
+    routed = request.model_for(p.name) or p.default_model(
+        request.capability, references=request.billable().references
+    )
+    return why(p.name, routed)
 
 
 def note(provider: str, model: str | None, said: str) -> None:

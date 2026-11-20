@@ -274,6 +274,7 @@ NOT_ADAPTERS = (
     "rehearsal",
     "check",
     "retired",
+    "outputs",
 )
 
 

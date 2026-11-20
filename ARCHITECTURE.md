@@ -100,7 +100,8 @@ The modules in `src/kalainova/`, and the two paths that make a piece. Every mode
      rehearsal.py (requests written down under the router's attempt, none sent) ·
      payloads.py (a payload sealed by its uploads' bytes, and the digest a package signs) ·
      balances.py (what a vendor's account has left, where it says; unknown never blocks) ·
-     retired.py (a route the vendor says is gone, refused before any spend)
+     retired.py (a route the vendor says is gone, refused before any spend) ·
+     outputs.py (a returned file is what was asked for, or it is refused)
    router ─▶ gates.py (stop, studio limits, vendor balance, signed-off packages) ─▶ packages.py
 
  Foundation
