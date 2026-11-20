@@ -30,6 +30,7 @@ from .errors import BilledError as BilledError
 from .errors import InvalidRequestError as InvalidRequestError
 from .errors import RateLimitedError as RateLimitedError
 from .errors import RefusalError as RefusalError
+from .errors import RetiredError as RetiredError
 from .errors import UnauthorizedError as UnauthorizedError
 from .errors import UnavailableError as UnavailableError
 from .errors import VendorError as VendorError

@@ -200,8 +200,8 @@ def _job(tmp_path, song=None, **extra):
 
 def test_a_rehearsal_writes_down_each_planned_take_and_sends_nothing(tmp_path, studio):
     job = _job(tmp_path, _song(duration_sec=180))  # Mureka makes 120 to 300 s
-    pinned = {"provider": "fal", "model": MUREKA}
-    job.write("job", {**job.job, "providers": {**job.job["providers"], "song": ["fal"]},
+    pinned = {"provider": "mureka", "model": "mureka-9.5"}  # fal's Mureka routes are retired
+    job.write("job", {**job.job, "providers": {**job.job["providers"], "song": ["mureka"]},
                       "brief": {**job.job["brief"], "song_model": pinned}})  # fmt: skip
     report = rehearse.run(job, check=None)
     asked = [r for c in report["calls"] if c["capability"] == "song" for r in c["requests"]]
@@ -219,10 +219,11 @@ def test_a_rehearsal_stops_where_the_run_would(tmp_path, studio):
 def test_a_pin_sets_the_song_model_and_its_takes_by_command(tmp_path, studio, monkeypatch):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
     job = _job(tmp_path)
-    assert main(["pin", job.id, "song", f"fal:{MUREKA}", "--takes", "3"]) == 0
+    assert main(["pin", job.id, "song", f"fal:{MUREKA}"]) != 0, "fal's route is retired"
+    assert main(["pin", job.id, "song", "mureka:mureka-9.5", "--takes", "3"]) == 0
     data = json.loads(job.path("job").read_text())
-    assert data["brief"]["song_model"] == {"provider": "fal", "model": MUREKA}
-    assert data["providers"]["song"] == ["fal"]
+    assert data["brief"]["song_model"] == {"provider": "mureka", "model": "mureka-9.5"}
+    assert data["providers"]["song"] == ["mureka"]
     assert data["brief"]["takes"] == data["brief"]["max_takes"] == 3
     assert main(["pin", job.id, "song", "nowhere"]) != 0
     assert main(["pin", job.id, "transcribe", "fal:some-model"]) != 0

@@ -38,7 +38,7 @@ from typing import Any
 
 from .. import config, gates, media, trace
 from ..jobfs import ContractError, Job
-from . import base, prices, records, rehearsal
+from . import base, prices, records, rehearsal, retired
 from .contract import (
     RECORDED,
     Billable,
@@ -51,6 +51,7 @@ from .contract import (
     RefusalError,
     Request,
     Result,
+    RetiredError,
 )
 
 # OSError covers connection, timeout, and HTTP errors. ValueError, KeyError, and IndexError cover a
@@ -336,6 +337,13 @@ def _attempt(
 ) -> Result | None:
     """One provider's try. A result, or None to move on to the next; raises what must stop."""
     capability = request.capability
+    routed = request.model_for(p.name) or p.default_model(
+        capability, references=request.billable().references
+    )
+    gone = retired.why(p.name, routed)
+    if gone:  # the vendor said it is gone: nothing held, nothing asked of a person
+        errors.append(f"{p.name}: {gone}")
+        return None
     ok, estimate = _priced(job, p, request, errors)
     if not ok:
         return None
@@ -442,6 +450,8 @@ class _Try:
         refused = isinstance(exc, RefusalError)
         self.trace(outcome="refused" if refused else "error", estimate=self.estimate,
                    settled=before, error_class=kind, detail=said)  # fmt: skip
+        if isinstance(exc, RetiredError):  # written down once, so no later plan sends here
+            retired.note(self.p.name, self.routed, said)
         if isinstance(
             exc, InvalidRequestError
         ):  # the engine's mapping is wrong; a fallback hides it

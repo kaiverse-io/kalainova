@@ -268,9 +268,10 @@ audio_models:
     minimax/music-3: {max_sec: 300, style_field: prompt}   # fal's schema: duration up to 300 s
     # guide: how a model follows a track (brief.song_guide). The track goes up to `upload` first, for
     # an id that goes in `field`. clip_sec is the clip it takes; none: the whole track.
-    # 2026-11-20: fal answers 410 "This endpoint is deprecated and no longer available" for V9.5's
-    # song route, though its catalog still lists it; nothing is billed. Kept for when it returns.
+    # Kept for when it returns: delete `retired` then (providers/retired.py).
     mureka/v9.5/generate/song:     # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+      retired: "2026-11-20: fal answers 410, This endpoint is deprecated and no longer available, though its catalog lists it"
+      instead: mureka:mureka-9.5
       max_sec: 300
       min_sec: 120
       style_field: prompt
@@ -284,6 +285,8 @@ audio_models:
         # so with a reference no style is sent: the clip carries the sound
         reference: {upload: mureka/api/files/upload, purpose: reference, field: reference_id, clip_sec: 30, style: false}
     mureka/v9/generate/song:       # fal's schema 2026-11-20: V9.5's fields without a length; the model sets it
+      retired: "2026-11-20: fal answers 410, as for V9.5"
+      instead: mureka:mureka-9
       max_sec: 300                 # VERIFY: the schema states no longest song
       style_field: prompt
       style_max_chars: 1024        # fal's schema: with lyrics, up to 1,024 characters
