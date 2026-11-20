@@ -9,7 +9,7 @@ import json
 import pytest
 from fakes import Wire, context, make_job, needs_ffmpeg
 
-from kalainova import media, rehearse, song_master, songs, takes
+from kalainova import media, rehearse, song_lead, song_master, songs, takes
 from kalainova.__main__ import main
 from kalainova.jobfs import ContractError
 from kalainova.providers import fal
@@ -19,6 +19,11 @@ from kalainova.render import release
 pytestmark = needs_ffmpeg
 MUREKA = "mureka/v9.5/generate/song"
 VERSE = ["Paper boats on the kitchen floor", "Pencil marks beside the door"]
+MOVES = [
+    {"kind": "verse", "lines": ["Words"], "style": "restrained and intimate."},
+    {"kind": "chorus", "lines": ["More"], "style": "full groove, harmonies wide"},
+    {"kind": "outro", "lines": ["End"]},
+]
 
 
 def _song(**extra):
@@ -78,6 +83,112 @@ def test_a_style_of_only_what_it_wants_passes():
     assert songs.problems(_song(style="nocturnal, notably bright pads, nonstop groove")) == []
 
 
+def test_a_section_note_is_held_to_the_styles_rules_since_it_is_sent_too():
+    quiet = [{"kind": "intro", "lines": [], "style": "pads only, no vocal"},
+             {"kind": "verse", "lines": VERSE}]  # fmt: skip
+    found = songs.problems(_song(sections=quiet))
+    assert len(found) == 1 and "section" in found[0] and "avoid" in found[0]
+
+
+@pytest.mark.parametrize("line", ["instrumental", "(Instrumental)", "[inst]", "no vocals"])
+def test_a_stage_direction_among_the_lines_is_refused_since_it_would_be_sung(line):
+    quiet = [{"kind": "intro", "lines": [line]}, {"kind": "verse", "lines": VERSE}]
+    found = songs.problems(_song(sections=quiet))
+    assert len(found) == 1 and "would be sung" in found[0]
+    assert (
+        songs.problems(_song(sections=[{"kind": "verse", "lines": ["An instrumental night"]}]))
+        == []
+    )
+
+
+def test_how_an_uncommon_word_is_said_reaches_the_model_with_the_style():
+    song = _song(sections=[{"kind": "verse", "lines": ["Wave the lantern, amigos"]}],
+                 pronounce={"amigos": "ah-MEE-gohs"})  # fmt: skip
+    assert songs.problems(song) == []
+    said = songs.style_text(song)
+    assert said == 'warm indie pop, acoustic guitar, clear lead vocal, pronounce "amigos" as ' \
+                   '"ah-MEE-gohs", 120 bpm'  # fmt: skip
+    assert "adelante" in songs.problems({**song, "pronounce": {"adelante": "ah-deh-LAHN-teh"}})[0]
+
+
+def test_a_draft_brief_is_short_names_no_tempo_and_keeps_its_section_notes_brief():
+    assert song_lead.draft_problems(_song()) == []
+    long = song_lead.draft_problems(_song(style="pads, " * 100))
+    assert len(long) == 1 and "under 450" in long[0]
+    assert "bpm" in song_lead.draft_problems(_song(style="pads, a steady 122 bpm pulse"))[0]
+    wordy = [{"kind": "verse", "lines": VERSE, "style": "drums " * 20}]
+    assert "verse" in song_lead.draft_problems(_song(sections=wordy))[0]
+
+
+def test_a_section_note_rides_on_its_lyric_tag_where_the_model_reads_it_there(mureka):
+    provider, wire, tmp = mureka
+    words = SongRequest(lyrics="[Verse]\nWords\n", dst=tmp / "s.wav", style="house", duration=180,
+                        sections=MOVES)  # fmt: skip
+    provider.song(words, context(model="mureka/v9.5/generate/song"))
+    assert wire.sent[-1]["payload"]["prompt"] == "house"
+    assert wire.sent[-1]["payload"]["lyrics"] == (
+        "[Verse] restrained and intimate\nWords\n[Chorus] full groove, harmonies wide\nMore\n"
+        "[Outro]\nEnd\n"
+    )
+
+
+def test_a_model_that_reads_no_notes_on_tags_gets_them_after_the_style(mureka):
+    provider, wire, tmp = mureka
+    words = SongRequest(lyrics="[Verse]\nWords\n", dst=tmp / "s.wav", style="house.",
+                        duration=90, sections=MOVES)  # fmt: skip
+    provider.song(words, context(model="minimax/music-3"))
+    assert wire.sent[-1]["payload"]["prompt"] == (
+        "house. Verse: restrained and intimate. Chorus: full groove, harmonies wide."
+    )
+    assert wire.sent[-1]["payload"]["lyrics"] == "[Verse]\nWords\n"
+
+
+def test_words_past_the_vendors_limit_are_refused_before_sending(mureka):
+    provider, wire, tmp = mureka
+    long = SongRequest(lyrics="w" * 5001, dst=tmp / "s.wav", style="house", duration=180)
+    with pytest.raises(ValueError, match="at most 5000 lyrics characters"):
+        provider.song(long, context(model="mureka/v9.5/generate/song"))
+    short = SongRequest(lyrics="w", dst=tmp / "s.wav", style="house", duration=90)
+    with pytest.raises(ValueError, match="at least 120 s"):
+        provider.song(short, context(model="mureka/v9.5/generate/song"))
+
+
+def test_a_plan_model_takes_each_section_as_a_chunk_of_its_own_length_and_direction(mureka):
+    provider, wire, tmp = mureka
+    verse = {"kind": "verse", "bars": 16, "lines": VERSE, "style": "restrained and intimate"}
+    sections = [{"kind": "intro", "bars": 8, "style": "pads alone", "avoid": "kick, rap"}, verse]
+    req = SongRequest(lyrics="", dst=tmp / "s.wav", style="synth pop", duration=180, bpm=120,
+                      sections=sections, avoid="rap, autotune", seed=7)  # fmt: skip
+    res = provider.song(req, context(model="elevenlabs/music/v2.5"))
+    sent = wire.sent[-1]["payload"]
+    first, second = sent["composition_plan"]["chunks"]
+    assert (first["duration_ms"], second["duration_ms"]) == (16000, 32000)  # bars at 120 bpm
+    assert first["text"] == "[Intro]" and second["text"] == "[Verse]\n" + "\n".join(VERSE)
+    assert first["positive_styles"] == ["pads alone", "synth pop"]  # its own note leads
+    assert second["positive_styles"] == ["restrained and intimate"]
+    assert first["negative_styles"] == ["kick", "rap", "autotune"]  # its own, then the song's
+    assert second["negative_styles"] == ["rap", "autotune"] and sent["seed"] == 7
+    assert res.cost == pytest.approx(48 * 0.01)  # $0.60 a minute, for the 48 s the plan runs
+
+
+def test_a_section_longer_than_a_chunk_is_refused_before_sending(mureka):
+    provider, wire, tmp = mureka
+    long = SongRequest(lyrics="", dst=tmp / "s.wav", style="house", bpm=60,
+                       sections=[{"kind": "verse", "bars": 40, "lines": ["a"]}])  # fmt: skip
+    with pytest.raises(ValueError, match="a chunk is 3 to 120 s"):
+        provider.song(long, context(model="elevenlabs/music/v2.5"))
+
+
+def test_mureka_v9_takes_v95s_request_without_a_length(mureka):
+    provider, wire, tmp = mureka
+    req = SongRequest(lyrics="[Verse]\nW\n", dst=tmp / "s.wav", style="house", duration=180,
+                      vocal_gender="female", sections=MOVES)  # fmt: skip
+    provider.song(req, context(model="mureka/v9/generate/song"))
+    sent = wire.sent[-1]["payload"]
+    assert "duration" not in sent and sent["gender"] == "female"
+    assert sent["lyrics"].startswith("[Verse] restrained and intimate\n")
+
+
 # ---------------------------------------------------------------- before spend
 
 
@@ -88,7 +199,7 @@ def _job(tmp_path, song=None, **extra):
 
 
 def test_a_rehearsal_writes_down_each_planned_take_and_sends_nothing(tmp_path, studio):
-    job = _job(tmp_path)
+    job = _job(tmp_path, _song(duration_sec=180))  # Mureka makes 120 to 300 s
     pinned = {"provider": "fal", "model": MUREKA}
     job.write("job", {**job.job, "providers": {**job.job["providers"], "song": ["fal"]},
                       "brief": {**job.job["brief"], "song_model": pinned}})  # fmt: skip
@@ -173,3 +284,33 @@ def test_a_master_of_another_song_take_is_refused_until_that_take_stands(tmp_pat
 def test_the_style_joins_its_tempo_and_key_cleanly():
     said = songs.style_text(_song(style="warm pads. The outro thins out.", key="A minor"))
     assert said == "warm pads. The outro thins out, 120 bpm, A minor"
+
+
+def _noise_wav(path, levels, sr=22050, sec=8.0):
+    import wave
+
+    import numpy as np
+
+    rng = np.random.default_rng(1)
+    parts = [level * rng.standard_normal(int(sr * sec)) for level in levels]
+    pcm = (np.clip(np.concatenate(parts), -1, 1) * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(1), out.setsampwidth(2), out.setframerate(sr)
+        out.writeframes(pcm.tobytes())
+    return path
+
+
+def test_an_intro_played_at_full_level_reads_as_no_soft_start(tmp_path):
+    from kalainova.bar import song as musicbar
+
+    sections = [{"kind": "intro", "bars": 4}, {"kind": "chorus", "bars": 4}]  # 8 s each at 120
+    song = _song(sections=sections, bpm=120)
+    soft = musicbar.intro_rise(_noise_wav(tmp_path / "soft.wav", [0.05, 0.4]), song)
+    loud = musicbar.intro_rise(_noise_wav(tmp_path / "loud.wav", [0.4, 0.4]), song)
+    assert soft < -15 and -0.5 < loud <= 0.0
+    assert musicbar.intro_rise(tmp_path / "loud.wav", _song()) is None  # no intro asked for
+    unplaced = _song(sections=[{"kind": "intro"}, {"kind": "chorus"}])
+    assert (
+        musicbar.intro_rise(_noise_wav(tmp_path / "long.wav", [0.05, 0.05, 0.4, 0.4]), unplaced)
+        < -10
+    )

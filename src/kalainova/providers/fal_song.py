@@ -6,6 +6,13 @@ makes that upload and puts the id under the row's `field`. A use with `style: fa
 text, because the vendor takes the sound from the track alone. A row with `needs_guide` only works
 from a track. A guide a model cannot follow is refused here, before anything is sent.
 
+A row with `composition_plan` takes the song as a plan of chunks instead, one per section, each
+with its own length (from its bars at the song's tempo), words and direction (song_text.plan).
+
+A row with `section_notes: tags` reads each section's note on its lyric tag; any other row reads
+the notes after the style (song_text). `lyrics_max_chars` and `style_max_chars` are the vendor's
+limits, refused here rather than cut upstream.
+
 A row that `edits` sings one span of a take again with new words (`edit_payload`): a generate
 row names its edit route under `edit_with`, and a repair is pinned to that route, so the package,
 the ledger and the price all name the edit model. The take goes by the vendor's own id when it
@@ -19,6 +26,7 @@ from typing import Any
 
 from .. import media
 from ..config import audio_spec, price_for
+from . import song_text
 from .contract import SongRequest
 
 Fields = dict[str, Any]
@@ -29,6 +37,8 @@ def payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
     if req.repaint is not None:
         raise ValueError("fal's song models cannot repaint a span of a take")
     spec = audio_spec("fal", model)
+    if spec.get("composition_plan"):  # one chunk per section, each its own length and direction
+        return _plan_payload(model, req), None
     how = (spec.get("guide") or {}).get(req.guide.use) if req.guide else None
     if req.guide and not how:
         raise ValueError(f"{model} takes no {req.guide.use} track")
@@ -37,23 +47,59 @@ def payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
             f"{model} makes a song again from a {spec['needs_guide']} track; give it one"
         )
     style_field = spec.get("style_field", "prompt")
-    lyrics = req.lyrics
-    if req.instrumental and spec.get("instrumental_lyrics"):
-        lyrics = spec["instrumental_lyrics"]
+    lyrics, style = _texts(model, spec, req)
     if spec.get("lyrics_in_prompt"):  # one text field carries the sound and the words to sing
-        sent: Fields = {style_field: f"{req.style}\n\nLyrics:\n{lyrics}".strip()}
+        sent: Fields = {style_field: f"{style}\n\nLyrics:\n{lyrics}".strip()}
     else:
-        sent = {style_field: req.style, "lyrics": lyrics}
-    most = spec.get("style_max_chars")
-    if most and len(req.style) > int(most):
-        raise ValueError(f"{model} takes at most {most} style characters, not {len(req.style)}")
+        sent = {style_field: style, "lyrics": lyrics}
     if req.duration and spec.get("takes_duration", True):
+        least = float(spec.get("min_sec") or 0)
+        if req.duration < least:
+            raise ValueError(f"{model} makes at least {least:g} s, not {req.duration:g}")
         sent["duration"] = int(req.duration)
     if req.vocal_gender and spec.get("gender_field") and not req.instrumental:
         sent[str(spec["gender_field"])] = req.vocal_gender
     if how is not None and how.get("style") is False:  # the track carries the sound instead
         sent.pop(style_field, None)
     return sent, how
+
+
+def _plan_payload(model: str, req: SongRequest) -> Fields:
+    if req.guide:
+        raise ValueError(f"{model} takes no guide track here")
+    chunks = song_text.plan(req.sections, req.style, req.avoid, req.bpm, req.duration or 120)
+    sent: Fields = {"composition_plan": {"chunks": chunks}, "output_format": "mp3_48000_320"}
+    if req.seed is not None:
+        sent["seed"] = int(req.seed)
+    if req.instrumental:
+        sent["force_instrumental"] = True
+    return sent
+
+
+def _seconds(model: str, req: SongRequest) -> float:
+    """How long the song asked for runs: a plan's chunks added up, else its length."""
+    if audio_spec("fal", model).get("composition_plan") and req.sections:
+        return sum(song_text.section_ms(req.sections, req.bpm, req.duration or 120)) / 1000
+    return float(req.duration or 0)
+
+
+def _texts(model: str, spec: Fields, req: SongRequest) -> tuple[str, str]:
+    """The words and the style as this model reads them, each section's note where it reads it,
+    refused past the vendor's limits."""
+    lyrics, style = req.lyrics, req.style
+    if song_text.has_notes(req.sections):
+        if spec.get("section_notes") == "tags":
+            lyrics = song_text.tagged(req.sections, notes=True)
+        else:
+            style = song_text.styled(style, req.sections)
+    if req.instrumental and spec.get("instrumental_lyrics"):
+        lyrics = spec["instrumental_lyrics"]
+    for text, limit, what in ((style, "style_max_chars", "style"),
+                              (lyrics, "lyrics_max_chars", "lyrics")):  # fmt: skip
+        most = spec.get(limit)
+        if most and len(text) > int(most):
+            raise ValueError(f"{model} takes at most {most} {what} characters, not {len(text)}")
+    return lyrics, style
 
 
 def edit_payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
@@ -103,4 +149,4 @@ def guide_cost(model: str) -> float:
 def cost(model: str, req: SongRequest) -> float:
     """The song itself, without the guide's upload."""
     row = price_for("fal", "song", model)
-    return float(row.get("per_track", 0)) + (req.duration or 0) * float(row.get("per_sec", 0))
+    return float(row.get("per_track", 0)) + _seconds(model, req) * float(row.get("per_sec", 0))

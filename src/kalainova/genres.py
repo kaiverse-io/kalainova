@@ -1,16 +1,19 @@
-"""GENRES. The studio's genre profiles: what a song of one genre is written and made inside.
+"""GENRES. The studio's genre profiles: where a song of one genre usually sits, and the few things
+the studio holds every song of it to.
 
 A profile lives under `genres:` in the studio's private config; the repo names none. A job names
-one in `brief.genre` (`kalainova new --genre`, `kalainova request --media song --genre`). Then:
+one in `brief.genre` (`kalainova new --genre`, `kalainova request <stream> --media song --genre`).
+Then:
 
-  the writer   is handed the profile and writes inside it: a tempo in its range, one of its keys,
-               its structure and bar counts, its base style before its own words, its voice
+  the writer   is handed the profile as the genre's usual ground: a tempo range, keys, a usual
+               arrangement, base sound words, what to keep out, the voice. It leads from there and
+               chooses this song's own (song_lead, ADR 0032)
   the engine   pins the profile's song model and takes, unless the brief already pins them
-  the check    refuses, before any spend, a song file whose tempo is outside the profile's range,
-               whose key is not one of its keys, or whose voice is not the profile's
+  the check    refuses, before any spend, only what the profile `holds`: a tempo outside its
+               range, a key not among its keys, another voice, or another run of sections
 
-The profile is the studio's decision about what its songs are. A brief still says what this one is
-about, and a person still chooses among what comes back.
+The profile is the studio's notes on a genre, not a template. A brief says what this song is
+about, the writer decides what it is, and a person still chooses among what comes back.
 """
 
 from __future__ import annotations
@@ -52,26 +55,53 @@ def apply(brief: dict[str, Any], name: str) -> dict[str, Any]:
     return brief
 
 
-def problems(song: dict[str, Any], found: Profile | None) -> list[str]:
-    """Where a song file leaves its genre's profile. Each is refused before any spend."""
-    if not found:
-        return []
-    out = []
-    span = found.get("bpm")
+def holds(found: Profile | None) -> list[str]:
+    """What the studio holds every song of this genre to; the rest of the profile is notes."""
+    named = [str(h) for h in (found or {}).get("holds") or []]
+    unknown = [h for h in named if h not in HELD]
+    if unknown:
+        raise ContractError(f"a genre holds only {', '.join(HELD)}, not {', '.join(unknown)}")
+    return named
+
+
+def _tempo(song: dict[str, Any], found: Profile) -> str:
+    low, high = (float(v) for v in found.get("bpm") or (0, float("inf")))
     bpm = song.get("bpm")
-    if span:
-        low, high = float(span[0]), float(span[1])
-        if bpm is None or not low <= float(bpm) <= high:
-            out.append(f"the genre's tempo is {low:g} to {high:g} bpm; the song asks for {bpm}")
+    if bpm is None or not low <= float(bpm) <= high:
+        return f"the genre holds its tempo to {low:g} to {high:g} bpm; the song asks {bpm}"
+    return ""
+
+
+def _key(song: dict[str, Any], found: Profile) -> str:
     keys = [str(k).casefold() for k in found.get("keys") or []]
     if keys and str(song.get("key") or "").casefold() not in keys:
-        out.append(
-            f"the genre's keys are {', '.join(found['keys'])}; the song is in {song.get('key')}"
-        )
+        held = ", ".join(found["keys"])
+        return f"the genre holds its keys to {held}; the song is in {song.get('key')}"
+    return ""
+
+
+def _voice(song: dict[str, Any], found: Profile) -> str:
     voice = found.get("vocal_gender")
     if voice and not song.get("instrumental") and song.get("vocal_gender") != voice:
-        out.append(f"the genre's voice is {voice}; the song asks for {song.get('vocal_gender')}")
-    return out
+        return f"the genre holds its voice {voice}; the song asks {song.get('vocal_gender')}"
+    return ""
+
+
+def _sections(song: dict[str, Any], found: Profile) -> str:
+    usual = [str(s.get("kind")) for s in found.get("structure") or []]
+    if usual and [str(s.get("kind")) for s in song["sections"]] != usual:
+        return f"the genre holds its sections to {', '.join(usual)}"
+    return ""
+
+
+HELD = {"bpm": _tempo, "key": _key, "vocal_gender": _voice, "structure": _sections}
+
+
+def problems(song: dict[str, Any], found: Profile | None) -> list[str]:
+    """Where a song file leaves what its genre's profile holds. Each is refused before any spend."""
+    if not found:
+        return []
+    return [said for said in (HELD[h](song, found) for h in holds(found)) if said]
 
 
 def writer_text(brief: dict[str, Any]) -> str:
@@ -79,7 +109,12 @@ def writer_text(brief: dict[str, Any]) -> str:
     found = for_brief(brief)
     if not found:
         return ""
-    shown = {k: v for k, v in found.items() if k not in ("song_model", "takes")}
+    shown = {k: v for k, v in found.items() if k not in ("song_model", "takes", "holds")}
+    held = holds(found)
     return prompts.load("genre_profile").format(
-        profile=json.dumps(shown, indent=2, ensure_ascii=False)
+        profile=json.dumps(shown, indent=2, ensure_ascii=False),
+        holds=f"The studio holds every song of it to its {', '.join(held)}; a song outside them is "
+        "refused. The rest is yours to choose."
+        if held
+        else "The studio holds nothing of it: every choice is yours.",
     )

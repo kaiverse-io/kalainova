@@ -5,6 +5,7 @@ kalainova bench-report <job> <shot> [--only 5,7,10] [--again]  the labelled side
                                                  table, and the engine's pick, at no cost
 kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]|--animatic]
                   [--preferred N --over M | --best N --among a,b,c] [--aspect lips]
+kalainova song-check <job> [--take N]            a song take against its own plan, as cards
 kalainova signals                                which readings predict a person's verdict
 kalainova agreement                              which readings, and the engine's picks, follow
                                                  a person's preferences, aspect by aspect
@@ -55,10 +56,51 @@ def add_parsers(sub: Any) -> None:
     verdict.add_argument("--aspect", default="", help="what the preference is about: lips, eyes...")
     verdict.add_argument("--animatic", action="store_true")
     verdict.add_argument("--note", default="")
+    check = sub.add_parser("song-check", help="a song take against its own plan, as cards")
+    check.add_argument("job")
+    check.add_argument("--take", type=int, help="the take to read; the chosen one by default")
     sub.add_parser("signals")
     sub.add_parser("agreement")
     sub.add_parser("review-set")
     sub.add_parser("judges")
+
+
+def _song_check(a: argparse.Namespace) -> int:
+    """Cards for what a song take missed of its own plan: each says what was asked, what was
+    measured, where, and the fix. Kept beside the take, and printed; nothing blocks on them."""
+    from . import takes
+    from .bar import plan
+    from .bar import song as musicbar
+    from .editor import beats
+
+    job = open_job(a.job)
+    song = job.read("song")
+    entry = takes.load(job)["shots"].get("song") or {}
+    chosen = takes.chosen(job, "song")
+    take = (
+        next((t for t in entry.get("takes", []) if t["n"] == a.take), None)
+        if a.take is not None
+        else chosen
+    )
+    if take is None:
+        raise ContractError(f"{job.id}: no song take {a.take if a.take is not None else 'chosen'}")
+    path = job.work / take["file"]
+    pcm = beats._pcm(path)
+    heard = musicbar.saved_heard(path) or []
+    cards = plan.energy_cards(plan.profile(pcm, song), song)[1] + plan.key_cards(pcm, song)[1]
+    stem = job.work / "vocals.wav"  # the stems are of the chosen take's master
+    if chosen and take["n"] == chosen["n"] and stem.exists():
+        cards += plan.voice_cards(beats._pcm(stem), song)
+    cards += plan.pronounce_cards(song, heard) + plan.words_cards(song, heard)
+    if not plan.spans(song):
+        print(f"{job.id}: the song file names no bars or tempo, so its sections cannot be placed")
+    out = path.with_suffix(".cards.json")
+    out.write_text(json.dumps(cards, indent=1, ensure_ascii=False))
+    for card in cards:
+        print(f"{card['at']:>5}  {card['section']}: planned {card['planned']}")
+        print(f"       measured {card['measured']}\n       fix: {card['fix']}")
+    print(f"{job.id} take {take['n']}: {len(cards)} card(s), kept in {out}")
+    return 0
 
 
 def _numbers(text: str | None) -> list[int] | None:
@@ -203,6 +245,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "agreement": _agreement,
     "review-set": _review_set,
     "judges": _judges,
+    "song-check": _song_check,
 }
 
 

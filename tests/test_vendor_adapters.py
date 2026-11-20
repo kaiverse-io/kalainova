@@ -236,6 +236,7 @@ def machine(monkeypatch, tmp_path):
         out = Path(cmd[cmd.index("--out") + 1]) if "--out" in cmd else None
         if out:
             seen["lyrics"] = Path(cmd[cmd.index("--lyrics") + 1]).read_text()
+            seen["tags"] = Path(cmd[cmd.index("--tags") + 1]).read_text()
             out.write_bytes(b"sung")
         elif "--output-path" in cmd:
             Path(cmd[cmd.index("--output-path") + 1]).write_bytes(b"frames")
@@ -256,6 +257,15 @@ def test_a_song_runs_in_its_own_environment_with_its_own_seed(machine, tmp_path)
     assert cmd[cmd.index("--seed") + 1] == "7" and cmd[cmd.index("--bpm") + 1] == "96"
     assert machine["lyrics"] == "[Verse]\nWords"
     assert res.seed == 7 and res.model == "heartmula"
+
+
+def test_a_song_on_this_machine_reads_its_section_notes_after_its_tags(machine, tmp_path):
+    moves = [{"kind": "verse", "lines": ["Words"], "style": "restrained"}, {"kind": "outro"}]
+    asked = SongRequest(lyrics="[Verse]\nWords", dst=tmp_path / "s.wav", style="pop", seed=1,
+                        sections=moves)  # fmt: skip
+    mac.Mac().song(asked, context())
+    assert machine["tags"] == "pop. Verse: restrained."
+    assert machine["lyrics"] == "[Verse]\nWords"
 
 
 def test_each_song_engine_has_its_runner_on_disk():

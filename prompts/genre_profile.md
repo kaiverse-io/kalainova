@@ -1,7 +1,4 @@
-The studio's profile for this song's genre (JSON). Write inside it:
-- a "bpm" inside its "bpm" range and a "key" from its "keys";
-- its "structure": the same sections in the same order, with its bar counts;
-- its "style" words first in your "style", then your own words for this song's sound and how it moves;
-- its "avoid" in your "avoid", and its "vocal_gender".
+The studio's notes on this song's genre (JSON): where the genre usually sits, its tempo range, keys, a usual arrangement, base sound words, what it keeps out, and its voice. They are ground to lead from, not a template. Choose this song's tempo, key, length, sections and sound for what it is about, and leave the usual wherever this song is better for it. Its "avoid" goes in your "avoid".
+{holds}
 
 {profile}

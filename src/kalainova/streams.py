@@ -228,14 +228,14 @@ def request(
     record = _job_record(stream, job_id, brief, chosen, resolved.shared.get("format") or {})
     if amplify:
         record["brief"]["amplification"] = amplify
-    if duration:
-        record["brief"]["duration_sec"] = duration
     if media:
         record["media"] = list(media)
     if genre:
         from . import genres
 
         genres.apply(record["brief"], genre)
+    if duration:  # asked for in this request, so it stands over the genre's usual length
+        record["brief"]["duration_sec"] = duration
     folder = root / "jobs" / job_id
     folder.mkdir(parents=True)
     job = Job(folder)

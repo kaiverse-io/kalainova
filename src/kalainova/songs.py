@@ -16,14 +16,14 @@ from typing import Any
 
 import numpy as np
 
-from . import captions, config, genres, media, render, song_guide, takes, writers
+from . import captions, config, genres, media, render, song_guide, song_lead, takes, writers
 from .bar import judges
 from .bar import song as musicbar
 from .bar.readings import summarise
 from .editor.singing import sounding_span
 from .editor.singing import timed_lines as timed_lines
 from .jobfs import ContractError, Job
-from .providers import router
+from .providers import router, song_text
 from .providers.contract import Guide, Pin, SeparateRequest, SongRequest, TranscribeRequest
 from .render import release
 from .song_repair import repair_take as repair_take
@@ -31,10 +31,9 @@ from .song_repair import repair_take as repair_take
 Song = dict[str, Any]
 Cue = dict[str, Any]
 SHOT = "song"
-SAFE_TAKES = {
-    "takes": 2,
-    "max_takes": 3,
-}  # the best of several beats the first of one, in every test
+# One take, then more only while they are free (takes.make_until_good): a paid song is one take
+# whose request is made right, and a weak section is repaired, not retaken (ADR 0031).
+SAFE_TAKES = {"takes": 1, "max_takes": 3}
 IMITATION = re.compile(
     r"\b(?:in the style of|sounds? (?:just )?like|voice of|cover of|like (?:a )?(?:young|early) )",
     re.I,
@@ -44,11 +43,17 @@ IMITATION = re.compile(
 NEGATION = re.compile(r"\b(?:no|not|without|never|avoid|don't|zero)\s+[a-z][\w-]*", re.I)
 FADE_SEC = 3.0
 CAPTION_RATE = 24.0
-SECTION_NAMES = {"pre-chorus": "Pre-Chorus"}
+# A line is sung as written: a stage direction among the lines would be sung too.
+DIRECTION = re.compile(r"^\W*(?:instrumental|inst|no vocals?|music only)\W*$", re.I)
 
 
 def style_text(song: Song) -> str:
+    """The style as a model reads it: the brief, how its uncommon words are said, then the tempo
+    and key as numbers."""
     parts = [str(song["style"]).strip().rstrip(".,; ")]  # one clean join, not "pads., 122 bpm"
+    said = dict(song.get("pronounce") or {})
+    if said:
+        parts.append("pronounce " + ", ".join(f'"{w}" as "{s}"' for w, s in said.items()))
     if song.get("bpm"):
         parts.append(f"{song['bpm']:g} bpm")
     if song.get("key"):
@@ -57,25 +62,36 @@ def style_text(song: Song) -> str:
 
 
 def lyrics_text(song: Song) -> str:
-    """Words with their section tags, which is how every song model takes structure."""
-    out = []
-    for section in song["sections"]:
-        out.append(f"[{SECTION_NAMES.get(section['kind'], str(section['kind']).title())}]")
-        out += list(section.get("lines") or [])
-    return "\n".join(out) + "\n"
+    """Words with their section tags, which is how every song model takes structure. A model that
+    reads a section's note on its tag gets it from the provider (song_text)."""
+    return song_text.tagged(song["sections"])
 
 
 def problems(song: Song) -> list[str]:
-    """What must not reach a model at all."""
+    """What must not reach a model at all. A section's note is sent as its style is."""
     found = []
-    for text in (song["style"], song.get("avoid") or ""):
+    notes = [str(s.get("style") or "") for s in song.get("sections") or []]
+    kept_out = [str(s.get("avoid") or "") for s in song.get("sections") or []]
+    for text in (song["style"], song.get("avoid") or "", *notes, *kept_out):
         if IMITATION.search(str(text)):
             found.append(f"the style asks to imitate someone ({text[:60]!r}); describe the sound")
-    said = NEGATION.search(str(song["style"]))
-    if said:
+    for where, text in (("style", song["style"]), *(("a section's style", n) for n in notes)):
+        said = NEGATION.search(str(text))
+        if said:
+            found.append(
+                f"the {where} says {said.group(0)!r}: a song model reads every word of it, so a "
+                "sound named there is asked for. Name what you want, and put what to keep out in "
+                "avoid"
+            )
+    words = " ".join(musicbar.lyric_lines(song)).casefold()
+    unsung = [w for w in song.get("pronounce") or {} if str(w).casefold() not in words]
+    if unsung:
+        found.append(f"pronounce names words no line sings: {', '.join(unsung)}")
+    directions = [line for line in musicbar.lyric_lines(song) if DIRECTION.match(line)]
+    if directions:
         found.append(
-            f"the style says {said.group(0)!r}: a song model reads every word of its style, so a "
-            "sound named there is asked for. Name what you want, and put what to keep out in avoid"
+            f"the line {directions[0]!r} would be sung; a section with no voice has no lines, and "
+            'its style says "instrumental"'
         )
     if not song.get("instrumental") and not musicbar.lyric_lines(song):
         found.append("a song with a voice needs lines; set instrumental if it has none")
@@ -140,7 +156,11 @@ def rehearse_takes(job: Job) -> None:
     written down and nothing is sent. Refused first, as the run refuses, when the song cannot go."""
     song = job.read("song")
     brief = job.job.get("brief") or {}
-    refused = problems(song) + genres.problems(song, genres.for_brief(brief))
+    refused = (
+        problems(song)
+        + genres.problems(song, genres.for_brief(brief))
+        + song_lead.length_problems(brief, song)
+    )
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))
     guide, _ = song_guide.follow(job, brief, _song_pin(brief))
@@ -232,23 +252,9 @@ def clean(take_file: Path, cleaned: Path) -> Path:
         cut_at = end
         fade = min(FADE_SEC, end / 4)
     fade_start = max(cut_at - fade, 0.0)
-    media.run(
-        [
-            "-i",
-            str(take_file),
-            "-t",
-            f"{cut_at:.3f}",
-            "-af",
-            f"highpass=f=25,afade=t=out:st={fade_start:.3f}:d={fade:.3f}",
-            "-ar",
-            "48000",
-            "-ac",
-            "2",
-            "-c:a",
-            "pcm_s24le",
-            str(cleaned),
-        ]
-    )  # fmt: skip
+    media.run(["-i", str(take_file), "-t", f"{cut_at:.3f}",
+               "-af", f"highpass=f=25,afade=t=out:st={fade_start:.3f}:d={fade:.3f}",
+               "-ar", "48000", "-ac", "2", "-c:a", "pcm_s24le", str(cleaned)])  # fmt: skip
     return cleaned
 
 
@@ -265,11 +271,29 @@ def _stems(job: Job, final: Path) -> dict[str, str]:
     return {"vocals": vocals.name, "instrumental": rest.name}
 
 
-def write(job: Job) -> Song:
-    """The song file, written from the brief inside its genre when there is none yet. Each draft is
-    held to the song's rules and its genre, and a faulted one is written again."""
+def write(job: Job, keep_words: bool = False, again: bool = False, revise: str = "") -> Song:
+    """The song file, written from the brief inside its genre when there is none yet. With
+    keep_words, its sound is written again around its own lines; with again, a new song apart
+    from the one it replaces; with revise, the song revised by a person's notes. A song is
+    replaced only once nothing was made from it and its replacement passes, and the old one is set
+    aside. Each draft is held to the song's rules and its genre, and a faulted one is written
+    again."""
+    if (again or revise) and job.has("song") and takes.load(job)["shots"].get(SHOT):
+        raise ContractError(f"{job.id}: takes were made from this song; open a new job instead")
+    if revise and not job.has("song"):
+        raise ContractError(f"{job.id}: there is no song to revise; write one first")
     profile = genres.for_brief(job.job.get("brief") or {})
-    writers.ensure(job, "song", check=lambda d: problems(d) + genres.problems(d, profile))
+
+    def check(draft: Song) -> list[str]:
+        return problems(draft) + song_lead.draft_problems(draft) + genres.problems(draft, profile)
+
+    if keep_words:  # its words, tempo and key stand, so only its sound is held
+        return writers.sound(job, check=check)
+
+    def fresh(draft: Song) -> list[str]:  # a revision is not a repeat of the song it revises
+        return check(draft) + song_lead.problems(job, draft, own=not revise)
+
+    writers.ensure(job, "song", check=fresh, replace=again or bool(revise), revise=revise)
     return dict(job.read("song"))
 
 
@@ -277,7 +301,9 @@ def run(job: Job) -> Path:
     brief = job.job.get("brief") or {}
     profile = genres.for_brief(brief)
     song = write(job)
-    refused = problems(song) + genres.problems(song, profile)
+    refused = (
+        problems(song) + genres.problems(song, profile) + song_lead.length_problems(brief, song)
+    )
     if refused:
         raise ContractError(f"{job.id}: " + "; ".join(refused))
     router.refuse_too_long(

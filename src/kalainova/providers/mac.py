@@ -23,6 +23,7 @@ from typing import Any
 
 from .. import media
 from ..config import model_for
+from . import song_text
 from .base import Provider, register
 from .contract import (
     Context,
@@ -303,6 +304,7 @@ class Mac(Provider):
     def song(self, req: SongRequest, ctx: Context) -> Result:
         """A song through the engine named in config, in its own environment, with its own seed."""
         lyrics, dst, style, duration = req.lyrics, req.dst, req.style, req.duration
+        style = song_text.styled(style, req.sections)  # its tags read no notes on lyric tags
         engine = model_for("mac", "song") or "heartmula"
         python = os.environ.get(SONG_PYTHON_ENV)
         checkpoint = os.environ.get(SONG_CHECKPOINT_ENV)

@@ -9,11 +9,12 @@ Make a job with `"media": ["song"]`. A model writes `song.json` from the brief w
   "schema_version": "0.1",
   "job_id": "<id>",
   "title": "<title>",
-  "style": "genre, instruments, mood, and the kind of voice, in plain words",
+  "style": "a short brief: genre, emotion, rhythmic feel, the voice, core instruments with their roles, texture",
   "bpm": 96,
   "duration_sec": 150,
+  "pronounce": {"<an uncommon word the lines sing>": "<how it sounds>"},
   "sections": [
-    {"kind": "verse", "lines": ["..."], "visual": "what a lyric video shows here"},
+    {"kind": "verse", "lines": ["..."], "style": "a few words: what changes here", "visual": "what a lyric video shows here"},
     {"kind": "chorus", "lines": ["..."], "style": "how this section differs"}
   ]
 }
@@ -21,23 +22,56 @@ Make a job with `"media": ["song"]`. A model writes `song.json` from the brief w
 
 Describe a sound. A style asking to imitate a named person is refused before it reaches a model. Words are original, and no real person's voice is ever used.
 
-Name only what you want in `style`: a model hears every sound the style names, so "no autotune" asks for autotune, and a style that says "no", "without" or "never" is refused before spend. What to keep out goes in `avoid`. Many models read nothing about the arrangement but the style, so say there how the track moves, section to section; two takes of a style that fixes one groove "throughout" come back with the same beat. `vocal_gender` (`female` or `male`) goes to a model that takes it as its own setting (Mureka). `words_by` says who wrote the words (`person`, `model`, or `person_edited_model`): the release's AI record is read from it, and the engine's writer sets `model`.
+Name only what you want in `style`: a model hears every sound the style names, so "no autotune" asks for autotune, and a style that says "no", "without" or "never" is refused before spend. What to keep out goes in `avoid`. The same holds for each section's `style`, since it is sent too.
+
+Write `style` as a short production brief rather than a list of keywords, in the order Mureka's own prompt guide gives: genre, emotion, rhythmic feel, the voice (its timbre, how close it sits, clear diction), the core instruments each with its role, and the production texture. Keep the few traits that matter most clear. When a take drifts, cut words rather than add them. The tempo and key go in `bpm` and `key`, and reach the model as numbers after the style.
+
+Say how the track moves in each section's `style`, in a few words. Two takes of a style that fixes one groove "throughout" come back with the same beat. Where each note goes depends on the model:
+- a model whose row in `audio_models` has `section_notes: tags` (Mureka) reads each note on its lyric tag, as in `[Verse] restrained and intimate`;
+- any other model reads the notes after the style, in song order.
+
+`pronounce` lists each word or name the lines sing that is not of the song's language, with how it is said. It reaches the model in the style, and a word no line sings is refused.
+
+The engine's writer is held to all of this. A draft whose style runs past 450 characters, names a tempo, or has a section note past 80 characters is written again. `vocal_gender` (`female` or `male`) goes to a model that takes it as its own setting (Mureka). `words_by` says who wrote the words (`person`, `model`, or `person_edited_model`): the release's AI record is read from it, and the engine's writer sets `model`.
 
 ## Choose a genre
 
-What a song is made inside is the studio's decision, set once per genre and kept in the private
-config under `genres:`: a tempo range, keys, a structure with bar counts, base style words, what to
-keep out, the voice, the song model and how many takes. Name one when the job is opened:
+A genre profile is the studio's notes on a genre, kept in the private config under `genres:`:
+- where the genre usually sits: a tempo range, keys, a usual arrangement with bar counts, base style words, what to keep out, and the voice;
+- the song model and how many takes, which the engine pins unless the brief already does;
+- `holds`: the few of `bpm`, `key`, `vocal_gender` and `structure` that every song of the genre must keep. A song file outside them is refused before spend. The rest is the writer's to choose.
+
+Name a genre when the job is opened:
 
 ```sh
 kalainova new <id> --identity <id> --subject "<brief>" --media song --genre <genre>
 kalainova request <stream> "<brief>" --media song --genre <genre>
 ```
 
-The writer is handed the profile and writes inside it. A draft that breaks the song's rules (a
-"no ..." style) or leaves the genre is told what is wrong and written again, up to three times. The engine pins the profile's model and
-takes unless the brief already does, and refuses before spend a song file outside the profile's
-tempo, keys or voice. A stream that makes audio can be asked for a song.
+A stream that makes audio can be asked for a song.
+
+## The writer leads
+
+The writer is the song's creative lead (ADR 0032). From the person's brief it decides what this song is:
+- its idea and the one device a listener remembers it by;
+- its sub-style and sound;
+- its tempo, key and length;
+- its own arrangement and groove;
+- how it is sung.
+
+It writes that decision in `concept`, then the song. The engine adds no ideas of its own. It makes what the song file says, and refuses only what cannot go.
+
+The writer is shown:
+- the profile, as ground to lead from rather than a template;
+- the artist's voice and canon from the stream's kits;
+- the lengths the pinned model makes;
+- the stream's songs so far, newest first, with their concept, tempo, key, sections and sound, so the new one stands apart from them.
+
+A draft is told what is wrong and written again, up to three times, when it:
+- breaks the song's rules;
+- leaves what its genre holds;
+- asks for a length the model does not make;
+- repeats an earlier song of the stream, with the same tempo, key and run of sections, or the same title.
 
 ## Choose an engine
 
@@ -49,17 +83,28 @@ Pin one in the job's `providers`, for example `{"song": ["mac"], "transcribe": [
 | A hosted app | `spaces` | Free, rate limited | Needs the `spaces` extra. The lyrics leave this machine, and the app's terms need reading |
 | Eleven Music | `elevenlabs` | Rented | Takes a section-by-section plan |
 | MiniMax Music | `fal` | Rented | A style prompt plus tagged lyrics |
-| Mureka | `fal` | Rented | Lyrics plus a style prompt of up to 1,024 characters; 120 to 300 s |
+| Mureka V9.5 | `fal` | Rented | Lyrics of up to 5,000 characters, with each section's note on its tag, plus a style prompt of up to 1,024 characters; 120 to 300 s. Since 2026-11-20 fal answers 410 for it, billing nothing |
+| Mureka V9 | `fal` | Rented | V9.5's request without a length: the model sets it |
+| Eleven Music v2.5 | `fal` | Rented | A plan of one chunk per section: its words, its length from its bars at the song's tempo (3 to 120 s), its note as direction, and `avoid` on every chunk; a seed |
 | Lyria 3 Pro | `fal` | Rented | One prompt carries the style and the lyrics; the model sets the length |
 
 To use one model of a provider rather than its default, pin it:
-`kalainova pin <job> song fal:mureka/v9.5/generate/song --takes 3`. That sets the brief's
+`kalainova pin <job> song fal:mureka/v9.5/generate/song --takes 1`. That sets the brief's
 `song_model`, the job's song provider and how many takes are made. A provider with no model
 (`kalainova pin <job> song mac`) uses that provider's own default and clears any other vendor's
 model the brief or its genre pinned. The router sends the
 song there and nowhere else. `kalainova rehearse <job>` then writes down each take's request,
 with its fields and price, and sends nothing. `kalainova song <job> --write` writes the song file
-alone, inside its genre, so it can be read and rehearsed before anything is made. Choose by listening, not by a model's reputation: open one job per
+alone, inside its genre, so it can be read and rehearsed before anything is made.
+`kalainova song <job> --write --keep-words` writes only its sound again: the style, what to keep
+out, how uncommon words are said, and each section's note. Every line, the tempo, the key and who
+wrote the words stay as they were, and the file it replaces is kept in the job's work folder. Use
+it on words a person wrote, or to bring an older song file up to the current brief.
+`kalainova song <job> --write --again` asks the writer for a new song in place of one nothing was
+made from. The new one must stand apart from the old one too. `kalainova song <job> --write
+--revise "<notes>"` hands the writer the song and a person's notes to revise it by, keeping what
+the notes do not touch. Either way the old song is set aside in the work folder only once its
+replacement passes. Once a take is made from a song, open a new job instead. Choose by listening, not by a model's reputation: open one job per
 model with the same `song.json`, then hear them blind (below).
 
 ### Start from a free draft
@@ -107,7 +152,18 @@ second ranking would be made knowing the answers.
 
 A judge is a model trained to agree with people about quality (ADR 0024). The engine ships none. Name each one under `judges.song` in your private config: a command that takes `--out FILE` and audio paths, and writes `{path: {score: number}}`. `providers/runners/muqeval_run.py` runs MuQ-Eval (MIT), which scores musical impression from 1 to 5. Set it up with a checkout of its repo, its A1 weights, and an environment with torch, librosa, omegaconf, muq and `transformers==4.46.3`, since newer releases break the muq package. `providers/runners/aesthetics_run.py` runs Audiobox Aesthetics (CC-BY-4.0), which mostly reads production and tells similar takes apart poorly. The first judge's `rank_by` score ranks the takes that pass their readings. With `--judge`, every take of the named jobs is read again with the current readings and the transcript kept beside it (nothing is spent), scored at once, and listed best first, beside what its readings missed. The last line is the engine's pick between the jobs, by the rule that chooses within one: of the takes that pass every reading, the judge's highest; when none passes, it says so and names the closest. Each job keeps its own chosen take until its song is made again. A judge never hears the brief, so a take it likes may not sing the words, and that is what the readings are for.
 
-Several takes are made, and readings pick one. Tempo against what was asked, steadiness, how many words can be picked out, whether the chorus can be (`song.chorus_heard`: the share of its lines a listener picks out at least half of), and shape all warn and never reject. Only a wrong level on the finished file blocks, because a reading cannot judge a song. Listen to it.
+Give every section an `energy` from 1 to 5: how much it carries, as you plan the song's arc. A take is read against it. `kalainova song-check <job> [--take N]` prints what a take missed of its own plan as cards, each with a time and a fix:
+- a section carrying two or more levels off its planned energy;
+- a voice where the plan has no words, or none where it has them;
+- a key other than the one asked;
+- an uncommon word from `pronounce` not heard where it is sung;
+- a section whose words were mostly not heard there.
+
+The cards are kept beside the take, and none of them blocks (ADR 0034).
+
+A section can name what it keeps out in its own `avoid`, such as the drums of a soft intro; a plan model (Eleven Music v2.5) takes it on that section's chunk (ADR 0033).
+
+A paid model makes one take unless the brief asks for more (ADR 0031): the request is made right instead, and a weak section is repaired rather than retaken. A free model makes more while a reading misses, up to `max_takes`, and readings pick one. Tempo against what was asked, steadiness, how many words can be picked out, whether the chorus can be (`song.chorus_heard`: the share of its lines a listener picks out at least half of), shape, and whether an intro opens below the loudest section (`song.intro_rise`, ADR 0033) all warn and never reject. Only a wrong level on the finished file blocks, because a reading cannot judge a song. Listen to it.
 
 You get `final.wav` at -14 LUFS, `final.m4a`, and `final.lrc` with captions, timed to what was heard when something can transcribe it and spread by length when not. Stems come out when a `separate` provider is listed. The vocal stem is then transcribed as well, kept beside the take as `<take>.vocals.heard.json`, and the finished song's lyric readings are read from it, since a transcriber hears far more of a voice without its band. That is a second paid call, so it needs its own allowance; when no one signed one off, the engine says so, the mix's transcript stands, and QA's `song.lyrics_heard_from` warns. Release files for a distributor (WAV, FLAC, MP3 with tags and a cover) are written beside them: see `docs/how-to/release-a-song.md`. So is `release/ai_use.json`: what AI made, part by part (the words, the music, the vocal, the mastering), and the AI credits a distributor's form is likely to want. It suggests and sends nothing; the person uploading answers the live form.
 

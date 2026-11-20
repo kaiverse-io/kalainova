@@ -18,6 +18,7 @@ import numpy as np
 
 from .. import media
 from ..editor import beats
+from . import plan
 from .readings import Reading, at_least, at_most, summarise
 from .sound import (
     clipped_share,
@@ -162,6 +163,36 @@ def _tempo_readings(path: Path, song: Song) -> list[Reading]:
     return out
 
 
+def section_spans(song: Song) -> list[tuple[float, float]]:
+    """Where each section was asked to sit, in seconds (plan.spans)."""
+    return plan.spans(song)
+
+
+INTRO_SEC = 15.0  # the opening a song without bars is read by, against its loudest stretch
+
+
+def intro_rise(path: Path, song: Song) -> float | None:
+    """How far below the song's loudest section its intro plays, in dB (0 when the intro is the
+    loudest). A take asked for a soft start that opens at full level reads near 0. Without bars to
+    place the sections, its first 15 s against its loudest 15 s. None without an intro first."""
+    sections = song.get("sections") or []
+    if not sections or str(sections[0].get("kind")) != "intro":
+        return None
+    pcm = beats._pcm(path)
+
+    def level(a: float, b: float) -> float:
+        part = pcm[int(a * beats.SR) : int(b * beats.SR)]
+        return float(20 * np.log10(np.sqrt(np.mean(part**2)) + 1e-9)) if part.size else -120.0
+
+    spans = section_spans(song)
+    if not spans:
+        end = pcm.size / beats.SR
+        starts = np.arange(0.0, max(end - INTRO_SEC, 0.0) + 1e-9, INTRO_SEC / 3)
+        spans = [(float(a), float(a) + INTRO_SEC) for a in starts]
+    levels = [level(a, b) for a, b in spans]
+    return round(levels[0] - max(levels), 2)
+
+
 def measure(path: Path, song: Song, heard: list[Word] | None) -> dict[str, Any]:
     """A take's readings. A reading that needs a transcript waits until there is one."""
     readings: list[Reading] = [*_sound_readings(path), *_tempo_readings(path, song)]
@@ -172,6 +203,10 @@ def measure(path: Path, song: Song, heard: list[Word] | None) -> dict[str, Any]:
     lra = media.loudness(path).get("loudness_range_lu")
     if lra is not None:
         readings.append(at_least("song.shape", float(lra), "song_range_lu_min"))
+    rise = intro_rise(path, song)
+    if rise is not None:
+        readings.append(at_most("song.intro_rise", rise, "song_intro_below_loudest_db"))
+    readings += _plan_readings(path, song)
     if heard is not None and not song.get("instrumental"):
         found = words_found(lyric_lines(song), heard)
         readings.append(at_least("song.words_found", found, "song_words_found_min"))
@@ -179,6 +214,20 @@ def measure(path: Path, song: Song, heard: list[Word] | None) -> dict[str, Any]:
         if chorus is not None:
             readings.append(at_least("song.chorus_heard", chorus, "song_chorus_heard_min"))
     return summarise([asdict(r) for r in readings])
+
+
+def _plan_readings(path: Path, song: Song) -> list[Reading]:
+    """Whether the take kept its own plan: its energy arc against each section's planned energy
+    (Spearman's rho) and its key against the key asked (1 the same, 0.5 the relative key)."""
+    pcm = beats._pcm(path)
+    out = []
+    rho, _ = plan.energy_cards(plan.profile(pcm, song), song)
+    if rho is not None:
+        out.append(at_least("song.energy_follows_plan", rho, "song_energy_rho_min"))
+    match, _ = plan.key_cards(pcm, song) if song.get("key") else (None, [])
+    if match is not None:
+        out.append(at_least("song.key_match", match, "song_key_match_min"))
+    return out
 
 
 def saved_heard(take: Path) -> list[Word] | None:

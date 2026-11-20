@@ -34,3 +34,7 @@ One decision per file. Short. Status is `accepted` until a later ADR supersedes 
 | [0028](0028-a-paid-song-can-follow-a-free-draft.md) | A paid song can follow a free draft: a clip of it as a reference, or the whole track remixed (built; unused, since the vendor's guided routes failed) |
 | [0029](0029-a-songs-master-is-chosen-among-options-heard-blind.md) | A song's master is chosen by a person, among options the engine renders and hears blind |
 | [0030](0030-a-song-is-made-inside-its-genres-profile.md) | A song is written and made inside its genre's profile, which the studio sets |
+| [0031](0031-a-song-request-follows-its-vendors-prompt-guide.md) | A song request follows its vendor's own prompt guide: a short brief, notes on the lyric tags, and how uncommon words are said |
+| [0032](0032-the-writer-leads-a-songs-creative-choices.md) | The writer leads a song's creative choices, and a genre profile is ground to lead from, held only where the studio says |
+| [0033](0033-a-take-that-opens-at-full-level-is-read-and-a-plan-leads-with-each-sections-own-direction.md) | A take that opens at full level is read as such, and a plan leads each chunk with its section's own direction |
+| [0034](0034-a-song-take-is-read-against-its-own-plan.md) | A song take is read against its own plan, and what it missed becomes a card with a time and a fix |
