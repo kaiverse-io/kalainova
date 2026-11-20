@@ -2,9 +2,10 @@
 
 A section's `style` is a short note on what changes there ("restrained and intimate"). A model
 whose row in `audio_models` has `section_notes: tags` reads each note on its section's lyric tag,
-as its vendor's own prompt guide shows ("[Verse] restrained and intimate"). Any other model reads
-the notes after the style, in order. Either way, every section of a song file reaches the model
-that sings it (ADR 0029).
+as its vendor's own prompt guide shows ("[Verse] restrained and intimate"). One with
+`section_notes: timestamps` reads each section under a timed marker ("[0:23-0:38] Verse: ..."),
+its span from its bars. Any other model reads the notes after the style, in order. Either way,
+every section of a song file reaches the model that sings it (ADR 0029).
 """
 
 from __future__ import annotations
@@ -51,6 +52,24 @@ def styled(style: str, sections: Sequence[Section]) -> str:
     if not said:
         return style
     return f"{style.strip().rstrip('.,; ')}. {said}" if style.strip() else said
+
+
+def _clock(ms: int) -> str:
+    minutes, rest = divmod(round(ms / 1000), 60)
+    return f"{minutes}:{rest:02d}"
+
+
+def timestamped(sections: Sequence[Section], bpm: float | None, seconds: float) -> str:
+    """The words under timed section markers, as Lyria's guide shows them ("[0:00-0:30] Intro:
+    ..."): each section's span from its bars at the song's tempo, its note after its name."""
+    out, at = [], 0
+    for section, ms in zip(sections, section_ms(sections, bpm, seconds), strict=True):
+        said = note(section)
+        marker = f"[{_clock(at)}-{_clock(at + ms)}] {name(section)}"
+        out.append(f"{marker}: {said}" if said else marker)
+        out += [str(line) for line in section.get("lines") or []]
+        at += ms
+    return "\n".join(out) + "\n"
 
 
 CHUNK_MS = (3000, 120000)  # a plan's chunk, as ElevenLabs takes it

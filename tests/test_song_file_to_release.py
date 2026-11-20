@@ -341,3 +341,43 @@ def test_a_hint_is_keyed_into_the_request_only_when_a_song_has_one(tmp_path):
     said = SongRequest(lyrics="w", dst=tmp_path / "s.wav", style="house", pronounce={"a": "b"})
     assert "pronounce" not in plain._shape()[1]
     assert plain.key() != said.key()
+
+
+LYRIA = "google/lyria-3.5"
+
+
+def test_lyria_reads_each_section_under_a_timed_marker_in_one_prompt(mureka):
+    """Lyria 3.5 takes one prompt: the style, then the words under markers timed from their bars
+    (its guide: "[0:00-0:30] Intro: ..."). It takes no length field."""
+    provider, wire, tmp = mureka
+    sections = [
+        {"kind": "intro", "bars": 8, "style": "pads alone"},
+        {"kind": "verse", "bars": 16, "lines": ["Six in the morning"], "style": "voice set back"},
+    ]
+    req = SongRequest(lyrics="[Intro]\n[Verse]\nSix in the morning\n", dst=tmp / "s.wav",
+                      style="melodic house, 120 bpm", duration=180, bpm=120, sections=sections,
+                      language="en")  # fmt: skip
+    res = provider.song(req, context(model=LYRIA))
+    sent = wire.sent[-1]["payload"]
+    assert sent == {
+        "prompt": "melodic house, 120 bpm\n\nLyrics:\n[0:00-0:16] Intro: pads alone\n"
+        "[0:16-0:48] Verse: voice set back\nSix in the morning"
+    }
+    assert res.cost == pytest.approx(0.10)
+
+
+def test_a_song_in_a_language_lyria_does_not_sing_is_refused_before_sending(mureka):
+    provider, wire, tmp = mureka
+    before = len(wire.sent)
+    req = SongRequest(lyrics="[Verse]\nW\n", dst=tmp / "s.wav", style="house", duration=120,
+                      language="ar")  # fmt: skip
+    with pytest.raises(ValueError, match="not ar"):
+        provider.song(req, context(model=LYRIA))
+    assert len(wire.sent) == before
+
+
+def test_lyrias_limit_holds_the_style_and_the_words_together(mureka):
+    provider, _, tmp = mureka
+    req = SongRequest(lyrics="w" * 4990, dst=tmp / "s.wav", style="house", duration=120)
+    with pytest.raises(ValueError, match="style and words together"):
+        provider.song(req, context(model=LYRIA))

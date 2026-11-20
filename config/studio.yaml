@@ -142,6 +142,7 @@ prices:
     mureka/api/files/upload: {per_call: 0.01, checked: "fal's model page 2026-11-18: $0.01 an upload"}
     mureka/api/song/edit: {per_track: 0.10, checked: "fal's model page 2026-11-19: $0.10 an edited region"}
     fal-ai/lyria3/pro: {per_track: 0.08, checked: "fal's model page: $0.08 a track"}
+    google/lyria-3.5: {per_track: 0.10, checked: "fal's model page 2026-11-20: $0.10 a song; confirm with scripts/check_fal_prices.py"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
     lipsync: {per_min: 3.00}       # ESTIMATE
@@ -191,10 +192,32 @@ licences:
       obligations: ["A commercial product must display MiniMax-Music3 prominently", "Written authorisation above $20M yearly revenue"]
   spaces:
     "*": {name: hosted app, commercial: false, retention: unknown, obligations: ["Read the terms of the app and of the model it runs before releasing anything"]}
+  # terms: the page a person read, and read: when. A package shows both beside each paid call,
+  # so the terms in force when it was signed are on record with the spend.
   elevenlabs:
     "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm your plan allows commercial use"]}
+    music_v2_5:
+      name: Eleven Music terms
+      commercial: true
+      retention: unknown
+      terms: https://elevenlabs.io/music-terms
+      read: 2026-11-20
+      obligations: ["Streaming distribution needs the Creator plan or higher; Free and Starter may not stream (the English terms' table). Translated and archived pages read stricter: confirm in writing before a release", "High-quality downloads need Pro or higher"]
   fal:
     "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm the model's own terms on fal"]}
+    elevenlabs/music/v2.5:
+      name: vendor terms via fal
+      commercial: true
+      retention: unknown
+      read: 2026-11-20
+      obligations: ["Whether ElevenLabs' music terms let a take made through fal be streamed is not documented: settle it before a release"]
+    google/lyria-3.5:
+      name: vendor terms via fal
+      commercial: true
+      retention: unknown
+      terms: https://deepmind.google/models/model-cards/lyria-3-5/
+      read: 2026-11-20
+      obligations: ["fal marks it for commercial use; Google's model card defers to the service terms: confirm streaming release in writing", "It returns MP3 only, so a master made from it is lossy at its source"]
     fal-ai/ace-step:
       name: ACE-Step (VERIFY)
       commercial: true
@@ -271,6 +294,14 @@ audio_models:
       guide:
         remix: {upload: mureka/api/files/upload, purpose: remix, field: upload_audio_id}
     fal-ai/lyria3/pro: {max_sec: 184, style_field: prompt, lyrics_in_prompt: true, takes_duration: false}   # one prompt carries style and lyrics; no length field. VERIFY the longest track
+    google/lyria-3.5:              # fal's schema 2026-11-20: one prompt of up to 5,000 characters; negative_prompt "not supported"; returns MP3
+      max_sec: 300                 # VERIFY: the schema says "full-length songs up to a few minutes"
+      style_field: prompt
+      lyrics_in_prompt: true
+      prompt_max_chars: 5000       # the style and the words together
+      takes_duration: false        # the length comes from the timed section markers
+      section_notes: timestamps    # its guide: "[0:00-0:30] Intro: ..." / "[0:30-1:00] Verse: ..."
+      languages: [en, de, es, fr, hi, ja, ko, pt]
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
 takes:

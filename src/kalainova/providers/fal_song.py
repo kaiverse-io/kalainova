@@ -9,9 +9,11 @@ from a track. A guide a model cannot follow is refused here, before anything is 
 A row with `composition_plan` takes the song as a plan of chunks instead, one per section, each
 with its own length (from its bars at the song's tempo), words and direction (song_text.plan).
 
-A row with `section_notes: tags` reads each section's note on its lyric tag; any other row reads
-the notes after the style (song_text). `lyrics_max_chars` and `style_max_chars` are the vendor's
-limits, refused here rather than cut upstream.
+A row with `section_notes: tags` reads each section's note on its lyric tag, one with
+`timestamps` each section under a timed marker; any other row reads the notes after the style
+(song_text). A row's `languages` are the ones its model sings; a song in another is refused.
+`lyrics_max_chars`, `style_max_chars` and `prompt_max_chars` (the style and the words in one
+field) are the vendor's limits, refused here rather than cut upstream.
 
 A row that `edits` sings one span of a take again with new words (`edit_payload`): a generate
 row names its edit route under `edit_with`, and a repair is pinned to that route, so the package,
@@ -46,12 +48,9 @@ def payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
         raise ValueError(
             f"{model} makes a song again from a {spec['needs_guide']} track; give it one"
         )
+    _sings(model, spec, req.language)
     style_field = spec.get("style_field", "prompt")
-    lyrics, style = _texts(model, spec, req)
-    if spec.get("lyrics_in_prompt"):  # one text field carries the sound and the words to sing
-        sent: Fields = {style_field: f"{style}\n\nLyrics:\n{lyrics}".strip()}
-    else:
-        sent = {style_field: style, "lyrics": lyrics}
+    sent = _words(model, spec, req)
     if req.duration and spec.get("takes_duration", True):
         least = float(spec.get("min_sec") or 0)
         if req.duration < least:
@@ -62,6 +61,29 @@ def payload(model: str, req: SongRequest) -> tuple[Fields, Fields | None]:
     if how is not None and how.get("style") is False:  # the track carries the sound instead
         sent.pop(style_field, None)
     return sent, how
+
+
+def _sings(model: str, spec: Fields, language: str | None) -> None:
+    """Refuse a song in a language the model's row does not list; a row with none lists all."""
+    langs = [str(x) for x in spec.get("languages") or []]
+    if langs and language and str(language).split("-")[0].lower() not in langs:
+        raise ValueError(f"{model} sings {', '.join(langs)}, not {language}; choose another")
+
+
+def _words(model: str, spec: Fields, req: SongRequest) -> Fields:
+    """The style and the words under the model's own fields: one field for both, or two."""
+    style_field = spec.get("style_field", "prompt")
+    lyrics, style = _texts(model, spec, req)
+    if not spec.get("lyrics_in_prompt"):
+        return {style_field: style, "lyrics": lyrics}
+    prompt = f"{style}\n\nLyrics:\n{lyrics}".strip()  # one field: the sound, then the words
+    most = spec.get("prompt_max_chars")
+    if most and len(prompt) > int(most):
+        raise ValueError(
+            f"{model} takes at most {most} characters of style and words together, "
+            f"not {len(prompt)}"
+        )
+    return {style_field: prompt}
 
 
 def _plan_payload(model: str, req: SongRequest) -> Fields:
@@ -89,7 +111,9 @@ def _texts(model: str, spec: Fields, req: SongRequest) -> tuple[str, str]:
     """The words and the style as this model reads them, each section's note where it reads it,
     refused past the vendor's limits."""
     lyrics, style = req.lyrics, req.style
-    if song_text.has_notes(req.sections):
+    if spec.get("section_notes") == "timestamps" and req.sections:  # timed, with notes or none
+        lyrics = song_text.timestamped(req.sections, req.bpm, req.duration or 120)
+    elif song_text.has_notes(req.sections):
         if spec.get("section_notes") == "tags":
             lyrics = song_text.tagged(req.sections, notes=True)
         else:
