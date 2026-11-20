@@ -12,9 +12,13 @@ kalainova filmstrip <file> <start> <end>         frames over a waveform
 kalainova cutcheck <job>                         a click or a flash at any cut
 kalainova export <job> [--to fcpxml|otio|edl]    the cut for an editing system
 kalainova timeline-import <job> <file>  an edit saved in FCPXML, EDL or OTIO, read back
-kalainova song <job>                             lyrics to takes to a master
+kalainova song <job> [--write [--keep-words|--again|--revise NOTES]]  lyrics to takes to a master;
+                 --write: the song only; its sound again, a new song, or this one revised by notes
 kalainova song repair <job> [--take N] [--section S|--start S --end S] [--prompt P]
                                                   repaint one span of a take, beside it
+kalainova song master <job> [--take N] [--vocal-db=-3,0,3] [--reference FILE]... [--level song]
+                  [--hear]                        master options to hear blind, beside each other
+kalainova song master <job> --release            the master a person chose, as the release
 kalainova song-video <job> <new id> [--excerpt SEC [--start SEC]]  a video cut to the song
 kalainova research <job> "question" [--query q]  sources, snapshots, checked findings
 kalainova research <job> --check                 hold written findings to their sources
@@ -119,6 +123,15 @@ def _make_parsers(sub: Any) -> None:
         ("--start", {"type": float}),
         ("--end", {"type": float}),
         ("--prompt", {"default": ""}),
+        ("--vocal-db", {"default": "", "help": "master: dB moves, as --vocal-db=-3,0,3"}),
+        ("--reference", {"action": "append", "type": Path, "default": []}),
+        ("--level", {"default": "song", "help": "master: a profile, such as song or song-loud"}),
+        ("--hear", {"action": "store_true", "help": "master: transcribe each option"}),
+        ("--release", {"action": "store_true", "help": "master: release the master chosen"}),
+        ("--write", {"action": "store_true", "help": "write the song file, and make nothing"}),
+        ("--keep-words", {"action": "store_true", "help": "write: its sound again, lines kept"}),
+        ("--again", {"action": "store_true", "help": "write: a new song, the old one set aside"}),
+        ("--revise", {"default": "", "help": "write: the song revised by these notes"}),
     ]
     for opt, kw in song_args:
         song.add_argument(opt, **kw)
@@ -295,9 +308,42 @@ def _song(a: argparse.Namespace) -> int:
         )
         print(json.dumps(take, ensure_ascii=False))
         return 0
+    if a.job_or_action == "master":
+        return _song_master(a)
+    modes = [m for m in (a.keep_words, a.again, a.revise) if m]
+    if modes and (not a.write or len(modes) > 1):
+        raise ContractError("--keep-words, --again or --revise goes with --write, one of them")
+    if a.write:
+        job = open_job(a.job_or_action)
+        song = songs.write(job, keep_words=a.keep_words, again=a.again, revise=a.revise)
+        print(f"{song['title']}: {song.get('bpm')} bpm, {song.get('key')}, "
+              f"{len(song['sections'])} sections; nothing was made")  # fmt: skip
+        return 0
     if a.repair_job is not None:
         raise ContractError("use `kalainova song repair <job>` for song repair")
     return _print_qa(open_job(a.job_or_action), songs.run(open_job(a.job_or_action)))
+
+
+def _song_master(a: argparse.Namespace) -> int:
+    from . import song_master
+
+    if not a.repair_job:
+        raise ContractError("song master needs a job")
+    job = open_job(a.repair_job)
+    if a.release:
+        return _print_qa(job, song_master.release(job))
+    try:
+        moves = [float(v) for v in str(a.vocal_db).split(",") if v.strip()]
+    except ValueError as exc:
+        raise ContractError(f"--vocal-db takes dB, written --vocal-db=-1.5,0,1.5: {exc}") from exc
+    made = song_master.make(
+        job, take_n=a.take, vocal_db=moves, references=a.reference, level=a.level, hear=a.hear
+    )
+    for line in song_master.lines(made):
+        print(line)
+    print(f"hear them blind: kalainova review {job.id} --blind --shot master")
+    print(f"then record the one you choose: kalainova take {job.id} master N")
+    return 0
 
 
 def _song_video(a: argparse.Namespace) -> int:

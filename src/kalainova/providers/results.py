@@ -52,6 +52,20 @@ class Receipt:
     request_id: str | None = None  # the vendor's id for the request, as its bill lists it
     billed_units: float | None = None
     vendor_cost: float | None = None  # billed units times this account's unit price
+    # paid steps an adapter took before the call itself, such as an upload the model reads by id:
+    # each {"model", "request_id", "billed_units", "cost"}. A failed call is still charged for them
+    steps: list[dict[str, Any]] = field(default_factory=list)
+
+    def step(self, model: str, cost: float) -> None:
+        """Close a paid step: keep its request id and units, so the call itself starts clean."""
+        self.steps.append(
+            {"model": model, "request_id": self.request_id, "billed_units": self.billed_units,
+             "cost": round(cost, 6)}
+        )  # fmt: skip
+        self.request_id, self.billed_units = None, None
+
+    def steps_cost(self) -> float:
+        return float(sum(float(s.get("cost") or 0.0) for s in self.steps))
 
 
 @dataclass
@@ -112,3 +126,6 @@ class Inputs:
     seed: bool = True
     longest_sec: float | None = None
     repaint: bool = False  # can remake one span of a song and keep the rest
+    # the ways a song model follows a track (contract.GUIDE_USES), each with the clip length it
+    # takes; 0 takes the whole track
+    guides: Mapping[str, float] = field(default_factory=dict)

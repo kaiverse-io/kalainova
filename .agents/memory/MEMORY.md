@@ -24,3 +24,5 @@
 - [Direct the performance, not the mouth](direct-the-performance-not-the-mouth.md) — sung shots get the engine's versioned direction; cues keep to framing; a model's prompt limit is in config
 - [A lip repaint flattens a sung mouth](a-lip-repaint-flattens-a-sung-mouth.md) — singing is one voice-driven call; a repaint kept 30% of the movement
 - [Reuse before generating](reuse-before-generating.md) — say which stills and takes can serve each shot before a package; one pass on a take before a new take
+- [A transcript of a sung mix is not a measurement](a-transcript-of-a-sung-mix-is-not-a-measurement.md) — one Whisper pass gave lyrics, invented text, or "We'll be right back" x7; same stem read 66% then 4.5%; separator resamples to 44.1k; stems add back only to 16-18 dB
+- [A plan's first chunk sets the whole song's tone](a-plans-first-chunk-sets-the-whole-songs-tone.md) — a plan take opened at full level and drifted key; lead each chunk with its note, read the take against its plan (`bar/plan.py`, `song-check`); fix unproved

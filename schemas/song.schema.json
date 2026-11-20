@@ -24,6 +24,10 @@
       "type": "string",
       "minLength": 1
     },
+    "concept": {
+      "type": "string",
+      "description": "The idea the song is built on and what sets it apart from the stream's other songs, in its writer's words."
+    },
     "style": {
       "type": "string",
       "minLength": 1,
@@ -44,6 +48,21 @@
       "type": "string",
       "description": "BCP 47 tag of the lyrics."
     },
+    "pronounce": {
+      "type": "object",
+      "description": "How a word or name the lines sing is said, when it is not of the song's language or is uncommon: the words as written, each to how it sounds. The style a model reads carries them.",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "vocal_gender": {
+      "enum": [
+        "female",
+        "male"
+      ],
+      "description": "The lead voice, for a model that takes it as its own setting (Mureka's gender) rather than reading it from the style."
+    },
     "duration_sec": {
       "type": "number",
       "exclusiveMinimum": 0
@@ -54,6 +73,14 @@
     "byline": {
       "type": "string",
       "description": "The artist name on release files."
+    },
+    "words_by": {
+      "enum": [
+        "person",
+        "model",
+        "person_edited_model"
+      ],
+      "description": "Who wrote the words: a person, a model (or an agent), or a person editing a model's draft. A release's AI disclosure is read from it."
     },
     "release": {
       "type": "object",
@@ -109,7 +136,17 @@
           },
           "style": {
             "type": "string",
-            "description": "How this section differs from the rest."
+            "description": "How this section differs from the rest, in a few words. A model that reads notes on lyric tags gets it there; any other model gets the notes after the style."
+          },
+          "energy": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "How much this section carries, from 1 (nearly nothing) to 5 (the song's fullest), as its writer means it. A take is read against it, section by section."
+          },
+          "avoid": {
+            "type": "string",
+            "description": "What this section keeps out, in a few words, such as the drums of a quiet intro. A model that takes what to keep out per section (a plan's chunk) gets it there; it is never sent as style."
           },
           "visual": {
             "type": "string",

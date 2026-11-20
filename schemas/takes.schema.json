@@ -136,6 +136,27 @@
                   ],
                   "minItems": 2,
                   "maxItems": 2
+                },
+                "master": {
+                  "type": "object",
+                  "description": "A master option of a song take (song_master.py, ADR 0029): the take it came from, the vocal move, the reference it was matched to, the level, and how it read once encoded. A person hears the options blind and chooses one.",
+                  "required": ["from_take", "vocal_db", "level"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "from_take": {"type": "integer", "minimum": 0},
+                    "source_sha256": {"type": ["string", "null"]},
+                    "vocal_db": {"type": "number"},
+                    "reference": {
+                      "type": ["object", "null"],
+                      "required": ["name", "sha256"],
+                      "properties": {"name": {"type": "string"}, "sha256": {"type": "string"}}
+                    },
+                    "level": {"type": "string", "minLength": 1},
+                    "stems": {"type": ["object", "null"]},
+                    "matchering": {"type": ["object", "null"]},
+                    "encoded": {"type": "object"},
+                    "heard_by": {"type": ["string", "null"]}
+                  }
                 }
               }
             }

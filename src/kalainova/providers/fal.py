@@ -20,8 +20,8 @@ from typing import Any
 import requests
 
 from .. import media
-from ..config import audio_spec, model_for, price_for, reference_spec, sing_spec, video_spec
-from . import fal_sing
+from ..config import model_for, price_for, reference_spec, sing_spec, video_spec
+from . import fal_sing, fal_song, payloads
 from .base import Provider, register
 from .contract import (
     Billable,
@@ -209,7 +209,10 @@ class Fal(Provider):
             )
         if billable.capability in ("song", "separate", "sing") and not model:
             model = model_for("fal", billable.capability)
-        return super().estimate(billable, model)
+        found = super().estimate(billable, model)
+        if found is not None and billable.capability == "song" and billable.guided and model:
+            found += fal_song.guide_cost(model)
+        return found
 
     def _with_references(
         self, capability: str, model: str, prompt: str, refs: tuple[Reference, ...]
@@ -386,29 +389,41 @@ class Fal(Provider):
         self.transport.fetch(reply, req.dst, at=("video.url",), billed=cost)
         return Result(path=req.dst, cost=cost, model=model)
 
+    def _vendor_file(self, path: Path, how: Fields, ctx: Context) -> tuple[str, float]:
+        """A file the vendor keeps on its side, for a model that takes an id instead of a URL, and
+        what keeping it cost. The id is sealed as the file's bytes, so a signed payload binds the
+        file and not an id that only the paid run can know."""
+        upload = str(how["upload"])
+        reply = self._send(
+            upload, {"file_url": self.transport.upload(path), "purpose": how["purpose"]}, ctx
+        )
+        cost = fal_song.upload_cost(upload)
+        ctx.receipt.step(upload, cost)  # billed now, whatever becomes of the song
+        found = reply.rehearsed or reply.get("id")
+        if not found:
+            raise BilledError(cost, f"fal {upload} finished but returned no file id")
+        payloads.remember(str(found), path)
+        return str(found), cost
+
     def song(self, req: SongRequest, ctx: Context) -> Result:
-        if req.repaint is not None:
-            raise ValueError("fal's song models cannot repaint a span of a take")
+        """A song sent as fal_song says for the model's row; a guide goes up first, for its id."""
         model = ctx.model or model_for("fal", "song")
-        spec = audio_spec("fal", model)
-        style_field = spec.get("style_field", "prompt")
-        lyrics = req.lyrics
-        if req.instrumental and spec.get("instrumental_lyrics"):
-            lyrics = spec["instrumental_lyrics"]
-        if spec.get("lyrics_in_prompt"):  # one text field carries the sound and the words to sing
-            payload: Fields = {style_field: f"{req.style}\n\nLyrics:\n{lyrics}".strip()}
+        taken = 0.0
+        if req.repaint is not None:  # one span sung again, on a row that edits
+            payload, how = fal_song.edit_payload(model, req)
+            if how:
+                upload = fal_song.upload_copy(req.repaint.source)
+                payload[str(how["field"])], taken = self._vendor_file(upload, how, ctx)
         else:
-            payload = {style_field: req.style, "lyrics": lyrics}
-        most = spec.get("style_max_chars")
-        if most and len(req.style) > int(most):
-            raise ValueError(f"{model} takes at most {most} style characters, not {len(req.style)}")
-        if req.duration and spec.get("takes_duration", True):
-            payload["duration"] = int(req.duration)
+            payload, how = fal_song.payload(model, req)
+            if req.guide and how:
+                payload[str(how["field"])], taken = self._vendor_file(req.guide.source, how, ctx)
         reply = self._send(model, payload, ctx)
-        row = price_for("fal", "song", model)
-        cost = float(row.get("per_track", 0)) + (req.duration or 0) * float(row.get("per_sec", 0))
+        cost = taken + fal_song.cost(model, req)
         self._fetch_audio(reply, req.dst, cost)
-        return Result(path=req.dst, cost=cost, model=model, seed=_seed(reply, req.seed))
+        # the vendor's own id for the take, so a later edit of it needs no upload
+        kept = {"song_id": str(reply.get("song_id"))} if reply.get("song_id") else {}
+        return Result(path=req.dst, cost=cost, model=model, seed=_seed(reply, req.seed), meta=kept)
 
     def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         """Vocals, and everything else mixed back together from the model's other stems."""

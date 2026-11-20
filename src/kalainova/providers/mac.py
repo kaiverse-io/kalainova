@@ -23,6 +23,7 @@ from typing import Any
 
 from .. import media
 from ..config import model_for
+from . import song_text
 from .base import Provider, register
 from .contract import (
     Context,
@@ -163,6 +164,10 @@ class Mac(Provider):
         if capability == "song" and not os.environ.get(SONG_PYTHON_ENV):
             if SONG_PYTHON_ENV not in missing:
                 missing.append(SONG_PYTHON_ENV)
+        if capability == "separate" and not missing:
+            tool = _python().with_name("audio-separator")
+            if not tool.is_file():  # its stems need the tool in the same environment
+                missing.append(f"audio-separator beside {PYTHON_ENV}")
         return missing
 
     def voice(self, req: VoiceRequest, ctx: Context) -> Result:
@@ -299,6 +304,7 @@ class Mac(Provider):
     def song(self, req: SongRequest, ctx: Context) -> Result:
         """A song through the engine named in config, in its own environment, with its own seed."""
         lyrics, dst, style, duration = req.lyrics, req.dst, req.style, req.duration
+        style = song_text.styled(style, req.sections)  # its tags read no notes on lyric tags
         engine = model_for("mac", "song") or "heartmula"
         python = os.environ.get(SONG_PYTHON_ENV)
         checkpoint = os.environ.get(SONG_CHECKPOINT_ENV)

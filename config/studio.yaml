@@ -16,7 +16,7 @@ preference:
   lipsync: [fal]
   sing: [fal]                     # a Sings: shot, made in one call from its still and its line
   motion: [fal, mac, local]
-  separate: []                     # stems cost money, so a job opts in: providers: {separate: [fal]}. "mac" can too
+  separate: []                     # a job opts in: providers: {separate: [separator]} runs here for nothing; [fal] costs money; "mac" can too
   graphics: [hyperframes]
   search: [exa, wikipedia, openalex]
 
@@ -26,6 +26,7 @@ adapters:
   beats: {use: inhouse}            # beat_this: {use: beat_this, command: beat_this}. Gives downbeats too
   speech_cuts: {use: inhouse}      # auto_editor: {use: auto_editor, command: auto-editor, margin: 0.2s}. Cuts by loudness
   timeline: {use: inhouse}         # otio: {use: otio, command: otioconvert}. OpenTimelineIO writes FCPXML and EDL and reads an edit back
+  reference_master: {use: none}    # matchering: {use: matchering, python: <its environment's python>}. Matches a master to an owned reference (song_master.py)
 
 # How long the engine waits for one call. A provider's own timeouts should be shorter.
 deadlines_sec:
@@ -45,6 +46,13 @@ deadlines_sec:
   search: 60
 
 models:
+  cli:                             # subscriptions' command lines (providers/cli_llm.py); KALAINOVA_LLM_CLI names them, ":" apart, tried in order
+    claude: ""                     # the model Claude Code is asked for; empty: its own default
+    codex: ""                      # the model Codex is asked for; empty: its own default
+  separator:                       # python-audio-separator on this machine; KALAINOVA_AUDIO_SEPARATOR names its command
+    # Multisong vocal SDR 10.98 (ZFTurbo's table, Nov 2026); BS-RoFormer viperx 1297
+    # (model_bs_roformer_ep_317_sdr_12.9755.ckpt) reads 10.87 there. Compare them on your own takes.
+    separate: vocals_mel_band_roformer.ckpt
   anthropic:
     llm: claude-opus-5-5
     judge: claude-haiku-4-5
@@ -128,6 +136,11 @@ prices:
     song: {per_track: 0.15}        # ESTIMATE
     minimax/music-3: {per_track: 0.36, checked: "fal lists $0.002/s; 0.36 is three minutes at that rate, per track until billed units confirm"}
     mureka/v9.5/generate/song: {per_track: 0.15, checked: "fal's model page: $0.15 a song with lyrics; $0.50 from a prompt alone"}
+    mureka/v9/generate/song: {per_track: 0.15, checked: "fal's pricing API 2026-11-20: 0.005 a unit, as V9.5"}
+    elevenlabs/music/v2.5: {per_sec: 0.01, checked: "fal's pricing API 2026-11-20: $0.60 a minute"}
+    mureka/v9.5/song/remix: {per_track: 0.50, checked: "fal's model page 2026-11-18: $0.50 a remixed song"}
+    mureka/api/files/upload: {per_call: 0.01, checked: "fal's model page 2026-11-18: $0.01 an upload"}
+    mureka/api/song/edit: {per_track: 0.10, checked: "fal's model page 2026-11-19: $0.10 an edited region"}
     fal-ai/lyria3/pro: {per_track: 0.08, checked: "fal's model page: $0.08 a track"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
@@ -203,6 +216,10 @@ licences:
     "*": {name: Apache-2.0, commercial: true, retention: "none: renders on this machine"}
   whispercpp:
     "*": {name: MIT (whisper.cpp; the model file has its own terms), commercial: true, retention: "none: runs on this machine"}
+  cli:
+    "*": {name: the subscription's own terms, commercial: true, retention: "the vendor's: what is asked leaves this machine for it"}
+  separator:
+    "*": {name: MIT (python-audio-separator; each checkpoint has its own terms), commercial: true, retention: "none: runs on this machine", obligations: ["Many open separation checkpoints were trained on MUSDB18-HQ, which is for educational use: list the checkpoint for a release's legal review"]}
 
 # What a song model states about itself. max_sec refuses a longer ask before any spend; a model with
 # no row is not checked. style_field and instrumental_lyrics are the adapter's field names. VERIFY each
@@ -211,7 +228,48 @@ audio_models:
   fal:
     fal-ai/ace-step: {max_sec: 240, style_field: tags, instrumental_lyrics: "[inst]"}   # fal's page: 5 to 240 s
     minimax/music-3: {max_sec: 300, style_field: prompt}   # fal's schema: duration up to 300 s
-    mureka/v9.5/generate/song: {max_sec: 300, style_field: prompt, style_max_chars: 1024}   # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+    # guide: how a model follows a track (brief.song_guide). The track goes up to `upload` first, for
+    # an id that goes in `field`. clip_sec is the clip it takes; none: the whole track.
+    # 2026-11-20: fal answers 410 "This endpoint is deprecated and no longer available" for V9.5's
+    # song route, though its catalog still lists it; nothing is billed. Kept for when it returns.
+    mureka/v9.5/generate/song:     # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+      max_sec: 300
+      min_sec: 120
+      style_field: prompt
+      style_max_chars: 1024
+      lyrics_max_chars: 5000       # fal's schema
+      section_notes: tags          # Mureka's prompt guide (2026-08-28): "[Verse 1] restrained and intimate"
+      gender_field: gender         # fal's schema: female or male, for lyrics-to-song
+      edit_with: mureka/api/song/edit   # a span of a take sung again (song_repair)
+      guide:                       # Mureka's upload docs: a reference is 30 s of mp3 or m4a, the rest trimmed.
+        # fal 422, 2026-11-18: "prompt and reference_id cannot be combined in lyrics-to-song mode",
+        # so with a reference no style is sent: the clip carries the sound
+        reference: {upload: mureka/api/files/upload, purpose: reference, field: reference_id, clip_sec: 30, style: false}
+    mureka/v9/generate/song:       # fal's schema 2026-11-20: V9.5's fields without a length; the model sets it
+      max_sec: 300                 # VERIFY: the schema states no longest song
+      style_field: prompt
+      style_max_chars: 1024        # fal's schema: with lyrics, up to 1,024 characters
+      lyrics_max_chars: 5000
+      section_notes: tags
+      gender_field: gender
+      takes_duration: false
+    elevenlabs/music/v2.5:         # fal's schema 2026-11-20: a plan of at most 30 chunks, each 3 to 120 s, 3 s to 10 min in all
+      max_sec: 600
+      composition_plan: true       # each section a chunk: its words, its length from its bars, its note as direction
+    mureka/api/song/edit:          # fal's schema 2026-11-19: song_id or upload_audio_id, lyrics, edit_start and edit_end in ms, at least 3 s
+      edits: true
+      min_region_sec: 3
+      upload: mureka/api/files/upload
+      purpose: audio
+    mureka/v9.5/song/remix:        # fal's schema 2026-11-18: lyrics and a prompt required, no length field; the source is 10 to 480 s
+      max_sec: 480
+      style_field: prompt
+      style_max_chars: 1024
+      section_notes: tags          # the same vendor's lyric tags as its generate route
+      takes_duration: false
+      needs_guide: remix
+      guide:
+        remix: {upload: mureka/api/files/upload, purpose: remix, field: upload_audio_id}
     fal-ai/lyria3/pro: {max_sec: 184, style_field: prompt, lyrics_in_prompt: true, takes_duration: false}   # one prompt carries style and lyrics; no length field. VERIFY the longest track
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
@@ -429,10 +487,21 @@ identity:
 #                 "{runners}/perform_run.py",  # background, and the camera
 #                 --face-model, ~/tools/face_landmarker.task,
 #                 --person-model, ~/tools/selfie_segmenter.tflite]
+#   look:                    # a bench's takes compared at once, ranked aspect by aspect (picture,
+#     - name: codex          # depth, physics, eyes, body, overall) by a frontier vision model on a
+#       command: [python, src/kalainova/providers/runners/look_run.py,  # subscription the studio
+#                 --cli, codex, --bin, codex, --model, <model>,         # has (codex or claude);
+#                 --prompt, prompts/judge_takes.md]                     # frames leave the machine
+#   song (a third judge):    # songs compared in pairs by a local model that listens (MLX)
+#     - name: listen
+#       command: [~/models/.venv/bin/python, src/kalainova/providers/runners/listen_run.py,
+#                 --model, mlx-community/gemma-4-e4b-it-4bit, --revision, <commit>,
+#                 --prompt, prompts/judge_song.md]
 judges:
   song: []
   lipsync: []
   performance: []
+  look: []
 
 # rank: the readings that order a bench's takes of one shot against each other (benchreport.py,
 #   ADR 0026), by capability. Each is scaled within the takes compared, never held to a fixed mark,
@@ -481,6 +550,7 @@ bar:
   shot_motion_min: 0.05            # share of a generated clip that moves, with the camera's pan and zoom taken out
   duplicate_share_max: 0.0
   master_lufs_tolerance: 1.0       # how far a master's integrated loudness may sit from its profile's target
+  master_encoded_true_peak_max: -0.1  # a song master's true peak once encoded as AAC and MP3 and decoded: past 0 it clips
   cambi_peak_max: 8.0              # the CAMBI banding index; about 5 reads as slightly annoying
   # Songs. Candidates until enough songs carry a human verdict, so they warn and never block.
   song_tempo_tolerance: 0.10       # how far the detected tempo may sit from the one asked for
@@ -488,6 +558,15 @@ bar:
   song_words_found_min: 0.70       # lyric error rate is not used: it ran against reviewed verdicts
   song_chorus_heard_min: 0.50      # share of the chorus lines a listener picks out at least half of
   song_range_lu_min: 2.0           # less than this has no shape between sections
+  # An intro this close to the loudest section opens at full level. 2026-11-20: a take asked for
+  # a sparse, filtered intro played it as its loudest section (0.0 dB), and the operator heard no
+  # soft start or build-up at all (ADR 0033)
+  song_intro_below_loudest_db: -3.0
+  # A take against its own plan (bar/plan.py, ADR 0034): how closely its sections' weight follows
+  # the energy the writer planned for each (Spearman's rho), and whether it sounds in the key asked
+  # (1 the same key, 0.5 its relative key). Starting values, to be held to verdicts.
+  song_energy_rho_min: 0.5
+  song_key_match_min: 0.5
   song_length_tolerance: 0.25
 
 # character_source_min_px: the smallest a model may make a shot with a character in it, on its short
@@ -504,7 +583,23 @@ profiles:
   landscape: {aspect: "16:9", width: 1920, height: 1080, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   podcast: {aspect: "audio-only", target_lufs: -16, true_peak_dbtp_max: -1}
   song: {aspect: "audio-only", target_lufs: -14, true_peak_dbtp_max: -1}
+  song-loud: {aspect: "audio-only", target_lufs: -9, true_peak_dbtp_max: -2}   # Spotify: below -2 dBTP when louder than -14 LUFS
   story-4x5: {aspect: "4:5", width: 1080, height: 1350, fps: 30, character_source_min_px: 1080, target_lufs: -14, true_peak_dbtp_max: -1, character_shot_max_sec: 3.2}
   # Premium streaming delivery: a ProRes master, LPCM stereo, black head and tail, captions as files.
   film-hd: {aspect: "16:9", width: 1920, height: 1080, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
   film-uhd: {aspect: "16:9", width: 3840, height: 2160, fps: 24, character_source_min_px: 1080, target_lufs: -24, true_peak_dbtp_max: -2, delivery: mezzanine, open_sec: 3.0, close_sec: 4.0}
+
+# genres: the studio's genre profiles (genres.py). A job names one in brief.genre; its song is
+#   written inside it, made on its song model, and refused before spend outside its tempo, keys or
+#   voice. The repo names no genre: each studio sets its own in its private config, as
+#   <genre-id>: {label, bpm: [low, high], keys: [...], duration_sec, vocal_gender, style, avoid,
+#                structure: [{kind, bars}], song_model: {provider, model}, takes}
+genres: {}
+
+# song_master: a song take's master as options a person hears blind (song_master.py, ADR 0029).
+#   vocal_db_most: the furthest a separated vocal is moved; past about 3 dB its artefacts are heard
+#   (practitioner guidance, 2026; no published listening test sets it).
+#   vocal_db: the vocal moves offered when none are asked for; as made, unless a studio sets more.
+song_master:
+  vocal_db_most: 3.0
+  vocal_db: [0]

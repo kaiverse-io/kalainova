@@ -236,7 +236,7 @@ def test_a_tempo_that_means_nothing_is_a_full_miss():
     assert musicbar.tempo_miss(0, 96) == 1.0
 
 
-def _clicks(path, bpm, seconds=24.0):
+def _clicks(path, bpm, seconds=24.0, accents=None):
     sr = 48000
     x = np.zeros(int(seconds * sr), np.float32)
     at = 0.0
@@ -244,6 +244,10 @@ def _clicks(path, bpm, seconds=24.0):
         i = int(at * sr)
         x[i : i + 400] = np.hanning(min(400, x.size - i)) * 0.8
         at += 60.0 / bpm(at)
+    for start, end, every in accents or ():  # a louder figure laid over the beat, in seconds
+        for at in np.arange(start, end, every):
+            i = int(at * sr)
+            x[i : i + 600] += np.hanning(min(600, x.size - i)) * 1.2
     from fakes import media as m
 
     m.subprocess.run(
@@ -262,6 +266,15 @@ def test_a_steady_track_reads_steady_and_a_wandering_one_does_not(tmp_path):
     held = musicbar.tempo_drift(beats.onset_envelope(beats._pcm(steady)), fps)
     lost = musicbar.tempo_drift(beats.onset_envelope(beats._pcm(wander)), fps)
     assert held < 0.02 < lost
+
+
+def test_a_steady_beat_under_a_dotted_figure_still_reads_steady(tmp_path):
+    # Dance percussion: a figure every 1.5 beats over a steady 120, in alternate passages.
+    # Windows over the figure read 80 bpm; read as 3:2 of the tempo asked for, they are no drift.
+    figure = [(start, start + 4.0, 0.75) for start in (4.0, 12.0, 20.0)]
+    steady = _clicks(tmp_path / "dotted.wav", lambda at: 120.0, seconds=32.0, accents=figure)
+    fps = beats.SR / beats.HOP
+    assert musicbar.tempo_drift(beats.onset_envelope(beats._pcm(steady)), fps, 120.0) < 0.02
 
 
 def test_words_found_counts_what_can_be_picked_out_and_ignores_little_words():

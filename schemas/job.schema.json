@@ -118,7 +118,9 @@
       "additionalProperties": true,
       "properties": {
         "captions": {
-          "enum": ["kinetic"],
+          "enum": [
+            "kinetic"
+          ],
           "description": "kinetic: word-timed captions drawn as a transparent layer by the graphics provider, inside the profile's safe_zone. Absent: the engine's own caption style. Film profiles burn nothing either way."
         },
         "subject": {
@@ -134,8 +136,12 @@
           "type": "object",
           "description": "Cut jobs: where the source file came from (origin) and the brief or licence file in the job folder that covers it (reference).",
           "properties": {
-            "origin": {"type": "string"},
-            "reference": {"type": "string"}
+            "origin": {
+              "type": "string"
+            },
+            "reference": {
+              "type": "string"
+            }
           }
         },
         "duration_sec": {
@@ -160,10 +166,42 @@
         },
         "song_model": {
           "type": "object",
-          "required": ["provider", "model"],
+          "required": [
+            "provider",
+            "model"
+          ],
           "additionalProperties": false,
-          "properties": {"provider": {"type": "string"}, "model": {"type": "string"}},
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
           "description": "The one song model this job uses, so jobs that differ only in it can be heard side by side."
+        },
+        "song_guide": {
+          "type": "object",
+          "required": [
+            "job",
+            "use"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "job": {
+              "type": "string",
+              "description": "A finished song job of this studio, owned or licensed."
+            },
+            "use": {
+              "enum": [
+                "reference",
+                "remix"
+              ],
+              "description": "reference: a clip of its track steers the sound and groove; remix: the whole track is sung and produced again."
+            }
+          },
+          "description": "A track the song's model follows, made before anything is paid for. Needs song_model, on a model that takes that use."
         },
         "cover_at_sec": {
           "type": "number",
@@ -181,6 +219,11 @@
         "client": {
           "type": "string",
           "description": "Client label for strategy client. The deliverable goes to their accounts; they hold the rights."
+        },
+        "genre": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A genre profile under genres in the studio config: the song is written and made inside it (genres.py)."
         }
       }
     },
@@ -201,17 +244,37 @@
     "animatic_reviewed": {
       "type": "object",
       "description": "Written by `kalainova verdict --animatic`: a person's verdict on the rough cut, and which cut it was.",
-      "required": ["verdict", "reviewer", "at", "animatic_sha256"],
+      "required": [
+        "verdict",
+        "reviewer",
+        "at",
+        "animatic_sha256"
+      ],
       "additionalProperties": false,
       "properties": {
-        "verdict": {"enum": ["accept", "fix", "reject"]},
-        "reviewer": {"type": "string", "minLength": 1},
-        "at": {"type": "string"},
-        "animatic_sha256": {"type": "string"},
+        "verdict": {
+          "enum": [
+            "accept",
+            "fix",
+            "reject"
+          ]
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "string"
+        },
+        "animatic_sha256": {
+          "type": "string"
+        },
         "stills": {
           "type": "object",
           "description": "sha256 hash of each accepted still at the time of animatic review.",
-          "additionalProperties": {"type": "string"}
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },
@@ -237,16 +300,31 @@
     "fingerprint": {
       "type": "object",
       "description": "Engine and configuration fingerprint recorded for this job.",
-      "required": ["engine_version", "git_sha", "prompts_hash", "config_hash"],
+      "required": [
+        "engine_version",
+        "git_sha",
+        "prompts_hash",
+        "config_hash"
+      ],
       "additionalProperties": true,
       "properties": {
-        "engine_version": {"type": "string"},
-        "git_sha": {"type": "string"},
-        "prompts_hash": {"type": "string"},
-        "config_hash": {"type": "string"},
+        "engine_version": {
+          "type": "string"
+        },
+        "git_sha": {
+          "type": "string"
+        },
+        "prompts_hash": {
+          "type": "string"
+        },
+        "config_hash": {
+          "type": "string"
+        },
         "models": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

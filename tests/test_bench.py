@@ -254,7 +254,11 @@ def test_every_bench_writes_a_labelled_report_with_the_engines_reading(stage):
     report = found["report"]
     assert report["panels"] == [0, 1] and report["status"] == "none", "nothing ranks plain video"
     folder = stage.work / "bench"
-    assert "| take |" in (folder / "b1.report.md").read_text().replace("| panel ", "")
+    hidden = (folder / "b1.report.md").read_text()
+    assert "| take |" not in hidden.replace("| panel ", ""), "kept until a person's verdict"
+    assert "--reveal" in hidden
+    shown = benchreport.write(stage, "b1", reveal=True)
+    assert shown["shown"] and "| take |" in (folder / "b1.report.md").read_text()
     assert media.summarize(folder / "b1.mp4")["height"] == 640 + benchreport.LABEL_H
     config.studio()["rank"] = {"video": [{"reading": "shot_motion", "better": "higher"}]}
     again = benchreport.write(stage, "b1", only=[1, 0])

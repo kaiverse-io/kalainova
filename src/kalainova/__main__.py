@@ -51,6 +51,7 @@ from pathlib import Path
 from . import (
     assets,
     edit,
+    genres,
     plan,
     production_cli,
     qa,
@@ -91,6 +92,8 @@ def _new(a) -> int:
             "fingerprint": fingerprint.fingerprint(),
         }
     )
+    if a.genre:
+        genres.apply(data["brief"], a.genre)
     (dst / "job.json").write_text(json.dumps(data, indent=2) + "\n")
     print(dst)
     return 0
@@ -252,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--rights", default="owned")
     n.add_argument("--duration", type=int, default=35)
     n.add_argument("--cost-cap", type=float, default=5.0)
+    n.add_argument("--genre", help="a song's genre profile, from genres in the studio config")
     m = sub.add_parser("make")
     m.add_argument("job")
     m.add_argument("--force", action="store_true")
@@ -283,9 +287,10 @@ def main(argv: list[str] | None = None) -> int:
     rv = sub.add_parser("review", help="a page of every take; --blind hears song jobs blind")
     rv.add_argument("jobs", nargs="+")
     rv.add_argument("--blind", action="store_true")
-    rv.add_argument("--rank", help="a blind set's letters, best first, such as C,A,B")
+    rv.add_argument("--rank", help="a blind set's letters, best first, such as C,A,B; tie with =")
     rv.add_argument("--reviewer", default="")
     rv.add_argument("--judge", action="store_true", help="score song takes with config's judges")
+    rv.add_argument("--shot", default="song", help="with --blind: song, or master for its options")
     sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
         "job"
     )
@@ -344,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "review":
             from . import reviewpage
 
-            print(reviewpage.cli(a.jobs, a.blind, a.rank, a.reviewer, judge=a.judge))
+            print(reviewpage.cli(a.jobs, a.blind, a.rank, a.reviewer, judge=a.judge, shot=a.shot))
             return 0
         if a.cmd in ("comic", "story"):
             return _document(a)

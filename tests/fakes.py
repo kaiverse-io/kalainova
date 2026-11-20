@@ -61,6 +61,7 @@ class Studio(base.Provider):
     silent_song = False
     end_image = False  # a model that takes the last frame as a picture
     can_repaint = True  # a song model that remakes one span of a take and keeps the rest
+    guides: dict[str, float] = {}  # the tracks a song model follows, and the clip each takes
 
     references = 0  # takes no reference pictures, unless a test says it does
 
@@ -70,12 +71,14 @@ class Studio(base.Provider):
             references=Studio.references,
             end_frame=Studio.end_image and capability == "video",
             repaint=self.can_repaint and capability == "song",
+            guides=dict(Studio.guides) if capability == "song" else {},
         )
 
     @classmethod
     def reset(cls) -> None:
         cls.calls = []
         cls.frozen_takes = 0
+        cls.guides = {}
         cls.fail_video = False
         cls.replies = []
         cls.heard = []

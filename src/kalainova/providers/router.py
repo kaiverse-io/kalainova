@@ -430,14 +430,18 @@ class _Try:
                        error_class=kind, detail=said)  # fmt: skip
             self.charge(exc.billed, "billed, then failed", self.model)
             return self._moved_on(said[:300])
-        self.job.release(self.reservation)
-        if self.allowed is not None:  # nothing was billed, so the signed entry is not used up
-            gates.give_back(self.job, self.aid, kind)
+        before = self.ctx.receipt.steps_cost()
+        if before > 0:  # a step the adapter paid for went through, then the call itself failed
+            self.charge(before, "a paid step went through, then the call failed", self.model)
+        else:
+            self.job.release(self.reservation)
+            if self.allowed is not None:  # nothing was billed, so the signed entry is not used up
+                gates.give_back(self.job, self.aid, kind)
         if isinstance(exc, ContractError) or not isinstance(exc, PROVIDER_FAILURES):
             raise exc  # a rule the engine set, a bug in an adapter, or the cap: nothing left held
         refused = isinstance(exc, RefusalError)
         self.trace(outcome="refused" if refused else "error", estimate=self.estimate,
-                   error_class=kind, detail=said)  # fmt: skip
+                   settled=before, error_class=kind, detail=said)  # fmt: skip
         if isinstance(
             exc, InvalidRequestError
         ):  # the engine's mapping is wrong; a fallback hides it

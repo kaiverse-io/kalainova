@@ -178,8 +178,9 @@ def write(job: Job) -> Path:
 BLIND, RANKING = "listen.html", "ranking.json"
 
 
-def blind(jobs: list[Job]) -> Path:
-    """Every song take of these jobs, shuffled, at one loudness, named by letter only.
+def blind(jobs: list[Job], shot_id: str = "song") -> Path:
+    """Every take of one sound shot of these jobs (the song, or its master options), shuffled, at
+    one loudness, named by letter only.
 
     Louder sounds better to a listener, so each take is copied at the song profile's level, with
     the source's tags stripped. Which job, take and model made each letter is kept away from the
@@ -187,9 +188,9 @@ def blind(jobs: list[Job]) -> Path:
     ranking cannot lean on a model's name or on a score."""
     found = []
     for job in jobs:
-        shot = takes.load(job)["shots"].get("song")
+        shot = takes.load(job)["shots"].get(shot_id)
         if not shot or not shot.get("takes"):
-            raise ContractError(f"{job.id}: no song takes yet, so there is nothing to hear")
+            raise ContractError(f"{job.id}: no {shot_id} takes yet, so there is nothing to hear")
         found += [(job, t) for t in shot["takes"] if not t.get("bench")]
     if not 2 <= len(found) <= len(string.ascii_uppercase):
         raise ContractError(f"a blind comparison takes 2 to 26 takes, not {len(found)}")
@@ -208,9 +209,9 @@ def blind(jobs: list[Job]) -> Path:
         media.run(["-i", str(levelled), "-map_metadata", "-1", "-fflags", "+bitexact",
                    str(out / f"{letter}.wav")])  # fmt: skip
         levelled.unlink()
-        key.append({"letter": letter, "job": job.id, "take": take["n"], "file": take["file"],
-                    "provider": take.get("provider", ""), "model": take.get("model", ""),
-                    "sha256": sha256_file(src)})  # fmt: skip
+        key.append({"letter": letter, "job": job.id, "shot": shot_id, "take": take["n"],
+                    "file": take["file"], "provider": take.get("provider", ""),
+                    "model": take.get("model", ""), "sha256": sha256_file(src)})  # fmt: skip
     _key_path(out).parent.mkdir(exist_ok=True)
     _key_path(out).write_text(json.dumps({"made_at": stamp, "takes": key}, indent=2) + "\n")
     rows = "".join(
@@ -226,7 +227,8 @@ def blind(jobs: list[Job]) -> Path:
         f"<p class=muted>{len(key)} takes, shuffled and set to one loudness. Listen to each in"
         " full. Which take is which is told when your ranking is recorded.</p>"
         f"<div class=row>{rows}</div><h2>Record your ranking, best first</h2>"
-        f"<pre>kalainova review {escape(str(out))} --rank {letters} --reviewer NAME</pre></main>"
+        f"<pre>kalainova review {escape(str(out))} --rank {letters} --reviewer NAME</pre>"
+        "<p class=muted>Join letters you cannot tell apart with =, such as A=B,C.</p></main>"
         "</html>\n"
     )
     return out / BLIND
@@ -239,17 +241,28 @@ def _key_path(folder: Path) -> Path:
 
 def rank(folder: Path, order: str, reviewer: str) -> str:
     """Record one ranking of a blind set, best first, then say what each letter was. A set is
-    ranked once: a second ranking would be made knowing the answers."""
+    ranked once: a second ranking would be made knowing the answers.
+
+    Letters a listener cannot tell apart share a place, joined by `=`: `A=B,C=D=E=F` says A and
+    B are level and better than the four after them, and claims no order inside either group."""
     if not reviewer.strip():
         raise ContractError("say who ranked it (--reviewer)")
     key_path, out = _key_path(folder), folder / RANKING
     if not key_path.is_file():
         raise ContractError(f"{folder} is not a blind listening set")
     key = {k["letter"]: k for k in json.loads(key_path.read_text())["takes"]}
-    asked = [x.strip().upper() for x in order.split(",") if x.strip()]
+    tiers = [
+        [x.strip().upper() for x in group.split("=") if x.strip()]
+        for group in order.split(",")
+        if group.strip()
+    ]
+    asked = [letter for tier in tiers for letter in tier]
     if sorted(asked) != sorted(key):
         raise ContractError(f"rank every letter once: {','.join(sorted(key))}")
-    ranked = [{"place": i, **key[x]} for i, x in enumerate(asked, 1)]
+    ranked, place = [], 1
+    for tier in tiers:
+        ranked += [{"place": place, "tied": len(tier) > 1, **key[x]} for x in tier]
+        place += len(tier)
     at = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
     try:  # made only if absent, so two rankings at once cannot both be kept
         with out.open("x") as fh:
@@ -261,7 +274,8 @@ def rank(folder: Path, order: str, reviewer: str) -> str:
             f"{folder} was ranked already; a second would know the answers"
         ) from exc
     return "\n".join(
-        f"{r['place']}. {r['letter']}: {r['job']} take {r['take']} ({r['model'] or r['provider']})"
+        f"{r['place']}{'=' if r['tied'] else '.'} {r['letter']}: {r['job']} "
+        f"{r.get('shot', 'song')} take {r['take']} ({r['model'] or r['provider']})"
         for r in ranked
     )
 
@@ -319,10 +333,16 @@ def _pick(found: list[tuple[Job, dict[str, Any]]]) -> str:
 
 
 def cli(
-    names: list[str], blind_set: bool, order: str | None, reviewer: str, *, judge: bool = False
+    names: list[str],
+    blind_set: bool,
+    order: str | None,
+    reviewer: str,
+    *,
+    judge: bool = False,
+    shot: str = "song",
 ) -> str:
-    """`kalainova review`: one job's takes, several song jobs heard blind or judged, or a blind
-    ranking."""
+    """`kalainova review`: one job's takes, several song jobs heard blind or judged, a job's
+    master options heard blind (--shot master), or a blind ranking."""
     from .jobfs import open_job
 
     if judge:
@@ -332,7 +352,7 @@ def cli(
             raise ContractError("--rank takes the one blind listening folder it ranks")
         return rank(Path(names[0]), order, reviewer)
     if blind_set:
-        return str(blind([open_job(n) for n in names]))
+        return str(blind([open_job(n) for n in names], shot))
     if len(names) != 1:
         raise ContractError("several jobs are heard side by side with --blind")
     return str(write(open_job(names[0])))

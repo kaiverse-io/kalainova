@@ -7,6 +7,7 @@ small or not square is warned about, not refused: the distributor's current rule
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,39 @@ MP3_KBPS = "320k"
 COVER_MIN_PX = 3000  # a common distributor floor. Re-read the distributor's current rule
 FOLDER = "release"
 AI_NOTE = "contains AI-generated media"
+AI_USE = "ai_use.json"
+WORDS = {
+    "person": "a person",
+    "model": "a model",
+    "person_edited_model": "a person, from a model's draft",
+}
+
+
+def ai_use(song: dict[str, Any], made_by: str, master: dict[str, Any] | None) -> dict[str, Any]:
+    """What was made by AI, part by part, as a distributor's AI credits ask: the words, the music,
+    the vocal, and how it was finished. The answers a form wants are suggested, never sent: the
+    person uploading maps them onto the distributor's live form."""
+    words = str(song.get("words_by") or "")
+    sung = not song.get("instrumental")
+    parts: dict[str, Any] = {
+        "lyrics": {"by": WORDS.get(words, "not recorded"), "ai": words != "person"}
+        if sung
+        else None,
+        "music": {"by": made_by, "ai": True},
+        "vocals": {"by": made_by, "ai": True} if sung else None,
+        "mastering": {
+            "by": "the engine's own processing, no generative model",
+            "chosen_by": (master or {}).get("chosen_by", "the engine's default"),
+            "ai": False,
+        },
+    }
+    asks = ["All of the audio"] + (["The lyrics"] if sung and words != "person" else [])
+    return {
+        "parts": {k: v for k, v in parts.items() if v is not None},
+        "suggested_ai_credits": asks,
+        "note": "Mixing and mastering by the engine are processing, not generation. Whether the "
+        "artist is a person or an AI persona is the uploader's answer, not the engine's.",
+    }
 
 
 def cover_warnings(cover: Path) -> list[str]:
@@ -104,8 +138,16 @@ def write(
     return {"files": files, "warnings": warnings, "cover": bool(cover)}
 
 
-def for_job(job: Job, song: dict[str, Any], lyrics: str) -> dict[str, Any]:
-    """The release folder for a song, with its cover from the job folder when it names one."""
+def for_job(
+    job: Job,
+    song: dict[str, Any],
+    lyrics: str,
+    *,
+    made_by: str = "",
+    master: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The release folder for a song, with its cover from the job folder when it names one, and
+    the record of what in it AI made (`ai_use.json`)."""
     named = (song.get("release") or {}).get("cover")
     cover = safe_path(job.folder, named) if named else None
     if cover and not cover.exists():
@@ -120,4 +162,7 @@ def for_job(job: Job, song: dict[str, Any], lyrics: str) -> dict[str, Any]:
     )
     for warning in made["warnings"]:
         print(f"{job.id}: {warning}")
+    record = ai_use(song, made_by or "a generative song model", master)
+    (job.work / FOLDER / AI_USE).write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
+    made["files"]["ai_use"] = f"{FOLDER}/{AI_USE}"
     return made
