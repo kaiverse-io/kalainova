@@ -238,6 +238,11 @@ def _pin_job(a: argparse.Namespace, root: Path) -> int:
         raise ContractError(f"no provider {provider!r}; there are {', '.join(base.names())}")
     if a.capability not in base.get(provider).capabilities:
         raise ContractError(f"{provider} cannot make {a.capability}")
+    from .providers import retired
+
+    gone = retired.why(provider, model or base.get(provider).default_model(a.capability))
+    if gone:
+        raise ContractError(f"{job.id}: not pinned: {gone}")
     data = job.job
     data.setdefault("providers", {})[a.capability] = [provider]
     brief = data.setdefault("brief", {})

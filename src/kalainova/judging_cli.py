@@ -56,6 +56,8 @@ def add_parsers(sub: Any) -> None:
     verdict.add_argument("--aspect", default="", help="what the preference is about: lips, eyes...")
     verdict.add_argument("--animatic", action="store_true")
     verdict.add_argument("--note", default="")
+    verdict.add_argument("--reason", default="", choices=("", *verdicts.REASONS),
+                         help="what the verdict is about, as one label")  # fmt: skip
     check = sub.add_parser("song-check", help="a song take against its own plan, as cards")
     check.add_argument("job")
     check.add_argument("--take", type=int, help="the take to read; the chosen one by default")
@@ -69,7 +71,7 @@ def _song_check(a: argparse.Namespace) -> int:
     """Cards for what a song take missed of its own plan: each says what was asked, what was
     measured, where, and the fix. Kept beside the take, and printed; nothing blocks on them."""
     from . import takes
-    from .bar import plan
+    from .bar import groove, plan
     from .bar import song as musicbar
     from .editor import beats
 
@@ -89,9 +91,15 @@ def _song_check(a: argparse.Namespace) -> int:
     heard = musicbar.saved_heard(path) or []
     cards = plan.energy_cards(plan.profile(pcm, song), song)[1] + plan.key_cards(pcm, song)[1]
     stem = job.work / "vocals.wav"  # the stems are of the chosen take's master
-    if chosen and take["n"] == chosen["n"] and stem.exists():
+    own = bool(chosen and take["n"] == chosen["n"])
+    if own and stem.exists():
         cards += plan.voice_cards(beats._pcm(stem), song)
     cards += plan.pronounce_cards(song, heard) + plan.words_cards(song, heard)
+    bed = job.work / "instrumental.wav"  # the groove reads best without the voice
+    music = beats._pcm(bed) if own and bed.exists() else pcm
+    cards += groove.kick_cards(music, song) + groove.build_cards(music, song)
+    measured = groove.measures(music, song)
+    path.with_suffix(".groove.json").write_text(json.dumps(measured, indent=1))
     if not plan.spans(song):
         print(f"{job.id}: the song file names no bars or tempo, so its sections cannot be placed")
     out = path.with_suffix(".cards.json")
@@ -99,6 +107,9 @@ def _song_check(a: argparse.Namespace) -> int:
     for card in cards:
         print(f"{card['at']:>5}  {card['section']}: planned {card['planned']}")
         print(f"       measured {card['measured']}\n       fix: {card['fix']}")
+    if measured:
+        print(f"kick enters at {measured.get('kick_enters_sec')} s; syncopation "
+              f"{measured.get('syncopation', 'not read')} (a reading, not a limit)")  # fmt: skip
     print(f"{job.id} take {take['n']}: {len(cards)} card(s), kept in {out}")
     return 0
 
@@ -138,7 +149,8 @@ def _bench_report(a: argparse.Namespace) -> int:
 
 def _verdict(a: argparse.Namespace) -> int:
     job = open_job(a.job)
-    kw = {"reviewer": a.reviewer, "shot": a.shot, "note": a.note, "aspect": a.aspect}
+    kw = {"reviewer": a.reviewer, "shot": a.shot, "note": a.note, "aspect": a.aspect,
+          "reason": a.reason}  # fmt: skip
     if a.best is not None:
         among = _numbers(a.among)
         if not among or a.preferred is not None:

@@ -34,7 +34,7 @@ from . import config, media, songs, takes
 from .bar import song as musicbar
 from .bar.judges import RUNNERS
 from .bar.readings import at_most
-from .jobfs import ContractError, Job
+from .jobfs import ContractError, Job, sha256_file
 from .providers import base, router
 from .providers.contract import SeparateRequest, TranscribeRequest
 
@@ -84,11 +84,7 @@ def plan(vocal_db: list[float], references: list[Path]) -> list[Option]:
 
 
 def _sha(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return sha256_file(path)
 
 
 def _db(x: np.ndarray) -> float:

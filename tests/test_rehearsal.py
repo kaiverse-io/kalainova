@@ -26,7 +26,7 @@ BEAT = {
 }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def offline(monkeypatch):
     """Any request to a vendor fails the test."""
 
@@ -48,7 +48,7 @@ def _job(tmp_path, video):
     )
 
 
-def test_a_rehearsal_names_each_field_and_price_and_spends_nothing(tmp_path, studio, offline):
+def test_a_rehearsal_names_each_field_and_price_and_spends_nothing(tmp_path, studio):
     job = _job(tmp_path, ["fal"])
     report = rehearse.run(job, check=SCHEMA_OK)
 
@@ -72,7 +72,7 @@ def test_a_rehearsal_names_each_field_and_price_and_spends_nothing(tmp_path, stu
     assert json.loads((job.work / rehearse.REPORT).read_text())["calls"]
 
 
-def test_the_real_run_still_waits_for_the_animatic(tmp_path, studio, offline):
+def test_the_real_run_still_waits_for_the_animatic(tmp_path, studio):
     job = _job(tmp_path, ["fal"])
     rehearse.run(job, check=SCHEMA_OK)
     with pytest.raises(ContractError, match="animatic"):
@@ -94,7 +94,7 @@ class Paid(base.Provider):
         raise AssertionError("a rehearsal called a paid model")
 
 
-def test_a_paid_model_that_cannot_rehearse_stops_it(tmp_path, studio, offline, monkeypatch):
+def test_a_paid_model_that_cannot_rehearse_stops_it(tmp_path, studio, monkeypatch):
     monkeypatch.setitem(base._REGISTRY, "paid", Paid)
     Paid.calls = 0
     report = rehearse.run(_job(tmp_path, ["paid"]))
@@ -110,7 +110,7 @@ class Keyed(Paid):
     env_key = "KEYED_TEST_KEY"
 
 
-def test_a_keyless_paid_model_listed_first_stops_it(tmp_path, studio, offline, monkeypatch):
+def test_a_keyless_paid_model_listed_first_stops_it(tmp_path, studio, monkeypatch):
     # With its key set, the real run would call it; the rehearsal must not show fal's route instead
     monkeypatch.setitem(base._REGISTRY, "keyed", Keyed)
     monkeypatch.delenv("KEYED_TEST_KEY", raising=False)
@@ -121,7 +121,7 @@ def test_a_keyless_paid_model_listed_first_stops_it(tmp_path, studio, offline, m
     assert not [c for c in report["calls"] if c["capability"] == "video"]
 
 
-def test_a_request_is_paired_with_its_call_by_the_attempt(tmp_path, offline):
+def test_a_request_is_paired_with_its_call_by_the_attempt(tmp_path):
     # fal brings audio down as .src and converts it; the request still belongs to the router's call
     dst = tmp_path / ".1a2b3c4d.music.wav"
     asked = MusicRequest(prompt="a warm bed", dst=dst, duration=6)
@@ -134,7 +134,7 @@ def test_a_request_is_paired_with_its_call_by_the_attempt(tmp_path, offline):
     assert media.duration(dst) == pytest.approx(6, abs=0.2)  # the length the engine asked for
 
 
-def test_fal_writes_down_the_start_frame_and_the_references(tmp_path, offline, monkeypatch):
+def test_fal_writes_down_the_start_frame_and_the_references(tmp_path, monkeypatch):
     model = "fal-ai/kling-video/o3/pro/reference-to-video"
     still, face = tmp_path / "still.png", tmp_path / "face.png"
     for path in (still, face):
@@ -165,7 +165,7 @@ def test_only_one_rehearsal_runs_at_a_time():
     assert rehearsal.active() is None
 
 
-def test_a_field_fal_would_refuse_stops_the_rehearsal(tmp_path, studio, offline):
+def test_a_field_fal_would_refuse_stops_the_rehearsal(tmp_path, studio):
     # The schema check runs on every rehearsal, so nobody has to remember a script
     def refuse(provider, model, payload):
         return [f"not in {model}'s schema: ['tail_image_url']"] if "video" in model else []
@@ -178,7 +178,7 @@ def test_a_field_fal_would_refuse_stops_the_rehearsal(tmp_path, studio, offline)
     assert any("SCHEMA REFUSES" in line for line in rehearse.lines(report))
 
 
-def test_a_bench_that_has_its_still_rehearses_only_the_bench(tmp_path, studio, offline):
+def test_a_bench_that_has_its_still_rehearses_only_the_bench(tmp_path, studio):
     job = _job(tmp_path, ["fal"])
     assets.run(job, animatic=True)  # the still, made free by the fake image provider
     packet = job.read("script_packet")

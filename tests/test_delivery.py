@@ -15,7 +15,7 @@ from kalainova.jobfs import Job
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 
 
-def _film_job(tmp_path, monkeypatch, profile="film-hd"):
+def _film_job(tmp_path, monkeypatch, profile="film-hd", render_film=True):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     for key in ("ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "FAL_KEY"):
         monkeypatch.delenv(key, raising=False)
@@ -58,8 +58,9 @@ def _film_job(tmp_path, monkeypatch, profile="film-hd"):
     job = Job(folder)
     assets.run(job)
     edit.run(job)
-    render.compile_plan(job)
-    render.execute(job)
+    if render_film:
+        render.compile_plan(job)
+        render.execute(job)
     return job
 
 
@@ -118,7 +119,7 @@ def test_a_piece_keeps_its_sources_frame_rate_rather_than_repeating_frames(
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_new_assets_are_never_cut_with_the_old_edit(tmp_path, monkeypatch):
-    job = _film_job(tmp_path, monkeypatch)
+    job = _film_job(tmp_path, monkeypatch, render_film=False)
     first = job.read("edit_manifest")
     am = job.read("asset_manifest")
     am["timeline"][-1]["end_sec"] += 5.0
@@ -131,7 +132,7 @@ def test_new_assets_are_never_cut_with_the_old_edit(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_the_edit_is_kept_while_its_assets_have_not_changed(tmp_path, monkeypatch):
-    job = _film_job(tmp_path, monkeypatch)
+    job = _film_job(tmp_path, monkeypatch, render_film=False)
     em = job.read("edit_manifest")
     em["fade_out_sec"] = 2.5  # a hand change, which a re-run must not undo
     job.write("edit_manifest", em)

@@ -19,6 +19,13 @@ First, decide the song. Read the brief for what the person asked: its subject, i
 Where the stream already has songs, make this one stand apart from them in its idea, its groove, its arrangement and its sound, not only in its words.
 Write that decision in "concept": two to four sentences on the idea and what sets this song apart.
 
+What studies of listeners have found, for you to weigh while you decide. None of it is a form to fill, and a song may go against any of it on purpose:
+- Groove: a middling amount of syncopation (notes pushed off the beat and held over a stronger one) gives listeners the most urge to move; too little feels stiff, too much loses the pulse (Witek et al. 2014). Say in the style and the section notes where the rhythm pushes off the beat and where it lands square.
+- Harmony: pleasure peaks where a mostly predictable progression meets one well-placed surprise, or a familiar resolution follows an uncertain stretch (Cheung et al. 2019). Decide where the surprise falls.
+- Hook: the hooks people know fastest put the voice forward, keep a simple melodic shape, and come back where the song repeats them (Van Balen et al. 2015). Repeat the hook's words exactly each time it returns.
+- Builds: a build is felt as a steady rise, so a section that leads into a drop rises bar by bar in level, brightness and activity (Biliousis and Dahl 2026), and its note says what rises. A breakdown, a build and a drop are liked over a flat track (Solberg and Jensenius 2017): the drop is felt as the contrast in energy between neighbouring sections.
+- The opening: a model takes the first section as the tone of the whole song, so a soft opening says so in its own note and keeps out, in its "avoid", what it holds back.
+
 Then write it. Rules:
 - The words are entirely your own. Never reuse real lyrics, and never name a real artist, song, or band.
 {sound}

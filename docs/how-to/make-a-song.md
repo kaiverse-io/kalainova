@@ -83,13 +83,15 @@ Pin one in the job's `providers`, for example `{"song": ["mac"], "transcribe": [
 | A hosted app | `spaces` | Free, rate limited | Needs the `spaces` extra. The lyrics leave this machine, and the app's terms need reading |
 | Eleven Music | `elevenlabs` | Rented | Takes a section-by-section plan |
 | MiniMax Music | `fal` | Rented | A style prompt plus tagged lyrics |
-| Mureka V9.5 | `fal` | Rented | Lyrics of up to 5,000 characters, with each section's note on its tag, plus a style prompt of up to 1,024 characters; 120 to 300 s. Since 2026-11-20 fal answers 410 for it, billing nothing |
-| Mureka V9 | `fal` | Rented | V9.5's request without a length: the model sets it |
-| Eleven Music v2.5 | `fal` | Rented | A plan of one chunk per section: its words, its length from its bars at the song's tempo (3 to 120 s), its note as direction, and `avoid` on every chunk; a seed |
+| Mureka V9.5 | `mureka` | Rented (`MUREKA_API_KEY`) | Mureka's own API: lyrics of up to 5,000 characters, with each section's note on its tag, plus a style prompt of up to 1,024 characters; 120 to 300 s; one song a call, the WAV kept. A weak section is sung again by region edit (3 to 30 s, on V8) |
+| Mureka V9 | `mureka` | Rented | V9.5's request without a length: the model sets it |
+| Mureka V9.5, V9 | `fal` | Retired | fal answers 410 for both since 2026-11-20, billing nothing; a pin or a plan naming them is refused, and pointed at `mureka` (ADR 0035) |
+| Eleven Music v2.5 | `elevenlabs` or `fal` | Rented | A plan of one chunk per section: its words, its length from its bars at the song's tempo (3 to 120 s), its note as direction, how its uncommon words are said, and `avoid` on every chunk; a seed. Both hosts send the same plan. Streaming a take needs ElevenLabs' Creator plan or higher |
+| Lyria 3.5 | `fal` | Rented | One prompt of up to 5,000 characters: the style, then each section under a marker timed from its bars (`[0:16-0:48] Verse: its note`). Sings English, German, Spanish, French, Hindi, Japanese, Korean and Portuguese; returns MP3 |
 | Lyria 3 Pro | `fal` | Rented | One prompt carries the style and the lyrics; the model sets the length |
 
 To use one model of a provider rather than its default, pin it:
-`kalainova pin <job> song fal:mureka/v9.5/generate/song --takes 1`. That sets the brief's
+`kalainova pin <job> song mureka:mureka-9.5 --takes 1`. That sets the brief's
 `song_model`, the job's song provider and how many takes are made. A provider with no model
 (`kalainova pin <job> song mac`) uses that provider's own default and clears any other vendor's
 model the brief or its genre pinned. The router sends the
@@ -157,9 +159,11 @@ Give every section an `energy` from 1 to 5: how much it carries, as you plan the
 - a voice where the plan has no words, or none where it has them;
 - a key other than the one asked;
 - an uncommon word from `pronounce` not heard where it is sung;
-- a section whose words were mostly not heard there.
+- a section whose words were mostly not heard there;
+- a steady kick in a section that keeps it out (its `avoid`, or energy 1), or from the first bar of one whose note holds it back ("kick enters late");
+- a build the plan steps up from (energy two or more below the next; a pre-chorus, or a note that says it builds) that does not rise into it.
 
-The cards are kept beside the take, and none of them blocks (ADR 0034).
+The cards are kept beside the take, and none of them blocks (ADR 0034, ADR 0035). Beside them, `<take>.groove.json` keeps when the kick enters and a syncopation index for each section: readings to rank by once a person's verdicts calibrate them, never limits. Say what a verdict was about with `kalainova verdict ... --reason plan` (or groove, vocal, hook, arrangement, genre, mix), so the readings can be held to it.
 
 A section can name what it keeps out in its own `avoid`, such as the drums of a soft intro; a plan model (Eleven Music v2.5) takes it on that section's chunk (ADR 0033).
 

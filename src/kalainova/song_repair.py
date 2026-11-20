@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 from typing import Any
 
@@ -45,6 +46,17 @@ def _repainter(job: Job) -> tuple[str, Pin | None]:
         f"(ready: {', '.join(tried) or 'none'}). The local ACE-Step route can: "
         "set models.mac.song to ace-step and put mac in the song preference."
     )
+
+
+def _vendor_id(take: dict[str, Any], painter: str) -> str | None:
+    """The vendor's own id of a take it made, while it still takes edits by that id."""
+    meta = take.get("meta") or {}
+    until = meta.get("song_id_until")
+    if take.get("provider") != painter or not meta.get("song_id"):
+        return None
+    if until and dt.date.fromisoformat(str(until)) < dt.date.today():
+        return None
+    return str(meta["song_id"])
 
 
 def _span_words(song: dict[str, Any], section_name: str | None) -> str:
@@ -132,10 +144,9 @@ def repair_take(
             start_sec=start,
             end_sec=end,
             lyrics=_span_words(song, section),
-            # a take this vendor made goes by its own id, so nothing is uploaded again
-            vendor_id=(target.get("meta") or {}).get("song_id")
-            if target.get("provider") == painter
-            else None,
+            # a take this vendor made goes by its own id, so nothing is uploaded again, while
+            # the vendor still keeps it (`song_id_until`); after that the take goes up as a file
+            vendor_id=_vendor_id(target, painter),
         ),
         pin=pin,
     )

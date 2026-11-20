@@ -273,6 +273,8 @@ NOT_ADAPTERS = (
     "prices",
     "rehearsal",
     "check",
+    "retired",
+    "outputs",
 )
 
 

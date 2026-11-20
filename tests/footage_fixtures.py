@@ -136,20 +136,3 @@ def talk(dst: Path, segments: list[tuple[float, bool]], size=(640, 360)) -> Path
         ]
     )
     return dst
-
-
-def travel_set(folder: Path) -> list[Path]:
-    folder.mkdir(parents=True, exist_ok=True)
-    specs = [
-        ("01_good_wide.mp4", 1, {}),
-        ("02_shaky.mp4", 2, {"shake": 6.0}),
-        ("03_blurry.mp4", 3, {"blur": 6.0}),
-        ("04_dark.mp4", 4, {"dark": 0.25}),
-        ("05_good_sunset.mp4", 5, {}),
-        ("06_good_ridge.mp4", 6, {"dur": 6.0}),
-    ]
-    out = [clip(folder / name, seed, **kw) for name, seed, kw in specs]
-    photo = folder / "07_photo.jpg"
-    landscape(7, 1600, 1066).save(photo, quality=92)
-    out.append(photo)
-    return out

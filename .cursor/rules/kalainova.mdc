@@ -1,0 +1,34 @@
+---
+description: Kalainova core development rules and agent guardrails
+globs: *
+alwaysApply: true
+---
+
+# Kalainova — Development Guardrails
+
+This project follows strict quality, architectural, and security boundaries defined in `AGENTS.md`.
+
+## Public Repository Rules
+- This repository is public. Never commit real credentials, character identities, account handles, brand names, or real media assets (`mp3`, `mp4`, `wav`, `m4a`, `mov`, `webm`, reference images).
+- Use `$KALAINOVA_HOME` for private studio jobs and kits.
+
+## Verification & Quality Gates
+- Always run `just ci` to verify changes.
+- Never skip git hooks or bypass pre-commit verification checks.
+- Never lower the coverage floor (`fail_under` or `--cov-fail-under` in `pyproject.toml`).
+- Keep all Python source and test files strictly under 500 lines (`max_file_lines = 500`).
+- Maintain gate integrity in `justfile`: never diverge `.github/workflows/ci.yaml` from `just ci` sequence.
+
+## Architecture & Code Boundaries
+- Preserve import boundaries enforced by `.importlinter`.
+- When adding or modifying top-level modules under `src/kalainova/`, update `ARCHITECTURE.md` with a matching section and update the Component Diagram in the same change (`just ci-arch`).
+- No inline prompt literals >200 characters (place in `prompts/`).
+- No bare `# noqa` or `# type: ignore` without a specific code and justification.
+
+## Human Gates
+- Humans gate publish (`kalainova approve`). Agents never write `approval.json`.
+- Humans sign off spend (`kalainova sign-off`). Agents build packages (`kalainova package`) but never sign them off.
+
+## Commits
+- Use conventional commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`.
+- No `Co-authored-by` / `Co-Authored-By` trailers in commits.

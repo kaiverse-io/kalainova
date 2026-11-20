@@ -2,13 +2,15 @@
 
 A section's `style` is a short note on what changes there ("restrained and intimate"). A model
 whose row in `audio_models` has `section_notes: tags` reads each note on its section's lyric tag,
-as its vendor's own prompt guide shows ("[Verse] restrained and intimate"). Any other model reads
-the notes after the style, in order. Either way, every section of a song file reaches the model
-that sings it (ADR 0029).
+as its vendor's own prompt guide shows ("[Verse] restrained and intimate"). One with
+`section_notes: timestamps` reads each section under a timed marker ("[0:23-0:38] Verse: ..."),
+its span from its bars. Any other model reads the notes after the style, in order. Either way,
+every section of a song file reaches the model that sings it (ADR 0029).
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -52,6 +54,24 @@ def styled(style: str, sections: Sequence[Section]) -> str:
     return f"{style.strip().rstrip('.,; ')}. {said}" if style.strip() else said
 
 
+def _clock(ms: int) -> str:
+    minutes, rest = divmod(round(ms / 1000), 60)
+    return f"{minutes}:{rest:02d}"
+
+
+def timestamped(sections: Sequence[Section], bpm: float | None, seconds: float) -> str:
+    """The words under timed section markers, as Lyria's guide shows them ("[0:00-0:30] Intro:
+    ..."): each section's span from its bars at the song's tempo, its note after its name."""
+    out, at = [], 0
+    for section, ms in zip(sections, section_ms(sections, bpm, seconds), strict=True):
+        said = note(section)
+        marker = f"[{_clock(at)}-{_clock(at + ms)}] {name(section)}"
+        out.append(f"{marker}: {said}" if said else marker)
+        out += [str(line) for line in section.get("lines") or []]
+        at += ms
+    return "\n".join(out) + "\n"
+
+
 CHUNK_MS = (3000, 120000)  # a plan's chunk, as ElevenLabs takes it
 CHUNKS_MOST = 30
 CHUNK_LINES_MOST, LINE_CHARS_MOST = 30, 200
@@ -66,13 +86,36 @@ def section_ms(sections: Sequence[Section], bpm: float | None, seconds: float) -
     return [round(seconds * 1000 * w / sum(weights)) for w in weights]
 
 
-def plan(sections: Sequence[Section], style: str, avoid: str, bpm: float | None,
-         seconds: float) -> list[dict[str, Any]]:  # fmt: skip
+WORD = re.compile(r"[\w']+")
+
+
+def sung_here(section: Section, pronounce: Mapping[str, str] | None) -> list[tuple[str, str]]:
+    """Each uncommon word this section sings, and how it is said, as a direction for its own
+    chunk: a hint sent only with the song's style reached the first chunk, and the word sung four
+    sections later was sung as an English one (2026-11-20)."""
+    sung = {w.casefold() for line in section.get("lines") or [] for w in WORD.findall(str(line))}
+    return [
+        (str(word), f'pronounce "{word}" as "{said}"')
+        for word, said in (pronounce or {}).items()
+        if {w.casefold() for w in WORD.findall(str(word))} <= sung
+    ]
+
+
+def plan(
+    sections: Sequence[Section],
+    style: str,
+    avoid: str,
+    bpm: float | None,
+    seconds: float,
+    pronounce: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
     """A composition plan, one chunk per section: its words under its tag, its length, and its
     note as the direction for it, first. The first chunk sets the whole song's tone, so it carries
     the style too, after its own note: a style put first there made a take's quiet intro its
-    loudest section (2026-11-20). What to keep out is held on every chunk, with what each section
-    keeps out of itself (`avoid` on a section). Refused where a chunk cannot be made."""
+    loudest section (2026-11-20). How each uncommon word is said goes on the chunk that sings it.
+    What to keep out is held on every chunk, with what each section keeps out of itself (`avoid`
+    on a section). Refused where a chunk cannot be made. Every host of a model that takes a plan
+    builds it here, so a change of host never changes what the model is asked."""
     if not sections or len(sections) > CHUNKS_MOST:
         raise ValueError(f"a composition plan takes 1 to {CHUNKS_MOST} sections")
 
@@ -89,7 +132,9 @@ def plan(sections: Sequence[Section], style: str, avoid: str, bpm: float | None,
             raise ValueError(f"{name(section)} runs {ms / 1000:g} s; a chunk is 3 to 120 s")
         if len(lines) > CHUNK_LINES_MOST or any(len(line) > LINE_CHARS_MOST for line in lines):
             raise ValueError(f"{name(section)} has more lines, or longer ones, than a chunk takes")
-        styles = [s for s in (note(section), (style if n == 0 else "")) if s] or [style]
+        lead = style if n == 0 else ""
+        styles = [s for s in (note(section), lead) if s] or [style]
+        styles += [hint for word, hint in sung_here(section, pronounce) if f'"{word}"' not in lead]
         chunks.append({"text": "\n".join([f"[{name(section)}]", *lines]), "duration_ms": ms,
                        "positive_styles": styles, "negative_styles": keep_out(section),
                        "context_adherence": "high"})  # fmt: skip

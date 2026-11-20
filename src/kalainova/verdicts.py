@@ -23,6 +23,10 @@ ENOUGH_OF_EACH = 3  # with fewer than this on either side, any separation is luc
 SEPARATES_AT = 0.8
 PAIRS_ENOUGH = 8  # fewer preferences than this on one aspect, and agreement is luck
 ASPECTS = ("overall", "lips", "head", "eyes", "body", "picture", "sound")
+# Why a take missed, in a person's words, as one label: the later fit of models, directions and
+# song verifiers against verdicts (#133) needs to know which part a verdict was about
+REASONS = ("plan", "groove", "vocal", "hook", "arrangement", "genre", "mix", "picture", "motion",
+           "lips", "unclear")  # fmt: skip
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
 
@@ -81,6 +85,7 @@ def record(
     over: int | None = None,
     animatic: bool = False,
     aspect: str = "",
+    reason: str = "",
 ) -> dict[str, Any]:
     """Write down what a person said. It has to name them, because a verdict is theirs.
 
@@ -89,9 +94,12 @@ def record(
     which aspect (`review_aspects` in config: the lips, the eyes, the picture...), so a judge of
     one aspect is held to what the person said of that aspect alone.
     A verdict on the animatic is on the rough cut as it stands; the job records which cut it was.
+    A `reason` labels what the verdict was about (REASONS), beside the person's own words.
     """
     _check_record_args(job, verdict, reviewer, shot, take, preferred, over, animatic)
     _check_aspect(aspect)
+    if reason and reason not in REASONS:
+        raise ContractError(f"a reason is one of {', '.join(REASONS)}, not {reason!r}")
     # The bytes judged, not only their take number: `assets --force` starts the numbering again,
     # and a number alone would hand an old verdict to a new clip.
     judged = _take_sha(job.folder, shot, take) if shot and preferred is None else ""
@@ -113,6 +121,7 @@ def record(
             else {}
         ),
         **({"aspect": aspect} if aspect else {}),
+        **({"reason": reason} if reason else {}),
         **({"note": note} if note else {}),
         **(
             {"saw_engine_pick": True}

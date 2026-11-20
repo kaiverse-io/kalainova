@@ -10,7 +10,7 @@ The point is a first take that already follows every lesson. A fix that lives in
 ## 1. Record it
 
 - **A take or a piece:**
-  - run `uv run kalainova verdict <job> accept|fix|reject --reviewer NAME --shot <id> --take <n> --note "<their words>"`;
+  - run `uv run kalainova verdict <job> accept|fix|reject --reviewer NAME --shot <id> --take <n> --note "<their words>"`, with `--reason` (plan, groove, vocal, hook, arrangement, genre, mix, picture, motion, lips, unclear) when their words say what it was about;
   - for a preference, use `--best N --among a,b,c --aspect <lips|head|eyes|body|picture|overall>`.
 - **How the agent worked:** write it in the harness's private memory (it is not about a piece).
 - Quote the person. Do not paraphrase a verdict into something kinder or more certain than they said.

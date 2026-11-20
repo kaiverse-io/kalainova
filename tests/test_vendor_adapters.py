@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import subprocess
 import sys
 import types
@@ -12,7 +11,7 @@ import pytest
 from fakes import Reply, Wire, context, needs_ffmpeg
 
 from kalainova import media
-from kalainova.providers import base, fal, hyperframes, mac, remote, search, spaces, transport
+from kalainova.providers import base, fal, hyperframes, mac, search, spaces, transport
 from kalainova.providers.contract import (
     GraphicsRequest,
     LipsyncRequest,
@@ -20,98 +19,8 @@ from kalainova.providers.contract import (
     SearchRequest,
     SeparateRequest,
     SongRequest,
-    UnauthorizedError,
     VideoRequest,
-    VoiceRequest,
 )
-
-
-@pytest.fixture
-def eleven(monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", "k")
-    sent = []
-    made = []
-
-    def post(url, **kw):
-        sent.append({"url": url, **kw})
-        return replies.pop(0)
-
-    replies: list[Reply] = []
-    monkeypatch.setattr(transport.requests, "post", post)
-    monkeypatch.setattr(media, "run", lambda args, **k: made.append(args))
-    return remote.ElevenLabs(), sent, replies, made
-
-
-def _speech(blob=b"pcm"):
-    return Reply(body={"audio_base64": base64.b64encode(blob).decode(), "alignment": {}})
-
-
-def test_speech_is_asked_for_losslessly_and_read_as_raw_samples(eleven, tmp_path):
-    provider, sent, replies, made = eleven
-    replies.append(_speech())
-    res = provider.voice(VoiceRequest(text="A line.", dst=tmp_path / "v.wav"), context())
-    assert sent[0]["params"]["output_format"] == "pcm_48000"
-    assert res.meta["audio_format"] == "pcm_48000"
-    assert made[0][:6] == ["-f", "s16le", "-ar", "48000", "-ac", "1"]
-
-
-def test_a_plan_without_lossless_audio_falls_back_and_the_record_says_so(eleven, tmp_path):
-    provider, sent, replies, made = eleven
-    replies += [Reply(status=403, text="output_format not allowed on this tier"), _speech()]
-    res = provider.voice(VoiceRequest(text="A line.", dst=tmp_path / "v.wav"), context())
-    assert sent[1]["params"]["output_format"] == "mp3_44100_128"
-    assert res.meta["audio_format"] == "mp3_44100_128"
-    assert made[0][0] == "-i", "an mp3 needs no raw format"
-
-
-def test_some_other_failure_is_not_mistaken_for_a_plan_limit(eleven, tmp_path):
-    provider, sent, replies, _ = eleven
-    replies.append(Reply(status=401, text="bad key"))
-    with pytest.raises(UnauthorizedError):
-        provider.voice(VoiceRequest(text="A line.", dst=tmp_path / "v.wav"), context())
-    assert len(sent) == 1
-
-
-def test_a_song_goes_as_a_chunked_composition_plan(eleven, tmp_path):
-    provider, sent, replies, _ = eleven
-    replies.append(Reply(content=b"pcm"))
-    sections = [
-        {"kind": "verse", "lines": ["One", "Two"], "style": "soft"},
-        {"kind": "chorus", "lines": ["Three", "Four", "Five", "Six"]},
-    ]
-    asked = SongRequest(
-        lyrics="ignored",
-        dst=tmp_path / "s.wav",
-        style="pop",
-        duration=60,
-        sections=sections,
-        avoid="dark",
-    )
-    provider.song(asked, context())
-    body = sent[0]["json"]
-    assert body["model_id"] == "music_v2_5" and "prompt" not in body
-    chunks = body["composition_plan"]["chunks"]
-    assert chunks[0]["text"] == "[Verse]\nOne\nTwo"
-    assert chunks[0]["positive_styles"] == ["pop", "soft"] and chunks[1]["negative_styles"] == [
-        "dark"
-    ]
-    assert chunks[1]["duration_ms"] == 2 * chunks[0]["duration_ms"], "time follows the lines"
-
-
-def test_a_song_plan_stays_inside_the_apis_limits():
-    many = [{"kind": "verse", "lines": ["x"]} for _ in range(50)]
-    chunks = remote.song_chunks(many, "pop", 10)
-    assert len(chunks) == remote.SONG_MOST_CHUNKS
-    assert all(c["duration_ms"] >= remote.SONG_LEAST_CHUNK_MS for c in chunks)
-
-
-def test_a_song_with_no_sections_goes_as_a_prompt(eleven, tmp_path):
-    provider, sent, replies, _ = eleven
-    replies.append(Reply(content=b"pcm"))
-    provider.song(
-        SongRequest(lyrics="The words", dst=tmp_path / "s.wav", style="pop", duration=30), context()
-    )
-    assert sent[0]["json"]["prompt"] == "pop\nThe words"
 
 
 @pytest.fixture

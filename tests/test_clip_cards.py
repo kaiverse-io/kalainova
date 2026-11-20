@@ -78,11 +78,11 @@ def test_a_clip_can_open_and_close_on_a_drawn_card(tmp_path, monkeypatch, studio
     job = cover_source(make_job(tmp_path))
     source = job.work / "talk.mp4"
     media.run(
-        ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=30:r=24", "-f", "lavfi", "-i",
-         "sine=f=220:d=30:r=48000", "-pix_fmt", "yuv420p", "-shortest", str(source)]
+        ["-f", "lavfi", "-i", "testsrc2=s=640x360:d=4:r=24", "-f", "lavfi", "-i",
+         "sine=f=220:d=4:r=48000", "-pix_fmt", "yuv420p", "-shortest", str(source)]
     )  # fmt: skip
     studio.heard = _transcript_words()
-    clip = {"start_sec": 0.0, "end_sec": 20.0, "title": "The turn"}
+    clip = {"start_sec": 0.0, "end_sec": 3.0, "title": "The turn"}
     child = clips.open_job(
         job, source, clip, "p1-clip-card", hook_text="The turn", close_text="Follow for more"
     )

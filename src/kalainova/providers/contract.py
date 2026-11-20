@@ -30,6 +30,7 @@ from .errors import BilledError as BilledError
 from .errors import InvalidRequestError as InvalidRequestError
 from .errors import RateLimitedError as RateLimitedError
 from .errors import RefusalError as RefusalError
+from .errors import RetiredError as RetiredError
 from .errors import UnauthorizedError as UnauthorizedError
 from .errors import UnavailableError as UnavailableError
 from .errors import VendorError as VendorError
@@ -363,6 +364,7 @@ class SongRequest(Request):
     language: str | None = None
     vocal_gender: str | None = None  # "female" or "male", for a model with its own setting
     instrumental: bool = False
+    pronounce: Mapping[str, str] | None = None  # uncommon words, and how each is said
     repaint: Repaint | None = None
     guide: Guide | None = None
 
@@ -391,6 +393,8 @@ class SongRequest(Request):
             )
             if self.vocal_gender:
                 kw["vocal_gender"] = self.vocal_gender
+            if self.pronounce:  # only when set, so a take paid for before keeps its key
+                kw["pronounce"] = dict(self.pronounce)
         if self.guide is not None:  # only when set, so a take paid for before guides keeps its key
             kw["guide"] = {"source": self.guide.source, "use": self.guide.use}
         return [self.lyrics], kw

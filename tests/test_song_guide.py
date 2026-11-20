@@ -196,6 +196,8 @@ def test_an_upload_keeps_its_own_request_id_and_is_charged_when_the_song_then_fa
 
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     monkeypatch.setenv("FAL_KEY", "k")
+    # fal's Mureka routes are retired (410); the ledger rule under test holds should they return
+    monkeypatch.setattr(router.retired, "why", lambda provider, model: None)
     refused = InvalidRequestError("fal answered 422: prompt and reference_id cannot be combined")
     wire = Wire({"id": "ref-1"}, refused)
     real_send = wire._send

@@ -200,8 +200,8 @@ def _job(tmp_path, song=None, **extra):
 
 def test_a_rehearsal_writes_down_each_planned_take_and_sends_nothing(tmp_path, studio):
     job = _job(tmp_path, _song(duration_sec=180))  # Mureka makes 120 to 300 s
-    pinned = {"provider": "fal", "model": MUREKA}
-    job.write("job", {**job.job, "providers": {**job.job["providers"], "song": ["fal"]},
+    pinned = {"provider": "mureka", "model": "mureka-9.5"}  # fal's Mureka routes are retired
+    job.write("job", {**job.job, "providers": {**job.job["providers"], "song": ["mureka"]},
                       "brief": {**job.job["brief"], "song_model": pinned}})  # fmt: skip
     report = rehearse.run(job, check=None)
     asked = [r for c in report["calls"] if c["capability"] == "song" for r in c["requests"]]
@@ -219,10 +219,11 @@ def test_a_rehearsal_stops_where_the_run_would(tmp_path, studio):
 def test_a_pin_sets_the_song_model_and_its_takes_by_command(tmp_path, studio, monkeypatch):
     monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
     job = _job(tmp_path)
-    assert main(["pin", job.id, "song", f"fal:{MUREKA}", "--takes", "3"]) == 0
+    assert main(["pin", job.id, "song", f"fal:{MUREKA}"]) != 0, "fal's route is retired"
+    assert main(["pin", job.id, "song", "mureka:mureka-9.5", "--takes", "3"]) == 0
     data = json.loads(job.path("job").read_text())
-    assert data["brief"]["song_model"] == {"provider": "fal", "model": MUREKA}
-    assert data["providers"]["song"] == ["fal"]
+    assert data["brief"]["song_model"] == {"provider": "mureka", "model": "mureka-9.5"}
+    assert data["providers"]["song"] == ["mureka"]
     assert data["brief"]["takes"] == data["brief"]["max_takes"] == 3
     assert main(["pin", job.id, "song", "nowhere"]) != 0
     assert main(["pin", job.id, "transcribe", "fal:some-model"]) != 0
@@ -314,3 +315,70 @@ def test_an_intro_played_at_full_level_reads_as_no_soft_start(tmp_path):
         musicbar.intro_rise(_noise_wav(tmp_path / "long.wav", [0.05, 0.05, 0.4, 0.4]), unplaced)
         < -10
     )
+
+
+def test_an_uncommon_word_is_said_on_the_chunk_that_sings_it(mureka):
+    """The hint rode only in the song's style, which a plan sends on its first chunk, so a word
+    sung in the pre-chorus was sung as an English one (2026-11-20)."""
+    provider, wire, tmp = mureka
+    sections = [
+        {"kind": "intro", "bars": 8, "style": "pads alone"},
+        {"kind": "pre-chorus", "bars": 4, "lines": ["Juntos, one breath in"], "style": "rising"},
+        {"kind": "chorus", "bars": 8, "lines": ["Hold the light"]},
+    ]
+    style = 'house, pronounce "juntos" as "HOON-tohs"'
+    req = SongRequest(lyrics="", dst=tmp / "s.wav", style=style, duration=180, bpm=120,
+                      sections=sections, pronounce={"juntos": "HOON-tohs"})  # fmt: skip
+    provider.song(req, context(model="elevenlabs/music/v2.5"))
+    intro, pre, chorus = wire.sent[-1]["payload"]["composition_plan"]["chunks"]
+    assert pre["positive_styles"] == ["rising", 'pronounce "juntos" as "HOON-tohs"']
+    assert intro["positive_styles"] == ["pads alone", 'house, pronounce "juntos" as "HOON-tohs"']
+    # a section with no note of its own keeps the style, and sings no uncommon word
+    assert chorus["positive_styles"] == ['house, pronounce "juntos" as "HOON-tohs"']
+
+
+def test_a_hint_is_keyed_into_the_request_only_when_a_song_has_one(tmp_path):
+    plain = SongRequest(lyrics="w", dst=tmp_path / "s.wav", style="house")
+    said = SongRequest(lyrics="w", dst=tmp_path / "s.wav", style="house", pronounce={"a": "b"})
+    assert "pronounce" not in plain._shape()[1]
+    assert plain.key() != said.key()
+
+
+LYRIA = "google/lyria-3.5"
+
+
+def test_lyria_reads_each_section_under_a_timed_marker_in_one_prompt(mureka):
+    """Lyria 3.5 takes one prompt: the style, then the words under markers timed from their bars
+    (its guide: "[0:00-0:30] Intro: ..."). It takes no length field."""
+    provider, wire, tmp = mureka
+    sections = [
+        {"kind": "intro", "bars": 8, "style": "pads alone"},
+        {"kind": "verse", "bars": 16, "lines": ["Six in the morning"], "style": "voice set back"},
+    ]
+    req = SongRequest(lyrics="[Intro]\n[Verse]\nSix in the morning\n", dst=tmp / "s.wav",
+                      style="melodic house, 120 bpm", duration=180, bpm=120, sections=sections,
+                      language="en")  # fmt: skip
+    res = provider.song(req, context(model=LYRIA))
+    sent = wire.sent[-1]["payload"]
+    assert sent == {
+        "prompt": "melodic house, 120 bpm\n\nLyrics:\n[0:00-0:16] Intro: pads alone\n"
+        "[0:16-0:48] Verse: voice set back\nSix in the morning"
+    }
+    assert res.cost == pytest.approx(0.10)
+
+
+def test_a_song_in_a_language_lyria_does_not_sing_is_refused_before_sending(mureka):
+    provider, wire, tmp = mureka
+    before = len(wire.sent)
+    req = SongRequest(lyrics="[Verse]\nW\n", dst=tmp / "s.wav", style="house", duration=120,
+                      language="ar")  # fmt: skip
+    with pytest.raises(ValueError, match="not ar"):
+        provider.song(req, context(model=LYRIA))
+    assert len(wire.sent) == before
+
+
+def test_lyrias_limit_holds_the_style_and_the_words_together(mureka):
+    provider, _, tmp = mureka
+    req = SongRequest(lyrics="w" * 4990, dst=tmp / "s.wav", style="house", duration=120)
+    with pytest.raises(ValueError, match="style and words together"):
+        provider.song(req, context(model=LYRIA))

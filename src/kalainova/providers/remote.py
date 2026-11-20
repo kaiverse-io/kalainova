@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import model_for, price_for
+from . import song_text
 from .base import Provider, register
 from .contract import (
     Context,
@@ -29,8 +30,6 @@ from .contract import (
 from .transport import TIMEOUT, Https, Reply, Transport
 
 LOSSY_AUDIO = "mp3_44100_128"  # what every ElevenLabs plan allows
-SONG_MOST_CHUNKS = 30
-SONG_LEAST_CHUNK_MS = 3000
 
 
 # ---------------------------------------------------------------- Anthropic
@@ -194,20 +193,28 @@ class ElevenLabs(Provider):
         return self._track(reply, req.dst, req.duration, "music", fmt)
 
     def song(self, req: SongRequest, ctx: Context) -> Result:
-        """A song from a composition plan: one chunk per section, each with its own lines and styles."""
+        """A song from a composition plan, built as every host of this model builds it
+        (song_text.plan): one chunk per section, its length from its bars at the song's tempo, its
+        own note first, and how its uncommon words are said. With no sections, a prompt."""
         if req.repaint is not None:
             raise ValueError("ElevenLabs cannot repaint a span of a take")
         seconds = float(req.duration or 120)
-        sections = [dict(s) for s in req.sections]
-        plan = song_chunks(sections, req.style, seconds, req.avoid)
         body: dict[str, Any] = {
             "model_id": model_for("elevenlabs", "song") or model_for("elevenlabs", "music")
         }
-        body.update(
-            {"composition_plan": {"chunks": plan}}
-            if plan
-            else {"prompt": f"{req.style}\n{req.lyrics}"}
-        )
+        if req.sections:
+            body["composition_plan"] = {
+                "chunks": song_text.plan(
+                    req.sections, req.style, req.avoid, req.bpm, seconds, req.pronounce
+                )
+            }
+            seconds = sum(song_text.section_ms(req.sections, req.bpm, seconds)) / 1000
+        else:
+            body["prompt"] = f"{req.style}\n{req.lyrics}"
+        if req.seed is not None:
+            body["seed"] = int(req.seed)
+        if req.instrumental:
+            body["force_instrumental"] = True
         reply, fmt = self._post("music", body, ctx, timeout=900)
         return self._track(reply, req.dst, seconds, "song", fmt)
 
@@ -227,30 +234,6 @@ class ElevenLabs(Provider):
         return Result(
             path=dst, cost=cost, model=model_for("elevenlabs", cap), meta={"audio_format": fmt}
         )
-
-
-def song_chunks(sections: list[dict], style: str, seconds: float, avoid: str = "") -> list[dict]:
-    """A composition plan: each section's time in proportion to its lines, inside the API's limits."""
-    parts = sections[:SONG_MOST_CHUNKS]
-    if not parts:
-        return []
-    weights = [max(len(s.get("lines") or []), 2) for s in parts]
-    total_ms = int(seconds * 1000)
-    chunks = []
-    for part, weight in zip(parts, weights):
-        lines = part.get("lines") or []
-        tag = f"[{str(part.get('kind', 'verse')).title()}]"
-        styles = [s for s in (style, part.get("style")) if s]
-        chunks.append(
-            {
-                "text": "\n".join([tag, *lines]),
-                "duration_ms": max(SONG_LEAST_CHUNK_MS, total_ms * weight // sum(weights)),
-                "positive_styles": styles,
-                "negative_styles": [avoid] if avoid else [],
-                "context_adherence": "high",
-            }
-        )
-    return chunks
 
 
 def chars_to_words(al: dict) -> list[dict]:

@@ -12,7 +12,7 @@ preference:
   music: [elevenlabs, fal, local]
   sfx: [elevenlabs, local]
   transcribe: [fal]
-  song: [elevenlabs, fal, local]
+  song: [elevenlabs, mureka, fal, local]
   lipsync: [fal]
   sing: [fal]                     # a Sings: shot, made in one call from its still and its line
   motion: [fal, mac, local]
@@ -64,6 +64,8 @@ models:
     sfx: eleven_text_to_sound_v2      # the id the docs list. VERIFY before the first paid run
     # A premium master cannot be better than this. Falls back to mp3_44100_128 when a plan lacks it.
     output_format: pcm_48000
+  mureka:                          # Mureka's own API (providers/mureka.py)
+    song: mureka-9.5
   fal:
     # Slugs: confirm with the fal MCP search_models/get_model_schema before first paid run.
     image: google/nano-banana-2.1                   # checked on fal 2026-11-06; premium = GPT Image 2.5
@@ -116,6 +118,11 @@ prices:
     music: {per_min: 0.80}
     song: {per_min: 0.80}
     sfx: {per_min: 0.50}
+  mureka:                          # platform.mureka.ai/pricing, read 2026-11-20; a $10 recharge lasts 12 months
+    song: {per_track: 0.15}        # the default model's price, for a call that names none
+    mureka-9.5: {per_track: 0.15, checked: "Mureka's pricing page 2026-11-20: $0.15 a song from lyrics"}
+    mureka-9: {per_track: 0.045, checked: "Mureka's pricing page 2026-11-20: $0.045 a song (O2, V8, V9)"}
+    region-edit: {per_track: 0.10, checked: "Mureka's pricing page 2026-11-20: $0.10 an edited region, on V8"}
   fal:
     image: {per_image: 0.15}       # ESTIMATE: Nano Banana 2.1 bills by tokens and rises with resolution
     video: {per_sec: 0.28}         # Wan 3.0 Prime at 1080p
@@ -142,6 +149,7 @@ prices:
     mureka/api/files/upload: {per_call: 0.01, checked: "fal's model page 2026-11-18: $0.01 an upload"}
     mureka/api/song/edit: {per_track: 0.10, checked: "fal's model page 2026-11-19: $0.10 an edited region"}
     fal-ai/lyria3/pro: {per_track: 0.08, checked: "fal's model page: $0.08 a track"}
+    google/lyria-3.5: {per_track: 0.10, checked: "fal's model page 2026-11-20: $0.10 a song; confirm with scripts/check_fal_prices.py"}
     fal-ai/ace-step: {per_sec: 0.0002}   # per second of audio made. ESTIMATE: from fal's public model page
     separate: {per_sec: 0.0007, checked: "fal's pricing API 2026-11-17: $0.0007 a second"}
     lipsync: {per_min: 3.00}       # ESTIMATE
@@ -191,10 +199,40 @@ licences:
       obligations: ["A commercial product must display MiniMax-Music3 prominently", "Written authorisation above $20M yearly revenue"]
   spaces:
     "*": {name: hosted app, commercial: false, retention: unknown, obligations: ["Read the terms of the app and of the model it runs before releasing anything"]}
+  # terms: the page a person read, and read: when. A package shows both beside each paid call,
+  # so the terms in force when it was signed are on record with the spend.
   elevenlabs:
     "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm your plan allows commercial use"]}
+    music_v2_5:
+      name: Eleven Music terms
+      commercial: true
+      retention: unknown
+      terms: https://elevenlabs.io/music-terms
+      read: "2026-11-20"
+      obligations: ["Streaming distribution needs the Creator plan or higher; Free and Starter may not stream (the English terms' table). Translated and archived pages read stricter: confirm in writing before a release", "High-quality downloads need Pro or higher"]
+  mureka:
+    "*":
+      name: Mureka API terms
+      commercial: true
+      retention: "the vendor's: uploads and voice samples may be kept (its privacy policy)"
+      terms: https://platform.mureka.ai/service_terms.pdf
+      read: "2026-11-20"
+      obligations: ["Its FAQ grants commercial use of output from paid API calls; confirm streaming release in writing", "A region edit runs on V8, an older model than the V9.5 take it edits: hear the join"]
   fal:
     "*": {name: vendor terms, commercial: true, retention: unknown, obligations: ["Confirm the model's own terms on fal"]}
+    elevenlabs/music/v2.5:
+      name: vendor terms via fal
+      commercial: true
+      retention: unknown
+      read: "2026-11-20"
+      obligations: ["Whether ElevenLabs' music terms let a take made through fal be streamed is not documented: settle it before a release"]
+    google/lyria-3.5:
+      name: vendor terms via fal
+      commercial: true
+      retention: unknown
+      terms: https://deepmind.google/models/model-cards/lyria-3-5/
+      read: "2026-11-20"
+      obligations: ["fal marks it for commercial use; Google's model card defers to the service terms: confirm streaming release in writing", "It returns MP3 only, so a master made from it is lossy at its source"]
     fal-ai/ace-step:
       name: ACE-Step (VERIFY)
       commercial: true
@@ -230,9 +268,10 @@ audio_models:
     minimax/music-3: {max_sec: 300, style_field: prompt}   # fal's schema: duration up to 300 s
     # guide: how a model follows a track (brief.song_guide). The track goes up to `upload` first, for
     # an id that goes in `field`. clip_sec is the clip it takes; none: the whole track.
-    # 2026-11-20: fal answers 410 "This endpoint is deprecated and no longer available" for V9.5's
-    # song route, though its catalog still lists it; nothing is billed. Kept for when it returns.
+    # Kept for when it returns: delete `retired` then (providers/retired.py).
     mureka/v9.5/generate/song:     # fal's schema: 120 to 300 s; with lyrics, the prompt is a style of up to 1,024 characters
+      retired: "2026-11-20: fal answers 410, This endpoint is deprecated and no longer available, though its catalog lists it"
+      instead: mureka:mureka-9.5
       max_sec: 300
       min_sec: 120
       style_field: prompt
@@ -246,6 +285,8 @@ audio_models:
         # so with a reference no style is sent: the clip carries the sound
         reference: {upload: mureka/api/files/upload, purpose: reference, field: reference_id, clip_sec: 30, style: false}
     mureka/v9/generate/song:       # fal's schema 2026-11-20: V9.5's fields without a length; the model sets it
+      retired: "2026-11-20: fal answers 410, as for V9.5"
+      instead: mureka:mureka-9
       max_sec: 300                 # VERIFY: the schema states no longest song
       style_field: prompt
       style_max_chars: 1024        # fal's schema: with lyrics, up to 1,024 characters
@@ -271,6 +312,39 @@ audio_models:
       guide:
         remix: {upload: mureka/api/files/upload, purpose: remix, field: upload_audio_id}
     fal-ai/lyria3/pro: {max_sec: 184, style_field: prompt, lyrics_in_prompt: true, takes_duration: false}   # one prompt carries style and lyrics; no length field. VERIFY the longest track
+    google/lyria-3.5:              # fal's schema 2026-11-20: one prompt of up to 5,000 characters; negative_prompt "not supported"; returns MP3
+      max_sec: 300                 # VERIFY: the schema says "full-length songs up to a few minutes"
+      style_field: prompt
+      lyrics_in_prompt: true
+      prompt_max_chars: 5000       # the style and the words together
+      takes_duration: false        # the length comes from the timed section markers
+      section_notes: timestamps    # its guide: "[0:00-0:30] Intro: ..." / "[0:30-1:00] Verse: ..."
+      languages: [en, de, es, fr, hi, ja, ko, pt]
+  mureka:                          # Mureka's own API: SongGenerateReq and SongRegionEditReq in its docs, read 2026-11-20
+    mureka-9.5:
+      max_sec: 300
+      min_sec: 120
+      style_field: prompt
+      style_max_chars: 1024
+      lyrics_max_chars: 5000
+      section_notes: tags
+      gender_field: gender
+      edit_with: region-edit
+    mureka-9:
+      max_sec: 300                 # "Song length not exceeding 5m30s"; no duration field below V9.5
+      style_field: prompt
+      style_max_chars: 1024
+      lyrics_max_chars: 5000
+      section_notes: tags
+      gender_field: gender
+      takes_duration: false
+      edit_with: region-edit
+    region-edit:                   # song_id (made in the last month) or upload_audio_id; the region is 3 s or more
+      edits: true
+      min_region_sec: 3
+      max_region_sec: 30           # the pricing page: "edit windows of 10 to 30 seconds"
+      upload: files/upload
+      purpose: audio
 
 # How many attempts a shot gets. A job's brief can set takes and max_takes.
 takes:

@@ -1,6 +1,6 @@
 # 0031. A song request follows its vendor's own prompt guide: a short brief, notes on the lyric tags, and how uncommon words are said
 
-Status: accepted · 2026-11-19. Builds on 0029 (a song file reaches its model as written) and 0030 (a song is made inside its genre's profile).
+Status: accepted · 2026-11-19; point 3 amended by 0035 (a hint goes on the chunk that sings the word). Builds on 0029 (a song file reaches its model as written) and 0030 (a song is made inside its genre's profile).
 
 ## Context
 

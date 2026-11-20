@@ -41,3 +41,8 @@ class RateLimitedError(VendorError):
 
 class UnavailableError(VendorError):
     """The vendor could not be reached or failed on its side."""
+
+
+class RetiredError(UnavailableError):
+    """The vendor says the route is gone for good (HTTP 410). Asking again finds nothing, so the
+    route is written down as retired (providers/retired.py)."""

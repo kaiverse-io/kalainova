@@ -38,6 +38,7 @@ from .contract import (
     InvalidRequestError,
     RateLimitedError,
     RefusalError,
+    RetiredError,
     UnauthorizedError,
     UnavailableError,
     VendorError,
@@ -103,6 +104,8 @@ def raise_for(resp: Any, platform: str) -> None:
         raise UnauthorizedError(message)
     if status == 429:
         raise RateLimitedError(message)
+    if status == 410:  # gone for good: written down, so no plan sends here again
+        raise RetiredError(message)
     raise UnavailableError(message)
 
 
