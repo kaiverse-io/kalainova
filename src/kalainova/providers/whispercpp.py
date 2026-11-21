@@ -54,6 +54,7 @@ class WhisperCpp(Provider):
     name = "whispercpp"
     capabilities = ("transcribe",)
     env_key = MODEL_ENV
+    env_file_key = MODEL_ENV
     free = True
     synthetic = False  # a reading of real audio
 
@@ -61,8 +62,6 @@ class WhisperCpp(Provider):
         missing = super().missing_env(capability)
         if shutil.which(COMMAND) is None:
             missing.append(f"{COMMAND} on PATH")
-        elif not missing and not Path(os.environ[MODEL_ENV]).is_file():
-            missing.append(f"{MODEL_ENV} names no file")
         return missing
 
     def transcribe(self, req: TranscribeRequest, ctx: Context) -> Result:

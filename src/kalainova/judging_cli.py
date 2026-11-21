@@ -19,9 +19,10 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
-from . import benchreport, verdicts
+from . import benchreport, config, verdicts
 from .bar import judges
 from .jobfs import ContractError, Job, home, open_job
 
@@ -59,8 +60,10 @@ def add_parsers(sub: Any) -> None:
     verdict.add_argument("--reason", default="", choices=("", *verdicts.REASONS),
                          help="what the verdict is about, as one label")  # fmt: skip
     check = sub.add_parser("song-check", help="a song take against its own plan, as cards")
-    check.add_argument("job")
+    check.add_argument("job", nargs="?", help="a job; leave out to read a file with --file")
     check.add_argument("--take", type=int, help="the take to read; the chosen one by default")
+    check.add_argument("--file", help="a song audio file from anywhere, made by any tool")
+    check.add_argument("--song", help="the song file (json) the audio was made from; with --file")
     sub.add_parser("signals")
     sub.add_parser("agreement")
     sub.add_parser("review-set")
@@ -75,6 +78,10 @@ def _song_check(a: argparse.Namespace) -> int:
     from .bar import song as musicbar
     from .editor import beats
 
+    if a.file:
+        return _song_check_file(a)
+    if not a.job:
+        raise ContractError("song-check needs a job, or --file and --song")
     job = open_job(a.job)
     song = job.read("song")
     entry = takes.load(job)["shots"].get("song") or {}
@@ -111,6 +118,57 @@ def _song_check(a: argparse.Namespace) -> int:
         print(f"kick enters at {measured.get('kick_enters_sec')} s; syncopation "
               f"{measured.get('syncopation', 'not read')} (a reading, not a limit)")  # fmt: skip
     print(f"{job.id} take {take['n']}: {len(cards)} card(s), kept in {out}")
+    return 0
+
+
+def _free_reader(base: Any, name: str) -> bool:
+    try:
+        p = base.get(name)
+    except KeyError:
+        return False
+    return bool(p.free and "transcribe" in p.capabilities)
+
+
+def _song_check_file(a: argparse.Namespace) -> int:
+    """The same readings and cards for a song this engine did not make, so any song, from any
+    tool, is held to the same plan. Nothing is spent: the words are read by a free local
+    transcriber, and nothing is written beside the file."""
+    from .bar import groove, plan
+    from .bar import song as musicbar
+    from .editor import beats
+    from .providers import base
+    from .providers.contract import TranscribeRequest
+    from .providers.results import Context
+
+    if not a.song:
+        raise ContractError("--file needs --song, the song file the audio was made from")
+    audio, song = Path(a.file), json.loads(Path(a.song).read_text())
+    if not audio.is_file():
+        raise ContractError(f"no such file: {audio}")
+    heard = None
+    local = [  # free readers only: a review spends nothing
+        n
+        for n in dict.fromkeys([*config.preference("transcribe"), "whispercpp", "mac"])
+        if _free_reader(base, n)
+    ]
+    try:
+        provider = base.resolve("transcribe", local)
+        words = provider.transcribe(TranscribeRequest(src=audio), Context()).words
+        heard = [dict(w) for w in words]
+    except (LookupError, RuntimeError, OSError) as exc:
+        print(f"the words were not read, so the word readings are left out: {exc}")
+    report = musicbar.measure(audio, song, heard)
+    for r in report["readings"]:
+        print(f"{'ok  ' if r['ok'] else 'MISS'} {r['id']:<30} {r['value']!s:<12} {r['limit']}")
+    print(f"{report['met']}/{report['total']} readings met; score {musicbar.score(report)}")
+    pcm = beats._pcm(audio)
+    cards = plan.energy_cards(plan.profile(pcm, song), song)[1] + plan.key_cards(pcm, song)[1]
+    cards += plan.pronounce_cards(song, heard or []) + plan.words_cards(song, heard or [])
+    cards += groove.kick_cards(pcm, song) + groove.build_cards(pcm, song)
+    for card in cards:
+        print(f"{card['at']:>5}  {card['section']}: planned {card['planned']}")
+        print(f"       measured {card['measured']}\n       fix: {card['fix']}")
+    print(f"{audio.name}: {len(cards)} card(s)")
     return 0
 
 

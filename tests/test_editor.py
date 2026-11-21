@@ -68,10 +68,10 @@ def test_footage_edit_rejects_bad_takes(tmp_path, monkeypatch):
     src = tmp_path / "in"
     src.mkdir()
     files = [
-        clip(src / "a_good.mp4", 1, dur=3, size=(320, 180)),
-        clip(src / "b_shaky.mp4", 2, dur=3, shake=6, size=(320, 180)),
-        clip(src / "c_good.mp4", 5, dur=3, size=(320, 180)),
-        clip(src / "d_dark.mp4", 4, dur=3, dark=0.2, size=(320, 180)),
+        clip(src / "a_good.mp4", 1, dur=2, size=(320, 180)),
+        clip(src / "b_shaky.mp4", 2, dur=2, shake=6, size=(320, 180)),
+        clip(src / "c_good.mp4", 5, dur=2, size=(320, 180)),
+        clip(src / "d_dark.mp4", 4, dur=2, dark=0.2, size=(320, 180)),
     ]
     photo = src / "e_photo.jpg"
     landscape(7, 800, 533).save(photo)
@@ -107,7 +107,7 @@ def test_footage_edit_rejects_bad_takes(tmp_path, monkeypatch):
     assert info["settings"]["grade"] == "warm"
 
 
-def _long_job(tmp_path, monkeypatch, note):
+def _long_job(tmp_path, monkeypatch, note, segments=None):
     from footage_fixtures import talk
 
     from kalainova.editor import analyze, direct
@@ -116,9 +116,14 @@ def _long_job(tmp_path, monkeypatch, note):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     src = tmp_path / "src"
     src.mkdir()
+    segs = (
+        [(3.0, True), (4.0, False), (3.0, True), (4.0, False), (3.0, True)]
+        if segments is None
+        else segments
+    )
     take = talk(
         src / "a_talk.mp4",
-        [(3.0, True), (4.0, False), (3.0, True), (4.0, False), (3.0, True)],
+        segs,
         size=(320, 180),
     )
     folder = tmp_path / "jobs" / "lf"
@@ -170,7 +175,7 @@ def test_a_long_form_edit_with_no_footage_left_is_refused(tmp_path, monkeypatch)
     from kalainova.jobfs import ContractError
 
     with pytest.raises(ContractError, match="no long-form footage"):
-        _long_job(tmp_path, monkeypatch, "long form, drop talk")
+        _long_job(tmp_path, monkeypatch, "long form, drop talk", segments=[(0.5, True)])
 
 
 def _moment(sig, source="s1"):
@@ -256,7 +261,7 @@ def test_a_reel_cuts_in_a_phrase_and_warns_about_tiny_sources(tmp_path, monkeypa
         monkeypatch.delenv(k, raising=False)
     src = tmp_path / "in"
     src.mkdir()
-    files = [clip(src / f"{i}.mp4", i + 10, dur=8, size=(320, 180)) for i in range(8)]
+    files = [clip(src / f"{i}.mp4", i + 10, dur=3, size=(320, 180)) for i in range(8)]
     folder = tmp_path / "jobs" / "ph"
     folder.mkdir(parents=True)
     (folder / "job.json").write_text(

@@ -175,12 +175,23 @@ def test_a_fallback_font_is_refused():
     )
 
 
-def _local_job(tmp_path, monkeypatch, **edit_opts):
+def _local_job(tmp_path, monkeypatch, beats=None, **edit_opts):
     monkeypatch.setenv("KALAINOVA_OUT", str(tmp_path / "out"))
     for key in ("ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "FAL_KEY"):
         monkeypatch.delenv(key, raising=False)
     folder = tmp_path / "jobs" / "pic"
     folder.mkdir(parents=True)
+    default_beats = [
+        {"id": "b1", "role": "hook", "text": "First line here.", "on_screen": "Open"},
+        {
+            "id": "b2",
+            "role": "body",
+            "text": "A second thought lands.",
+            "on_screen": "Two",
+        },
+        {"id": "b3", "role": "payoff", "text": "And it ends well.", "on_screen": "End"},
+    ]
+    resolved_beats = default_beats if beats is None else beats
     (folder / "job.json").write_text(
         json.dumps(
             {
@@ -193,7 +204,7 @@ def _local_job(tmp_path, monkeypatch, **edit_opts):
                 "status": "draft",
                 "skip_funded": True,
                 "cost_cap": 0,
-                "brief": {"subject": "test", "duration_sec": 6},
+                "brief": {"subject": "test", "duration_sec": max(3, len(resolved_beats) * 2)},
                 "edit": edit_opts,
             }
         )
@@ -203,16 +214,7 @@ def _local_job(tmp_path, monkeypatch, **edit_opts):
             {
                 "schema_version": "0.1",
                 "job_id": "pic",
-                "beats": [
-                    {"id": "b1", "role": "hook", "text": "First line here.", "on_screen": "Open"},
-                    {
-                        "id": "b2",
-                        "role": "body",
-                        "text": "A second thought lands.",
-                        "on_screen": "Two",
-                    },
-                    {"id": "b3", "role": "payoff", "text": "And it ends well.", "on_screen": "End"},
-                ],
+                "beats": resolved_beats,
             }
         )
     )
@@ -242,7 +244,11 @@ def test_a_render_meets_the_picture_bar(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_every_intermediate_is_lossless_ten_bit(tmp_path, monkeypatch):
-    job = _local_job(tmp_path, monkeypatch)
+    job = _local_job(
+        tmp_path,
+        monkeypatch,
+        beats=[{"id": "b1", "role": "hook", "text": "First line here.", "on_screen": "Open"}],
+    )
     _render(job)
     video = media.stream_info(job.work / "seg" / "00.mp4", "video")
     assert video["pix_fmt"] == "yuv444p10le"
@@ -479,11 +485,12 @@ def test_a_plan_accepts_a_box_at_the_edges_of_the_frame():
 
 @pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_a_piece_with_nothing_to_burn_in_keeps_no_second_copy_of_its_picture(tmp_path, monkeypatch):
-    job = _local_job(tmp_path, monkeypatch, captions=False)
-    packet = json.loads(job.path("script_packet").read_text())
-    for beat in packet["beats"]:
-        beat.pop("on_screen")
-    job.path("script_packet").write_text(json.dumps(packet))
+    job = _local_job(
+        tmp_path,
+        monkeypatch,
+        captions=False,
+        beats=[{"id": "b1", "role": "hook", "text": "First line here."}],
+    )
     final = _render(job)
     assert "overlay_text" not in [s["op"] for s in job.read("render_plan")["steps"]]
     assert final.exists()

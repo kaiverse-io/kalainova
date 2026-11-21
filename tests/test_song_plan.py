@@ -146,3 +146,40 @@ def test_a_take_is_read_against_its_plan_and_carded_by_command(tmp_path, studio,
     assert (job.work / take["file"]).with_suffix(".cards.json").exists()
     measured = json.loads((job.work / take["file"]).with_suffix(".groove.json").read_text())
     assert "kick_enters_sec" in measured  # the groove is read beside the plan
+
+
+def _cover_art_song(dst, song_seconds=12):
+    """An m4a like the ones music tools export: a tone with a cover picture attached."""
+
+    from kalainova import media
+
+    cover = dst.with_suffix(".png")
+    from PIL import Image
+
+    Image.new("RGB", (64, 64), (200, 40, 40)).save(cover)
+    media.run(["-f", "lavfi", "-i", f"sine=frequency=220:duration={song_seconds}", "-i", str(cover),
+               "-map", "0:a", "-map", "1:v", "-c:a", "aac", "-c:v", "mjpeg",
+               "-disposition:v", "attached_pic", str(dst)])  # fmt: skip
+
+
+def test_cover_art_on_an_audio_file_is_not_a_picture_track(tmp_path):
+    from kalainova import bar, media
+
+    song = tmp_path / "song.m4a"
+    _cover_art_song(song)
+    assert "width" not in media.summarize(song)  # the cover is not video
+    assert all(not r["id"].startswith("picture.") for r in bar.measure(song)["readings"])
+
+
+def test_a_song_from_another_tool_is_checked_by_file_and_song_file(tmp_path, capsys):
+    from kalainova.__main__ import main
+
+    audio = tmp_path / "other.m4a"
+    _cover_art_song(audio)
+    plan_file = tmp_path / "song.json"
+    plan_file.write_text(json.dumps({**_song([{"kind": "intro", "bars": 6}]), "instrumental": True,
+                                     "duration_sec": 12}))  # fmt: skip
+    assert main(["song-check", "--file", str(audio), "--song", str(plan_file)]) == 0
+    assert "readings met" in capsys.readouterr().out
+    assert main(["song-check", "--file", str(audio)]) != 0  # a file needs its song file
+    assert "--song" in capsys.readouterr().err

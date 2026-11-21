@@ -57,29 +57,32 @@ def clip(
     scene = landscape(seed, int(size[0] * 1.4), int(size[1] * 1.4))
     if blur:
         scene = scene.filter(ImageFilter.GaussianBlur(blur))
-    still = dst.with_suffix(".scene.png")
-    scene.save(still)
     n = int(dur * fps)
     W, H = size
     sw, sh = scene.size
     rng = np.random.default_rng(seed + 99)
     jx = np.cumsum(rng.normal(0, shake, n)) if shake else np.zeros(n)
     jy = np.cumsum(rng.normal(0, shake, n)) if shake else np.zeros(n)
-    frames_dir = dst.with_suffix("")
-    frames_dir.mkdir(exist_ok=True)
     arr = np.asarray(scene, np.float32)
+    raw = bytearray()
     for i in range(n):
         t = i / max(n - 1, 1)
         x = int((sw - W) * (0.15 + 0.7 * t) + jx[i]) % max(sw - W, 1)
         y = int((sh - H) * 0.5 + jy[i]) % max(sh - H, 1)
         f = arr[y : y + H, x : x + W] * dark
-        Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).save(frames_dir / f"{i:04d}.png")
+        raw.extend(np.clip(f, 0, 255).astype(np.uint8).tobytes())
     media.run(
         [
-            "-framerate",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{W}x{H}",
+            "-r",
             str(fps),
             "-i",
-            str(frames_dir / "%04d.png"),
+            "pipe:0",
             "-f",
             "lavfi",
             "-i",
@@ -94,12 +97,9 @@ def clip(
             "-c:a",
             "aac",
             str(dst),
-        ]
+        ],
+        input=bytes(raw),
     )
-    for f in frames_dir.iterdir():
-        f.unlink()
-    frames_dir.rmdir()
-    still.unlink()
     return dst
 
 

@@ -51,6 +51,7 @@ def _cap_subprocess_threads() -> None:
         "MKL_NUM_THREADS",
         "OPENBLAS_NUM_THREADS",
         "NUMEXPR_NUM_THREADS",
+        "KALAINOVA_FFMPEG_THREADS",
     ):
         os.environ[var] = "1"
 

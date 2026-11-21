@@ -350,6 +350,8 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
     │                                       │  │          │
     │                                       │  └─▶ kitrules ◀── scripts/check.py
     │                                       └─▶ providers
+    ├─▶ job_cli ─────────▶ assets, edit, genres, plan, qa, qachecks, render, resources, trace, jobfs
+    ├─▶ editor_cli ──────▶ qachecks, render, jobfs
     ├─▶ trace: labels each command's stage (and each stage of make)
     ├─▶ production_cli ──▶ dub, nle, provenance, qa, research, shotmake, shots,
     │                      songs, takes, timeline, editor, config, assets, preproduction,
@@ -425,6 +427,12 @@ Static view of top-level modules, an arrow wherever one imports another. `just c
 
 ### __main__
 The command line. Parses arguments and calls a stage. Holds no rules.
+
+### editor_cli
+Commands for the editing arm: `ingest` (split and score source footage), `edit` and `revise` (cut and render from comments), `shots` (list footage scores), `stock` (fetch free licensed clips), and `reel` (turn a brief into a cut reel).
+
+### job_cli
+Core job lifecycle commands: `new`, `make`, `stage`, `clean`, `status`, `review`, `comic`, `story`, `bar`, `host`, `providers`, `intake`, `approve`, `publish`, and `measure`. Encapsulates stage dispatch and report generation.
 
 ### studio_cli
 Commands for kits, streams, canon, schedules, requests, the look sheet, and `pin`, which sets which provider (and for a song which model, and how many takes) makes one part of a job, so `job.json` is not edited by hand. It registers `signoff_cli`'s commands first, so the sign-off sits with the studio's other commands, and `knowledge_cli`'s after them.

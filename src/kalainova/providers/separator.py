@@ -48,14 +48,9 @@ class Separator(Provider):
     name = "separator"
     capabilities = ("separate",)
     env_key = COMMAND_ENV
+    env_file_key = COMMAND_ENV
     free = True
     synthetic = False  # a split of the audio it is given; that audio's record says how it was made
-
-    def missing_env(self, capability: str = "") -> list[str]:
-        missing = super().missing_env(capability)
-        if not missing and not Path(os.environ[COMMAND_ENV]).is_file():
-            missing.append(f"{COMMAND_ENV} names no file")
-        return missing
 
     def separate(self, req: SeparateRequest, ctx: Context) -> Result:
         model = ctx.model or model_for("separator", "separate") or DEFAULT_MODEL
