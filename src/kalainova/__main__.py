@@ -1,7 +1,9 @@
 """kalainova CLI.
 
-  uv run kalainova new <id> --strategy generated --identity <label> --subject "..." [--media video,audio,text]
-  uv run kalainova make <job>          plan -> assets -> edit -> render -> qa (idempotent; --force redoes)
+  uv run kalainova new <id> --strategy generated --identity <label> --subject "..."
+                            [--media video,audio,text]
+  uv run kalainova make <job>          plan -> assets -> edit -> render -> qa
+                                       (idempotent; --force redoes)
   uv run kalainova stage <job> <stage>  run one stage: plan|assets|edit|compile|render|qa
   uv run kalainova approve <job> --reviewer <name> --platforms youtube,instagram
   uv run kalainova publish <job> <platform> [--live]
@@ -22,7 +24,8 @@ What stays the same (see `kalainova kit --help`, `stream --help`):
   kalainova schedule <stream> <date> "<brief>"
   kalainova request <stream> "<brief>" [--cast a,b]   a locked job for that stream
 
-Before money leaves (signoff_cli.py, ADR 0022): kalainova rehearse|limits|package|packages|sign|stop|resume
+Before money leaves (signoff_cli.py, ADR 0022):
+  kalainova rehearse|limits|package|packages|sign|stop|resume
 
 Shot by shot, songs, research, and what comes after a cut (see production_cli.py):
   kalainova shotplan|takes|take|retake|bench|sheet|filmstrip|cutcheck|export <job> ...
@@ -36,462 +39,49 @@ Editing arm (your own footage):
 
 Stock (free-license footage, needs PEXELS_API_KEY and/or PIXABAY_API_KEY and network):
   uv run kalainova stock <job> "Cape Town" [--count 10]          fetch, credit, ingest
-  uv run kalainova reel <id> "Cape Town" "20s reel, cinematic, warm, title: Cape Town"   new job -> stock -> edit
+  uv run kalainova reel <id> "Cape Town" "20s reel, cinematic, warm, title: Cape Town"
+                            new job -> stock -> edit
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import shutil
 import sys
-import time
-from pathlib import Path
 
-from . import (
-    assets,
-    edit,
-    genres,
-    plan,
-    production_cli,
-    qa,
-    qachecks,
-    render,
-    resources,
-    studio_cli,
-    trace,
-)
-from .jobfs import ContractError, home, open_job
+from . import editor_cli, job_cli, production_cli, studio_cli, trace
+from .job_cli import STAGES, _bar, _clean, _document, _make, _new, open_job  # noqa: F401
+from .jobfs import ContractError
 
 
-def _new(a) -> int:
-    from . import fingerprint
-
-    dst = home() / "jobs" / a.id
-    if dst.exists():
-        print(f"{dst} exists", file=sys.stderr)
-        return 1
-    shutil.copytree(resources.path("jobs", "_template"), dst)
-    (dst / "README.md").unlink(missing_ok=True)
-    data = json.loads((dst / "job.json").read_text())
-    data.update(
-        {
-            "job_id": a.id,
-            "strategy": a.strategy,
-            "status": "draft",
-            "distribution_identity": a.identity,
-            "media": a.media.split(","),
-            "rights": a.rights,
-            "cost_cap": a.cost_cap,
-            "brief": {
-                "subject": a.subject,
-                "audience": a.audience or "",
-                "outcome": a.outcome or "",
-                "duration_sec": a.duration,
-            },
-            "fingerprint": fingerprint.fingerprint(),
-        }
-    )
-    if a.genre:
-        genres.apply(data["brief"], a.genre)
-    (dst / "job.json").write_text(json.dumps(data, indent=2) + "\n")
-    print(dst)
-    return 0
-
-
-STAGES = {
-    "plan": lambda j, f: plan.run(j, force=f),
-    "assets": lambda j, f: assets.run(j, force=f),
-    "edit": lambda j, f: edit.run(j, force=f),
-    "compile": lambda j, f: render.compile_plan(j),
-    "render": lambda j, f: render.execute(j, cache=not f),
-    "qa": lambda j, f: qa.run(j),
-}
-
-
-def _make(a) -> int:
-    job = open_job(a.job)
-    order = ["plan", "assets", "edit", "compile", "render", "qa"]
-    for st in order[order.index(a.from_stage) :]:
-        trace.relabel(stage=st)
-        t0 = time.time()
-        STAGES[st](job, a.force)
-        print(f"  {st:<8} ok  {time.time() - t0:5.1f}s")
-        if st == "render":
-            job.set_status("rendered")
-    report = job.read("qa")
-    for c in report["checks"]:
-        if c["status"] != "pass":
-            print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"{qachecks.headline(report)}  ->  {job.artifact()}")
-    _print_bar(report)
-    print(f"spent {job.spent():.4f} of cap {job.job.get('cost_cap')}")
-    print(f'record verdict: kalainova verdict {job.id} accept|fix|reject --reviewer NAME --note ""')
-    return 0 if report["passed"] else 2
-
-
-def _clean(a) -> int:
-    """Free the picture chain's lossless intermediates. Rendering again makes them again."""
-    from .render import cache as render_cache
-
-    job = open_job(a.job)
-    if not job.has("render_plan"):
-        print(f"{job.id}: not rendered, nothing to clean")
-        return 0
-    files, freed = render_cache.clean(job.work, job.read("render_plan"), dry_run=a.dry_run)
-    print(
-        f"{job.id}: {len(files)} files, {'would free' if a.dry_run else 'freed'} {freed / 1e9:.2f} GB"
-    )
-    if files and not a.dry_run:
-        print(
-            "  the final, its records, every asset and take stay; `make <job> --from render` remakes these"
-        )
-    return 0
-
-
-def _render_edit(job) -> int:
-    from .editor import direct
-
-    t0 = time.time()
-    info = direct.run(job)
-    print(
-        f"  direct   ok  {time.time() - t0:5.1f}s  {info['cuts']} cuts, {info['duration_sec']}s"
-        + (f", {info['bpm']} bpm" if info.get("bpm") else "")
-    )
-    if info.get("note"):
-        print(f"  note     {info['note']}")
-    s = info["settings"]
-    print(
-        f"  settings {s['format']} · {s['pace']} · grade {s['grade']} · order {s['order']}"
-        + (f" · title '{s['title']}'" if s["title"] else "")
-        + (f" · drop {s['drop']}" if s["drop"] else "")
-    )
-    for st in ("compile", "render", "qa"):
-        t0 = time.time()
-        STAGES[st](job, False)
-        print(f"  {st:<8} ok  {time.time() - t0:5.1f}s")
-        if st == "render":
-            job.set_status("rendered")
-    report = job.read("qa")
-    for c in report["checks"]:
-        if c["status"] != "pass":
-            print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"{qachecks.headline(report)}  ->  {job.artifact()}")
-    _print_bar(report)
-    return 0 if report["passed"] else 2
-
-
-def _print_bar(report: dict) -> None:
-    if report.get("bar"):
-        from . import bar
-
-        print(f"studio bar: {bar.summary_line(report['bar'])}")
-
-
-def _document(a) -> int:
-    from . import comic, story, writers
-
-    job = open_job(a.job)
-    writers.ensure(job, a.cmd)
-    final = (comic if a.cmd == "comic" else story).run(job)
-    report = qa.run(job)
-    for c in report["checks"]:
-        if c["status"] != "pass":
-            print(f"  [{c['status']}] {c['id']}: {c['detail']}")
-    print(f"{qachecks.headline(report)}  ->  {final}")
-    return 0 if report["passed"] else 2
-
-
-def _bar(a) -> int:
-    """The studio bar for any file or job, so a piece from anywhere can be held to the same numbers."""
-    from pathlib import Path
-
-    from . import bar, media
-
-    target = Path(a.target)
-    if target.is_file():
-        try:
-            report = bar.measure(target)
-        except media.MediaError as exc:
-            raise ContractError(f"the studio bar cannot read it: {exc}") from exc
-    else:
-        job = open_job(a.target)
-        report = bar.measure_job(job.work, job.read("edit_manifest"), job.read("asset_manifest"))
-    for r in report["readings"]:
-        mark = "ok  " if r["ok"] else "MISS"
-        print(f"{mark} {r['id']:<30} {str(r['value'])[:26]:<28} {r['limit']}")
-    print(f"studio bar: {bar.summary_line(report)}")
-    kit = getattr(a, "kit", None)  # callers that predate --kit pass no such field
-    if kit:
-        print(_identity_line(target, kit))
-    return 0 if report["passed"] else 2
-
-
-def _identity_line(picture: Path, kit: str) -> str:
-    """A picture face by face, or a video frame by frame, against a frozen kit's faces."""
-    from . import kits
-    from .bar import identity
-
-    kit_id, _, ver = kit.partition("@")
-    version = int(ver) if ver else max(kits.versions(home(), kit_id), default=0)
-    refs = [
-        kits.blob_path(home(), e) for e in kits.load(home(), kit_id, version)["identity"]["refs"]
-    ]
-    return identity.kit_line(picture, refs, f"{kit_id}@{version}")
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="kalainova")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    job_cli.add_parsers(sub)
+    editor_cli.add_parsers(sub)
+    studio_cli.add_parsers(sub)
+    production_cli.add_parsers(sub)
+    return p
 
 
 @trace.scoped
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="kalainova")
-    sub = p.add_subparsers(dest="cmd", required=True)
-    n = sub.add_parser("new")
-    n.add_argument("id")
-    n.add_argument("--strategy", default="generated")
-    n.add_argument("--identity", required=True)
-    n.add_argument("--subject", required=True)
-    n.add_argument("--audience")
-    n.add_argument("--outcome")
-    n.add_argument("--media", default="video,audio,text")
-    n.add_argument("--rights", default="owned")
-    n.add_argument("--duration", type=int, default=35)
-    n.add_argument("--cost-cap", type=float, default=5.0)
-    n.add_argument("--genre", help="a song's genre profile, from genres in the studio config")
-    m = sub.add_parser("make")
-    m.add_argument("job")
-    m.add_argument("--force", action="store_true")
-    m.add_argument("--from", dest="from_stage", default="plan", choices=list(STAGES))
-    s = sub.add_parser("stage")
-    s.add_argument("job")
-    s.add_argument("stage", choices=list(STAGES))
-    s.add_argument("--force", action="store_true")
-    ap = sub.add_parser("approve")
-    ap.add_argument("job")
-    ap.add_argument("--reviewer", required=True)
-    ap.add_argument("--platforms", required=True)
-    ap.add_argument("--notes", default="")
-    ap.add_argument("--privacy", default="public", choices=["public", "unlisted", "private"])
-    pb = sub.add_parser("publish")
-    pb.add_argument("job")
-    pb.add_argument("platform")
-    pb.add_argument("--live", action="store_true")
-    pb.add_argument("--at", default=None, help="UTC time to go public; platforms that can hold it")
-    ms = sub.add_parser("measure")
-    ms.add_argument("job")
-    ms.add_argument(
-        "--force", action="store_true", help="snapshot before 48h; does not set views_48h"
-    )
-    sub.add_parser("status").add_argument("job")
-    cl = sub.add_parser("clean", help="delete rebuildable render intermediates")
-    cl.add_argument("job")
-    cl.add_argument("--dry-run", action="store_true")
-    rv = sub.add_parser("review", help="a page of every take; --blind hears song jobs blind")
-    rv.add_argument("jobs", nargs="+")
-    rv.add_argument("--blind", action="store_true")
-    rv.add_argument("--rank", help="a blind set's letters, best first, such as C,A,B; tie with =")
-    rv.add_argument("--reviewer", default="")
-    rv.add_argument("--judge", action="store_true", help="score song takes with config's judges")
-    rv.add_argument("--shot", default="song", help="with --blind: song, or master for its options")
-    sub.add_parser("comic", help="lay out and letter a comic from comic_script.json").add_argument(
-        "job"
-    )
-    sub.add_parser("story", help="typeset a book and an EPUB from story.json").add_argument("job")
-    bar_cmd = sub.add_parser("bar", help="hold a job or any file to the studio bar")
-    bar_cmd.add_argument("target")
-    bar_cmd.add_argument("--kit", help="KIT or KIT@VERSION: compare the faces in a picture with it")
-    sub.add_parser("host", help="check host system support and prerequisite capabilities")
-    pv = sub.add_parser("providers", help="what is ready; --check makes one real, paid call each")
-    pv.add_argument("--check", metavar="PROVIDER", help="prove an adapter against the live service")
-    pv.add_argument(
-        "--job", help="with --check: a job with a cost_cap, so the ledger holds the spend"
-    )
-    pv.add_argument("--capability", help="with --check: one capability only")
-    pv.add_argument("--spend", action="store_true", help="with --check: yes, make the paid calls")
-    ig = sub.add_parser("ingest")
-    ig.add_argument("job")
-    ig.add_argument("inputs", nargs="+")
-    for name in ("edit", "revise"):
-        e = sub.add_parser(name)
-        e.add_argument("job")
-        e.add_argument("note", nargs="?", default="")
-    sub.add_parser("shots").add_argument("job")
-    it = sub.add_parser("intake")
-    it.add_argument("job")
-    it.add_argument("file")
-    it.add_argument("--record", required=True)
-    st = sub.add_parser("stock")
-    st.add_argument("job")
-    st.add_argument("subject")
-    st.add_argument("--count", type=int, default=10)
-    rl = sub.add_parser("reel")
-    rl.add_argument("id")
-    rl.add_argument("subject")
-    rl.add_argument("note", nargs="?", default="")
-    rl.add_argument("--identity", default="stock-reels")
-    rl.add_argument("--count", type=int, default=10)
-    studio_cli.add_parsers(sub)
-    production_cli.add_parsers(sub)
+    p = build_parser()
     a = p.parse_args(argv)
-    trace.relabel(stage=getattr(a, "stage", None) or a.cmd)  # every call it makes says so
+    trace.relabel(stage=getattr(a, "stage", None) or a.cmd)
     try:
-        handled = studio_cli.dispatch(a)
-        if handled is None:
-            handled = production_cli.dispatch(a)
-        if handled is not None:
-            return handled
-        if a.cmd == "new":
-            return _new(a)
-        if a.cmd == "make":
-            return _make(a)
-        if a.cmd == "bar":
-            return _bar(a)
-        if a.cmd == "clean":
-            return _clean(a)
-        if a.cmd == "review":
-            from . import reviewpage
-
-            print(reviewpage.cli(a.jobs, a.blind, a.rank, a.reviewer, judge=a.judge, shot=a.shot))
-            return 0
-        if a.cmd in ("comic", "story"):
-            return _document(a)
-        if a.cmd == "stage":
-            out = STAGES[a.stage](open_job(a.job), a.force)
-            print(out if not isinstance(out, dict) else "ok")
-            return 0
-        if a.cmd == "ingest":
-            from pathlib import Path
-
-            from .editor import analyze
-
-            files = []
-            for item in a.inputs:
-                pth = Path(item)
-                files += sorted(x for x in pth.rglob("*") if x.is_file()) if pth.is_dir() else [pth]
-            fo = analyze.ingest(open_job(a.job), files)
-            print(f"{len(fo['sources'])} sources, {len(fo['shots'])} shots")
-            return 0
-        if a.cmd in ("edit", "revise"):
-            from .editor import direct
-
-            job = open_job(a.job)
-            if a.note:
-                direct.add_note(job, a.note)
-            return _render_edit(job)
-        if a.cmd in ("stock", "reel"):
-            from . import stock as stock_mod
-            from .editor import analyze, direct
-
-            if a.cmd == "reel":
-                jdir = home() / "jobs" / a.id
-                if not jdir.exists():
-                    jdir.mkdir(parents=True)
-                    (jdir / "job.json").write_text(
-                        json.dumps(
-                            {
-                                "schema_version": "0.1",
-                                "job_id": a.id,
-                                "strategy": "owned-derivative",
-                                "media": ["video", "audio"],
-                                "rights": "licensed",
-                                "distribution_identity": a.identity,
-                                "status": "draft",
-                                "cost_cap": 5,
-                                "brief": {"subject": a.subject},
-                            },
-                            indent=2,
-                        )
-                        + "\n"
-                    )
-                job = open_job(jdir)
-            else:
-                job = open_job(a.job)
-            paths = stock_mod.fetch(job, a.subject, count=a.count)
-            print(f"  stock    {len(paths)} clips  ({stock_mod.credits(job)[:120]}...)")
-            fo = analyze.ingest(job, paths)
-            print(f"  ingest   {len(fo['shots'])} shots")
-            if a.cmd == "stock":
-                return 0
-            if a.note:
-                direct.add_note(job, a.note)
-            return _render_edit(job)
-        if a.cmd == "intake":
-            from pathlib import Path
-
-            from . import intake
-
-            job = open_job(a.job)
-            print(intake.run(job, Path(a.file), json.loads(Path(a.record).read_text())))
-            return 0
-        if a.cmd == "shots":
-            import json as _j
-
-            job = open_job(a.job)
-            fo = _j.loads((job.folder / "footage.json").read_text())
-            names = {x["id"]: x["name"] for x in fo["sources"]}
-            for sh in sorted(fo["shots"], key=lambda x: -x["quality"]):
-                sc = sh["scores"]
-                print(
-                    f"{sh['id']:<9} q={sh['quality']:.2f}  sharp={sc['sharpness']:.2f} exp={sc['exposure']:.2f} "
-                    f"color={sc['colorfulness']:.2f} motion={sc['motion']:.2f} shake={sc['shake']:.2f}  {names[sh['source']]}"
-                )
-            return 0
-        from . import publish as pub
-
-        if a.cmd == "approve":
-            r = pub.approve(
-                open_job(a.job),
-                a.reviewer,
-                platforms=a.platforms.split(","),
-                notes=a.notes,
-                privacy=a.privacy,
-            )
-            print(json.dumps(r, indent=2))
-            return 0
-        if a.cmd == "publish":
-            print(
-                json.dumps(
-                    pub.publish(open_job(a.job), a.platform, dry_run=not a.live, publish_at=a.at),
-                    indent=2,
-                )
-            )
-            return 0
-        if a.cmd == "measure":
-            print(json.dumps(pub.measure(open_job(a.job), force=a.force), indent=2))
-            return 0
-        if a.cmd == "status":
-            job = open_job(a.job)
-            from . import preproduction
-            from .jobfs import CONTRACT_FILES
-
-            gate = preproduction.waiting_gate(job)
-            line = f"{job.id}: status={job.job['status']} spent={job.spent():.4f}"
-            if gate:
-                line += f" gate={gate}"
-            print(line)
-            if gate:
-                print(f"  waiting at gate: {gate}")
-            for k, v in CONTRACT_FILES.items():
-                print(f"  {'x' if job.has(k) else ' '} {v}")
-            return 0
-        if a.cmd == "host":
-            from . import host
-
-            return host.cli()
-        if a.cmd == "providers":
-            from .providers import base, check
-
-            if a.check:
-                return check.cli(a.check, a.job, a.capability, a.spend)
-
-            for name in base.names():
-                pr = base.get(name)
-                print(
-                    f"{name:<11} {'ready' if pr.available() else 'needs ' + ', '.join(pr.missing_env()):<26} {', '.join(pr.capabilities)}"
-                )
-            return 0
+        for handler in (
+            studio_cli.dispatch,
+            production_cli.dispatch,
+            editor_cli.dispatch,
+            job_cli.dispatch,
+        ):
+            handled = handler(a)
+            if handled is not None:
+                return handled
+        return 1
     except ContractError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    return 1
 
 
 if __name__ == "__main__":

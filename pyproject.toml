@@ -69,7 +69,6 @@ ignore = ["S101"]
 # Debt from before the chassis stamp (ADR 0008). This list only shrinks, and new files never join it.
 "scripts/check.py" = ["C901", "E501", "E741", "S607"]
 "scripts/lint_docs.py" = ["C901", "E501"]
-"src/kalainova/__main__.py" = ["C901", "E501"]
 "src/kalainova/captions.py" = ["B007", "E501", "E741", "F841"]
 "src/kalainova/config.py" = ["E501"]
 "src/kalainova/edit.py" = ["B905", "C901", "E501"]
@@ -98,7 +97,6 @@ mypy_path = "src"
 # Debt from before the chassis stamp (ADR 0008). This list only shrinks, and new modules never join it.
 [[tool.mypy.overrides]]
 module = [
-    "kalainova.__main__",
     "kalainova.captions",
     "kalainova.config",
     "kalainova.edit",

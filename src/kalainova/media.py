@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -82,10 +83,25 @@ def has_filter(name: str) -> bool:
 
 
 def run(
-    args: list[str], *, cwd: str | Path | None = None, loglevel: str = "error"
+    args: list[str],
+    *,
+    cwd: str | Path | None = None,
+    loglevel: str = "error",
+    input: str | bytes | None = None,
 ) -> subprocess.CompletedProcess:
-    cmd = [FFMPEG, "-hide_banner", "-y", "-loglevel", loglevel, *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    cmd = [FFMPEG, "-hide_banner", "-y", "-loglevel", loglevel]
+    if threads := os.environ.get("KALAINOVA_FFMPEG_THREADS"):
+        cmd.extend(["-threads", threads])
+    cmd.extend(args)
+    if isinstance(input, bytes):
+        raw = subprocess.run(cmd, input=input, capture_output=True, cwd=cwd)
+        stdout = raw.stdout.decode("utf-8", errors="replace")
+        stderr = raw.stderr.decode("utf-8", errors="replace")
+        proc = subprocess.CompletedProcess(
+            args=raw.args, returncode=raw.returncode, stdout=stdout, stderr=stderr
+        )
+    else:
+        proc = subprocess.run(cmd, input=input, capture_output=True, text=True, cwd=cwd)
     if proc.returncode != 0:
         raise MediaError(
             f"ffmpeg failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stderr[-2000:]}"
@@ -186,7 +202,8 @@ def summarize(path: str | Path) -> dict:
     info = probe(path)
     out: dict = {}
     for s in info.get("streams", []):
-        if s.get("codec_type") == "video" and "width" not in out:
+        cover = bool((s.get("disposition") or {}).get("attached_pic"))  # not a picture track
+        if s.get("codec_type") == "video" and not cover and "width" not in out:
             out["width"] = int(s["width"])
             out["height"] = int(s["height"])
             num, _, den = s.get("avg_frame_rate", "0/1").partition("/")

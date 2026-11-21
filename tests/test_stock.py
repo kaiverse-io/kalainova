@@ -86,7 +86,7 @@ def test_reel_from_mocked_pexels(tmp_path, monkeypatch):
     monkeypatch.setenv("PEXELS_API_KEY", "test")
     monkeypatch.delenv("PIXABAY_API_KEY", raising=False)
     blobs = [
-        clip(tmp_path / f"c{i}.mp4", seed, dur=5, size=(320, 180)).read_bytes()
+        clip(tmp_path / f"c{i}.mp4", seed, dur=2, size=(320, 180)).read_bytes()
         for i, seed in enumerate((1, 5, 6))
     ]
 

@@ -74,6 +74,15 @@ def test_every_kind_of_judge_says_whether_any_is_configured(monkeypatch):
     assert lines == [f"{kind}: none configured" for kind in judges.KINDS]
 
 
+def test_engine_agreement_returns_empty_when_no_preferences(tmp_path):
+    assert judging_cli.engine_agreement(tmp_path) == {}
+
+
+def test_judge_line_reports_missing_components(tmp_path):
+    judge = judges.Judge("test_judge", (str(tmp_path / "missing"),))
+    assert "missing" in judging_cli._judge_line("sync", judge)
+
+
 def test_every_released_direction_is_pinned_so_its_text_cannot_change_under_its_version():
     assert knowledge.unpinned() == [], (
         "a direction's text changed under its version: give it a new version in "

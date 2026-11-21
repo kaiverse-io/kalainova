@@ -6,6 +6,7 @@ kalainova bench-report <job> <shot> [--only 5,7,10] [--again]  the labelled side
 kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]|--animatic]
                   [--preferred N --over M | --best N --among a,b,c] [--aspect lips]
 kalainova song-check <job> [--take N]            a song take against its own plan, as cards
+kalainova song-add <job> <audio> --by LABEL      a song made elsewhere, as a take
 kalainova signals                                which readings predict a person's verdict
 kalainova agreement                              which readings, and the engine's picks, follow
                                                  a person's preferences, aspect by aspect
@@ -19,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from . import benchreport, verdicts
@@ -59,58 +61,150 @@ def add_parsers(sub: Any) -> None:
     verdict.add_argument("--reason", default="", choices=("", *verdicts.REASONS),
                          help="what the verdict is about, as one label")  # fmt: skip
     check = sub.add_parser("song-check", help="a song take against its own plan, as cards")
-    check.add_argument("job")
+    check.add_argument("job", nargs="?", help="a job; leave out to read a file with --file")
     check.add_argument("--take", type=int, help="the take to read; the chosen one by default")
+    check.add_argument("--file", help="a song audio file from anywhere, made by any tool")
+    check.add_argument("--song", help="the song file (json) the audio was made from; with --file")
+    add = sub.add_parser("song-add", help="a song made elsewhere, as a take read like any other")
+    add.add_argument("job")
+    add.add_argument("audio")
+    add.add_argument("--by", required=True, help="what made it, as one label")
     sub.add_parser("signals")
     sub.add_parser("agreement")
     sub.add_parser("review-set")
     sub.add_parser("judges")
 
 
-def _song_check(a: argparse.Namespace) -> int:
-    """Cards for what a song take missed of its own plan: each says what was asked, what was
-    measured, where, and the fix. Kept beside the take, and printed; nothing blocks on them."""
+def _print_cards(cards: list[dict[str, Any]]) -> None:
+    for card in cards:
+        print(f"{card['at']:>5}  {card['section']}: planned {card['planned']}")
+        print(f"       measured {card['measured']}\n       fix: {card['fix']}")
+
+
+def _resolve_song_take(job: Job, take_num: int | None) -> dict[str, Any]:
+    from . import takes
+
+    entry = takes.load(job)["shots"].get("song") or {}
+    chosen = takes.chosen(job, "song")
+    take = (
+        next((t for t in entry.get("takes", []) if t["n"] == take_num), None)
+        if take_num is not None
+        else chosen
+    )
+    if take is None:
+        label = str(take_num) if take_num is not None else "chosen"
+        raise ContractError(f"{job.id}: no song take {label}")
+    return take
+
+
+def _build_song_cards(
+    job: Job, take: dict[str, Any], path: Path, song: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     from . import takes
     from .bar import groove, plan
     from .bar import song as musicbar
     from .editor import beats
 
-    job = open_job(a.job)
-    song = job.read("song")
-    entry = takes.load(job)["shots"].get("song") or {}
-    chosen = takes.chosen(job, "song")
-    take = (
-        next((t for t in entry.get("takes", []) if t["n"] == a.take), None)
-        if a.take is not None
-        else chosen
-    )
-    if take is None:
-        raise ContractError(f"{job.id}: no song take {a.take if a.take is not None else 'chosen'}")
-    path = job.work / take["file"]
     pcm = beats._pcm(path)
     heard = musicbar.saved_heard(path) or []
+    chosen = takes.chosen(job, "song")
+    own = bool(chosen and take["n"] == chosen["n"])
     cards = plan.energy_cards(plan.profile(pcm, song), song)[1] + plan.key_cards(pcm, song)[1]
     stem = job.work / "vocals.wav"  # the stems are of the chosen take's master
-    own = bool(chosen and take["n"] == chosen["n"])
     if own and stem.exists():
         cards += plan.voice_cards(beats._pcm(stem), song)
     cards += plan.pronounce_cards(song, heard) + plan.words_cards(song, heard)
     bed = job.work / "instrumental.wav"  # the groove reads best without the voice
-    music = beats._pcm(bed) if own and bed.exists() else pcm
+    music = beats._pcm(bed) if (own and bed.exists()) else pcm
     cards += groove.kick_cards(music, song) + groove.build_cards(music, song)
     measured = groove.measures(music, song)
+    return cards, measured
+
+
+def _song_check(a: argparse.Namespace) -> int:
+    """Cards for what a song take missed of its own plan: each says what was asked, what was
+    measured, where, and the fix. Kept beside the take, and printed; nothing blocks on them."""
+    from .bar import plan
+
+    if a.file:
+        return _song_check_file(a)
+    if not a.job:
+        raise ContractError("song-check needs a job, or --file and --song")
+    job = open_job(a.job)
+    song = job.read("song")
+    take = _resolve_song_take(job, a.take)
+    path = job.work / take["file"]
+    cards, measured = _build_song_cards(job, take, path, song)
     path.with_suffix(".groove.json").write_text(json.dumps(measured, indent=1))
     if not plan.spans(song):
         print(f"{job.id}: the song file names no bars or tempo, so its sections cannot be placed")
     out = path.with_suffix(".cards.json")
     out.write_text(json.dumps(cards, indent=1, ensure_ascii=False))
-    for card in cards:
-        print(f"{card['at']:>5}  {card['section']}: planned {card['planned']}")
-        print(f"       measured {card['measured']}\n       fix: {card['fix']}")
+    _print_cards(cards)
     if measured:
-        print(f"kick enters at {measured.get('kick_enters_sec')} s; syncopation "
-              f"{measured.get('syncopation', 'not read')} (a reading, not a limit)")  # fmt: skip
+        print(
+            f"kick enters at {measured.get('kick_enters_sec')} s; syncopation "
+            f"{measured.get('syncopation', 'not read')} (a reading, not a limit)"
+        )
     print(f"{job.id} take {take['n']}: {len(cards)} card(s), kept in {out}")
+    return 0
+
+
+def _print_readings_report(report: dict[str, Any]) -> None:
+    from .bar import song as musicbar
+
+    for r in report["readings"]:
+        print(f"{'ok  ' if r['ok'] else 'MISS'} {r['id']:<30} {r['value']!s:<12} {r['limit']}")
+    print(f"{report['met']}/{report['total']} readings met; score {musicbar.score(report)}")
+
+
+def _file_cards(
+    audio: Path, song: dict[str, Any], heard: list[dict[str, Any]] | None
+) -> list[dict[str, Any]]:
+    from .bar import groove, plan
+    from .editor import beats
+
+    pcm = beats._pcm(audio)
+    cards = plan.energy_cards(plan.profile(pcm, song), song)[1] + plan.key_cards(pcm, song)[1]
+    cards += plan.pronounce_cards(song, heard or []) + plan.words_cards(song, heard or [])
+    cards += groove.kick_cards(pcm, song) + groove.build_cards(pcm, song)
+    return cards
+
+
+def _song_check_file(a: argparse.Namespace) -> int:
+    """The same readings and cards for a song this engine did not make, so any song, from any
+    tool, is held to the same plan. Nothing is spent: the words are read by a free local
+    transcriber, and nothing is written beside the file."""
+    from . import song_outside
+    from .bar import song as musicbar
+
+    if not a.song:
+        raise ContractError("--file needs --song, the song file the audio was made from")
+    audio, song = Path(a.file), json.loads(Path(a.song).read_text())
+    if not audio.is_file():
+        raise ContractError(f"no such file: {audio}")
+    heard = song_outside.free_heard(audio)
+    report = musicbar.measure(audio, song, heard)
+    _print_readings_report(report)
+    cards = _file_cards(audio, song, heard)
+    _print_cards(cards)
+    print(f"{audio.name}: {len(cards)} card(s)")
+    return 0
+
+
+def _song_add(a: argparse.Namespace) -> int:
+    """Take a song made by another tool into a job as a take, so the same readings, judges, review
+    page and verdicts apply to it and to the engine's own takes."""
+    from . import song_outside
+
+    audio = Path(a.audio)
+    if not audio.is_file():
+        raise ContractError(f"no such file: {audio}")
+    job = open_job(a.job)
+    take = song_outside.add_outside_take(job, audio, a.by)
+    found = take["readings"]
+    print(f"{job.id}: take {take['n']} from {a.by}: score {found['score']}")
+    print(f"  missed: {', '.join(found['misses']) or 'nothing'}")
     return 0
 
 
@@ -184,6 +278,14 @@ def _signals(a: argparse.Namespace) -> int:
     return 0
 
 
+def _job_places(root: Any, job_name: str, shot: str) -> dict[int, int]:
+    job = Job(root / job_name)
+    line = benchreport.line_of(job, shot)
+    ranking, close = benchreport.rules("sing" if line else "video")
+    found = benchreport.rank(benchreport.benched(job, shot), ranking, close)
+    return {r["n"]: i for i, r in enumerate(found["order"])}
+
+
 def engine_agreement(root: Any) -> dict[str, list[int]]:
     """For each aspect: of a person's preferences between two bench takes, how many the engine's
     ranking put the same way round, and how many it ranked at all."""
@@ -192,16 +294,12 @@ def engine_agreement(root: Any) -> dict[str, list[int]]:
     for row in verdicts.preferences(root):
         key = (row["job"], row["shot"])
         if key not in places:
-            job = Job(root / row["job"])
-            line = benchreport.line_of(job, row["shot"])
-            ranking, close = benchreport.rules("sing" if line else "video")
-            found = benchreport.rank(benchreport.benched(job, row["shot"]), ranking, close)
-            places[key] = {r["n"]: i for i, r in enumerate(found["order"])}
+            places[key] = _job_places(root, row["job"], row["shot"])
         seen = places[key]
         won, lost = row["won"]["n"], row["lost"]["n"]
         if won in seen and lost in seen:
             counts = tally.setdefault(row["aspect"], [0, 0])
-            counts[0] += seen[won] < seen[lost]
+            counts[0] += int(seen[won] < seen[lost])
             counts[1] += 1
     return tally
 
@@ -236,6 +334,11 @@ def _judges(a: argparse.Namespace) -> int:
     return 0
 
 
+def _judge_line(kind: str, judge: Any) -> str:
+    lacks = judges.missing(judge)
+    return f"{kind} {judge.name}: " + ("ready" if not lacks else "; ".join(lacks))
+
+
 def judges_on_this_machine() -> list[str]:
     """One line per judge in the config: ready, or what this machine lacks."""
     lines = []
@@ -244,8 +347,7 @@ def judges_on_this_machine() -> list[str]:
         if not found:
             lines.append(f"{kind}: none configured")
         for judge in found:
-            lacks = judges.missing(judge)
-            lines.append(f"{kind} {judge.name}: " + ("ready" if not lacks else "; ".join(lacks)))
+            lines.append(_judge_line(kind, judge))
     return lines
 
 
@@ -258,6 +360,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "review-set": _review_set,
     "judges": _judges,
     "song-check": _song_check,
+    "song-add": _song_add,
 }
 
 

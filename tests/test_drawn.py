@@ -52,7 +52,8 @@ class FakeGraphics(base.Provider):
             ["-f", "lavfi", "-i", f"color=c=black@0.0:s={w}x{h}:d={seconds}:r={rate},format=rgba",
              "-f", "lavfi", "-i", f"color=c=white:s=200x200:d={seconds}:r={rate},format=rgba",
              "-filter_complex", "[0][1]overlay=100:100:format=auto,format=yuva420p",
-             "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", str(dst)]
+             "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0",
+             "-speed", "8", "-deadline", "realtime", str(dst)]
         )  # fmt: skip
         return base.Result(path=dst, model="fake-graphics")
 

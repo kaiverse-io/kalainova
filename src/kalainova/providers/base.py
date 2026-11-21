@@ -74,6 +74,7 @@ class Provider:
     capabilities: tuple[str, ...] = ()
     env_key: str | None = None  # env var that must be set for the provider to be usable
     env_keys: tuple[str, ...] = ()  # for a provider that needs more than one
+    env_file_key: str | None = None  # env var naming an existing file that must be readable
     synthetic = True  # output is AI-generated and must be declared where platforms ask
     free = False  # calls cost nothing, so no price is needed under a cost cap
     placeholder = False  # output never counts as a real result
@@ -92,7 +93,12 @@ class Provider:
         if self.rehearses and rehearsal.active() is not None:
             return []  # a rehearsal sends nothing, so it needs no key
         needed = ((self.env_key,) if self.env_key else ()) + tuple(self.env_keys)
-        return [key for key in needed if not os.environ.get(key)]
+        missing = [key for key in needed if not os.environ.get(key)]
+        if self.env_file_key and not missing:
+            val = os.environ.get(self.env_file_key)
+            if not val or not Path(val).is_file():
+                missing.append(f"{self.env_file_key} names no file")
+        return missing
 
     def available(self, capability: str = "") -> bool:
         try:
