@@ -6,6 +6,7 @@ kalainova bench-report <job> <shot> [--only 5,7,10] [--again]  the labelled side
 kalainova verdict <job> accept|fix|reject --reviewer NAME [--shot ID [--take N]|--animatic]
                   [--preferred N --over M | --best N --among a,b,c] [--aspect lips]
 kalainova song-check <job> [--take N]            a song take against its own plan, as cards
+kalainova song-add <job> <audio> --by LABEL      a song made elsewhere, as a take
 kalainova signals                                which readings predict a person's verdict
 kalainova agreement                              which readings, and the engine's picks, follow
                                                  a person's preferences, aspect by aspect
@@ -22,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import benchreport, config, verdicts
+from . import benchreport, verdicts
 from .bar import judges
 from .jobfs import ContractError, Job, home, open_job
 
@@ -64,6 +65,10 @@ def add_parsers(sub: Any) -> None:
     check.add_argument("--take", type=int, help="the take to read; the chosen one by default")
     check.add_argument("--file", help="a song audio file from anywhere, made by any tool")
     check.add_argument("--song", help="the song file (json) the audio was made from; with --file")
+    add = sub.add_parser("song-add", help="a song made elsewhere, as a take read like any other")
+    add.add_argument("job")
+    add.add_argument("audio")
+    add.add_argument("--by", required=True, help="what made it, as one label")
     sub.add_parser("signals")
     sub.add_parser("agreement")
     sub.add_parser("review-set")
@@ -121,42 +126,21 @@ def _song_check(a: argparse.Namespace) -> int:
     return 0
 
 
-def _free_reader(base: Any, name: str) -> bool:
-    try:
-        p = base.get(name)
-    except KeyError:
-        return False
-    return bool(p.free and "transcribe" in p.capabilities)
-
-
 def _song_check_file(a: argparse.Namespace) -> int:
     """The same readings and cards for a song this engine did not make, so any song, from any
     tool, is held to the same plan. Nothing is spent: the words are read by a free local
     transcriber, and nothing is written beside the file."""
+    from . import song_outside
     from .bar import groove, plan
     from .bar import song as musicbar
     from .editor import beats
-    from .providers import base
-    from .providers.contract import TranscribeRequest
-    from .providers.results import Context
 
     if not a.song:
         raise ContractError("--file needs --song, the song file the audio was made from")
     audio, song = Path(a.file), json.loads(Path(a.song).read_text())
     if not audio.is_file():
         raise ContractError(f"no such file: {audio}")
-    heard = None
-    local = [  # free readers only: a review spends nothing
-        n
-        for n in dict.fromkeys([*config.preference("transcribe"), "whispercpp", "mac"])
-        if _free_reader(base, n)
-    ]
-    try:
-        provider = base.resolve("transcribe", local)
-        words = provider.transcribe(TranscribeRequest(src=audio), Context()).words
-        heard = [dict(w) for w in words]
-    except (LookupError, RuntimeError, OSError) as exc:
-        print(f"the words were not read, so the word readings are left out: {exc}")
+    heard = song_outside.free_heard(audio)
     report = musicbar.measure(audio, song, heard)
     for r in report["readings"]:
         print(f"{'ok  ' if r['ok'] else 'MISS'} {r['id']:<30} {r['value']!s:<12} {r['limit']}")
@@ -169,6 +153,22 @@ def _song_check_file(a: argparse.Namespace) -> int:
         print(f"{card['at']:>5}  {card['section']}: planned {card['planned']}")
         print(f"       measured {card['measured']}\n       fix: {card['fix']}")
     print(f"{audio.name}: {len(cards)} card(s)")
+    return 0
+
+
+def _song_add(a: argparse.Namespace) -> int:
+    """Take a song made by another tool into a job as a take, so the same readings, judges, review
+    page and verdicts apply to it and to the engine's own takes."""
+    from . import song_outside
+
+    audio = Path(a.audio)
+    if not audio.is_file():
+        raise ContractError(f"no such file: {audio}")
+    job = open_job(a.job)
+    take = song_outside.add_outside_take(job, audio, a.by)
+    found = take["readings"]
+    print(f"{job.id}: take {take['n']} from {a.by}: score {found['score']}")
+    print(f"  missed: {', '.join(found['misses']) or 'nothing'}")
     return 0
 
 
@@ -316,6 +316,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "review-set": _review_set,
     "judges": _judges,
     "song-check": _song_check,
+    "song-add": _song_add,
 }
 
 

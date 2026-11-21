@@ -183,3 +183,21 @@ def test_a_song_from_another_tool_is_checked_by_file_and_song_file(tmp_path, cap
     assert "readings met" in capsys.readouterr().out
     assert main(["song-check", "--file", str(audio)]) != 0  # a file needs its song file
     assert "--song" in capsys.readouterr().err
+
+
+def test_a_song_made_elsewhere_becomes_a_take_read_like_any_other(tmp_path, studio, monkeypatch):
+    from kalainova.__main__ import main
+
+    monkeypatch.setenv("KALAINOVA_HOME", str(tmp_path))
+    job = make_job(tmp_path, media=["song"])
+    job.write("song", {"schema_version": "0.1", "job_id": job.id, "title": "T", "style": "x",
+                       "bpm": BPM, "instrumental": True, "duration_sec": 12,
+                       "sections": [{"kind": "intro", "bars": 6}]})  # fmt: skip
+    audio = tmp_path / "other.m4a"
+    _cover_art_song(audio)
+    assert main(["song-add", job.id, str(audio), "--by", "another tool"]) == 0
+    entry = json.loads(job.path("takes").read_text())["shots"]["song"]
+    take = entry["takes"][0]
+    assert take["provider"] == "outside" and take["model"] == "another tool"
+    assert "song.tempo" in [r["id"] for r in take["readings"]["readings"]]
+    assert (job.work / take["file"]).exists() and not take.get("cost") and take["bench"]
